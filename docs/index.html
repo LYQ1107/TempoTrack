@@ -384,7 +384,7 @@
           <div class="button-row">
             <a class="btn primary" href="#" target="_blank" rel="noopener">Paper</a>
             <a class="btn" href="#" target="_blank" rel="noopener">arXiv</a>
-            <a class="btn" href="https://github.com/LYQ1107/TempoTrack" target="_blank" rel="noopener">Code</a>
+            <a class="btn" href="#" target="_blank" rel="noopener">Code</a>
             <a class="btn" href="#video">Video</a>
           </div>
 
@@ -582,8 +582,10 @@ conda activate tempotrack
 
 pip install -r requirements.txt
 
-# optional: install mmcv / mmdet / boxmot style deps
-# follow the exact versions used in your repo
+pip install -U openmim
+mim install mmengine
+pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.1/index.html
+pip install git+https://github.com/open-mmlab/mmdetection.git@v3.3.0
 python demo.py</code></pre>
             <div class="placeholder-note">This block describes the recommended environment setup for reproducing the project, including the Python version, package installation, and the core dependencies required for evaluation or demo scripts.</div>
           </article>
@@ -591,16 +593,16 @@ python demo.py</code></pre>
           <article class="card media-card">
             <h3>Dataset organization</h3>
 <pre><code>data/
-├── OVMOT/
-│   ├── images/
-│   │   ├── sequence_01/
-│   │   └── sequence_02/
+├── tao/
+│   ├── frames/
+│   │   ├── train/
+│   │   └── val/
+│   │   └── test/  
 │   ├── annotations/
-│   ├── detections/
-│   └── splits/
-├── outputs/
-│   ├── tracks/
-│   └── visualizations/
+├── bdd/
+│   ├── bdd100k/
+│   │   ├── images/
+│   └── annotations/
 └── checkpoints/</code></pre>
             <div class="placeholder-note">This panel shows a typical dataset layout for organizing image sequences, annotations, detector outputs, checkpoints, and tracking results in a way that is easy to reproduce and extend.</div>
           </article>
