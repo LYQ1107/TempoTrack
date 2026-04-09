@@ -56,10 +56,39 @@
       justify-content: space-between;
       gap: 20px;
     }
+    .brand,
+    nav a,
+    .btn,
+    .section-kicker,
+    .update-date {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
     .brand {
       font-size: 1.05rem;
       font-weight: 800;
       letter-spacing: 0.01em;
+    }
+    .brand-mark,
+    .nav-icon,
+    .btn-icon,
+    .section-icon,
+    .update-icon {
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      vertical-align: middle;
+      flex: 0 0 16px;
+    }
+    .brand-mark svg,
+    .nav-icon svg,
+    .btn-icon svg,
+    .section-icon svg,
+    .update-icon svg {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
     nav {
       display: flex;
@@ -73,7 +102,7 @@
     }
     nav a:hover { color: var(--primary); }
     .hero {
-      padding: 62px 0 26px;
+      padding: 62px 0 18px;
       background:
         radial-gradient(circle at right top, rgba(109,143,255,.16), transparent 26%),
         radial-gradient(circle at left top, rgba(45,97,240,.08), transparent 20%);
@@ -102,6 +131,10 @@
       font-size: clamp(2.4rem, 4vw, 4.3rem);
       line-height: 1.04;
       letter-spacing: -0.04em;
+    }
+    .hero-title-line {
+      display: block;
+      white-space: nowrap;
     }
     .hero-subtitle {
       margin: 18px auto 0;
@@ -313,6 +346,57 @@
       font-size: .94rem;
       border: 1px dashed #d7e1f2;
     }
+    .updates-wrap {
+      width: min(calc(100% - 32px), 1160px);
+      margin: 0 auto;
+    }
+    .updates-panel {
+      padding: 18px 22px;
+      border-radius: 18px;
+      background: rgba(255,255,255,.78);
+      border: 1px solid rgba(217,226,241,.95);
+      box-shadow: var(--shadow);
+    }
+    .updates-list {
+      display: grid;
+      gap: 8px;
+    }
+    .update-item {
+      display: grid;
+      grid-template-columns: 148px 1fr;
+      gap: 18px;
+      align-items: center;
+      padding: 8px 0;
+    }
+    .update-date {
+      color: #5e7297;
+      font-size: .95rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+    .update-body {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 1rem;
+    }
+    .update-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 30px;
+      padding: 0 12px;
+      border-radius: 9px;
+      background: #dbe8ff;
+      color: var(--primary);
+      font-size: .95rem;
+      font-weight: 700;
+    }
+    .update-text {
+      color: #263a60;
+      font-size: clamp(1rem, 1.35vw, 1.15rem);
+    }
     pre {
       margin: 0;
       overflow-x: auto;
@@ -338,25 +422,74 @@
       .stats-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
       .code-grid { grid-template-columns: 1fr; }
     }
+    @media (max-width: 900px) {
+      .hero-title-line {
+        white-space: normal;
+      }
+      .update-item {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+    }
     @media (max-width: 720px) {
       nav { display: none; }
       .hero { padding-top: 42px; }
       .feature-grid, .gallery-grid, .stats-row { grid-template-columns: 1fr; }
       .prose, .feature-card, .method-card, .table-card, .gallery-item, .media-card, .bib-card { padding: 20px; }
+      .update-body {
+        align-items: flex-start;
+      }
     }
   </style>
 </head>
 <body>
   <header class="site-header">
     <div class="container nav-wrap">
-      <a class="brand" href="#top">TempoTrack</a>
+      <a class="brand" href="#top">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 12h6l2-4 4 8 2-4h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span>TempoTrack</span>
+      </a>
       <nav>
-        <a href="#abstract">Abstract</a>
+        <a href="#updates">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+          </span>
+          <span>Updates</span>
+        </a>
+        <a href="#abstract">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M6 7h12M6 12h12M6 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span>Abstract</span>
+        </a>
         <a href="#contributions">Contributions</a>
         <a href="#method">Method</a>
-        <a href="#results">Results</a>
+        <a href="#results">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M5 16l4-4 3 3 7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span>Results</span>
+        </a>
         <a href="#visuals">Visuals</a>
-        <a href="#video">Video</a>
+        <a href="#video">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M8 7.5v9l8-4.5-8-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span>Video</span>
+        </a>
         <a href="#getting-started">Getting Started</a>
         <a href="#citation">Citation</a>
       </nav>
@@ -368,7 +501,10 @@
       <div class="container hero-grid">
         <div class="hero-intro">
           <p class="eyebrow">Open-Vocabulary Multi-Object Tracking</p>
-          <h1>Memory as Anchor:<br>Temporal Association for Open-Vocabulary Trackers</h1>
+          <h1>
+            <span class="hero-title-line">Memory as Anchor:</span>
+            <span class="hero-title-line">Temporal Association for Open-Vocabulary Trackers</span>
+          </h1>
           <p class="hero-subtitle">
             A training-free temporal association framework that stabilizes frozen open-vocabulary features with dual-timescale prototypes and EMD-based tracklet consolidation.
           </p>
@@ -382,10 +518,42 @@
           <p class="affiliation">Affiliation 1 · Affiliation 2 · Under Review</p>
 
           <div class="button-row">
-            <a class="btn primary" href="#" target="_blank" rel="noopener">Paper</a>
-            <a class="btn" href="#" target="_blank" rel="noopener">arXiv</a>
-            <a class="btn" href="#" target="_blank" rel="noopener">Code</a>
-            <a class="btn" href="#video">Video</a>
+            <a class="btn primary" href="#" target="_blank" rel="noopener">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M7 4.5h7l3 3V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M14 4.5V8h3.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span>Paper</span>
+            </a>
+            <a class="btn" href="#" target="_blank" rel="noopener">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M8 12h8M12 8v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+              </span>
+              <span>arXiv</span>
+            </a>
+            <a class="btn" href="#" target="_blank" rel="noopener">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M8 16c-2 0-3.5-1.5-3.5-3.5S6 9 8 9h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <path d="M16 8c2 0 3.5 1.5 3.5 3.5S18 15 16 15h-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <path d="M9.5 12h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span>Code</span>
+            </a>
+            <a class="btn" href="#video">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M8 7.5v9l8-4.5-8-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span>Video</span>
+            </a>
           </div>
 
           <ul class="hero-points">
@@ -393,6 +561,34 @@
             <li>Combines fast/slow prototypes for adaptation and long-term identity anchoring.</li>
             <li>Reconnects fragmented tracklets through set-to-set Earth Mover’s Distance matching.</li>
           </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="updates">
+      <div class="updates-wrap">
+        <div class="section-heading">
+          <p class="section-kicker">
+            <span class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+            </span>
+            <span>Latest</span>
+          </p>
+          <h2>Project Updates</h2>
+        </div>
+        <div class="updates-panel">
+          <div class="updates-list">
+            <div class="update-item">
+              <div class="update-date">2026-04-09</div>
+              <div class="update-body">
+                <span class="update-badge">New</span>
+                <span class="update-text">Initial repository created.</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -507,7 +703,8 @@
                 <tbody>
                   <tr><td>OVTrack†</td><td>36.3</td><td>36.3</td><td>32.0</td><td>33.2</td></tr>
                   <tr><td>MASA (R50)†</td><td>36.9</td><td>36.4</td><td>30.0</td><td>34.6</td></tr>
-                  <tr class="highlight-row"><td>TempoTrack (R50)†</td><td>38.4</td><td>40.1</td><td>32.3</td><td>41.0</td></tr>
+                  <tr><td>TempoTrack (R50)†</td><td>38.4</td><td>40.1</td><td>32.3</td><td>41.0</td></tr>
+                  <tr class="highlight-row"><td>TempoTrack (Detic)†</td><td>48.4</td><td>47.0</td><td>42.0</td><td>44.0</td></tr>
                 </tbody>
               </table>
             </div>
@@ -566,7 +763,6 @@
       </div>
     </section>
 
-    
     <section class="section" id="getting-started">
       <div class="container">
         <div class="section-heading">
@@ -610,7 +806,7 @@ python demo.py</code></pre>
       </div>
     </section>
 
-<section class="section" id="citation">
+    <section class="section" id="citation">
       <div class="narrow">
         <div class="section-heading">
           <p class="section-kicker">Reference</p>
