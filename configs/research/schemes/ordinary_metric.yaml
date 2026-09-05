@@ -1,0 +1,8 @@
+schema_version: 1
+name: ordinary_metric
+encoder:
+  hidden: 256
+  layers: 4
+  heads: 8
+loss: identity_matching_only
+prediction_loss: false

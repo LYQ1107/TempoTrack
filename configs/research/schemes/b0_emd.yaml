@@ -1,0 +1,13 @@
+schema_version: 1
+name: b0_emd
+controls:
+  - legacy_emd
+  - stable_emd
+sinkhorn:
+  epsilon: 0.05
+  iterations: 100
+  representative: all
+lam_app: 1.0
+lam_shape: 0.1
+lam_scale: 0.05
+lam_time: 0.1

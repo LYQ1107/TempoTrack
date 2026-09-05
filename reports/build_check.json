@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-09-05T16:03:32.982406+00:00",
+  "files_checked": 68,
+  "syntax_failures": [],
+  "wheel": {
+    "returncode": 0,
+    "output_tail": "Processing /data1/LWR/vranlee/SERVER_ONLY/avis/masa\n  Preparing metadata (pyproject.toml): started\n  Preparing metadata (pyproject.toml): finished with status 'done'\nBuilding wheels for collected packages: tempotrack\n  Building wheel for tempotrack (pyproject.toml): started\n  Building wheel for tempotrack (pyproject.toml): finished with status 'done'\n  Created wheel for tempotrack: filename=tempotrack-0.1.0-py3-none-any.whl size=233966 sha256=eceb71d06234f3761be49ab64097a2bdb406578493304a441a5f7d56c6c96221\n  Stored in directory: /tmp/pip-ephem-wheel-cache-0p2hhich/wheels/b3/ec/be/8cbf3ef443507c3fb2cb6236ddba29bf3f02588c7eb73a268d\nSuccessfully built tempotrack"
+  },
+  "smoke": {
+    "device": "cuda",
+    "m0_finite": true,
+    "m1_rate_order": true,
+    "s1_shape": [
+      2,
+      32
+    ],
+    "s2_loss_finite": true,
+    "s3_loss_finite": true,
+    "s4_loss_finite": true,
+    "path_cover": {
+      "valid": true,
+      "max_indegree": 1,
+      "max_outdegree": 1,
+      "legal_time": true,
+      "acyclic": true,
+      "selected_edges": 2
+    }
+  },
+  "passed": true
+}

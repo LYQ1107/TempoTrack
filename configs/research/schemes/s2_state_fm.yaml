@@ -1,0 +1,18 @@
+schema_version: 1
+name: s2_state_fm
+latent_dim: 64
+field:
+  layers: 4
+  hidden: 256
+solver:
+  type: heun
+  steps: 32
+sampling:
+  k: 16
+  support: normalized_log_mean_kernel
+controls:
+  - gaussian
+  - mdn
+  - cvae
+  - s1_single_point
+condition_excludes_target_appearance: true

@@ -1,0 +1,23 @@
+schema_version: 1
+name: m1_predictive_dual
+controller:
+  hidden: 128
+  layers: 2
+  activation: gelu
+  alpha_min: 0.0001
+  alpha_max: 0.99
+objective: future_retrieval
+supported_objectives:
+  - future_retrieval
+  - counterfactual_utility
+unroll: 16
+loss:
+  future_identity: 1.0
+  reliability_bce: 0.2
+  rate_regularizer: 0.01
+utility_ablation:
+  enabled: true
+  branches:
+    - hold
+    - recent_only
+    - recent_and_anchor

@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-05T16:03:04.741672+00:00",
+  "repo": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa",
+  "python": {
+    "executable": "/home/lwr/anaconda3/envs/masaenv/bin/python",
+    "version": "3.11.14"
+  },
+  "environment_name": "masaenv",
+  "platform": {
+    "system": "Linux",
+    "release": "5.4.0-150-generic",
+    "machine": "x86_64"
+  },
+  "modules": {
+    "torch": {
+      "available": true,
+      "version": "2.1.2.post304"
+    },
+    "numpy": {
+      "available": true,
+      "version": "1.26.4"
+    },
+    "scipy": {
+      "available": true,
+      "version": "1.15.2"
+    },
+    "yaml": {
+      "available": true,
+      "version": "6.0.3"
+    },
+    "mmcv": {
+      "available": true,
+      "version": "2.1.0"
+    },
+    "mmengine": {
+      "available": true,
+      "version": "0.10.7"
+    },
+    "mmdet": {
+      "available": true,
+      "version": "3.3.0"
+    },
+    "motmetrics": {
+      "available": true,
+      "version": "1.4.0"
+    }
+  },
+  "gpus": [
+    {
+      "index": "0",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "37323"
+    },
+    {
+      "index": "1",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "2",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "3",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "4",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "5",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "6",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "7",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "8",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    },
+    {
+      "index": "9",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memory_total_mib": "40960",
+      "memory_free_mib": "40335"
+    }
+  ],
+  "paths": {
+    "repo": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa",
+      "exists": true,
+      "files": 243,
+      "bytes": 206893143,
+      "sample": [
+        "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/.gitignore",
+        "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/=4.5.5.64",
+        "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/AssocA_surface_logit10.0_Base.png",
+        "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/AssocA_surface_logit10.0_Novel.png",
+        "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/CACHE_FIX.md"
+      ]
+    },
+    "data": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data",
+      "exists": true,
+      "files": 0,
+      "bytes": 0,
+      "sample": []
+    },
+    "saved_models": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models",
+      "exists": true,
+      "files": 0,
+      "bytes": 0,
+      "sample": []
+    },
+    "annotations": {
+      "train": {
+        "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/train.json",
+        "exists": true,
+        "files": 1,
+        "bytes": 21463934,
+        "sample": [
+          "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/train.json"
+        ]
+      },
+      "validation": {
+        "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/validation.json",
+        "exists": true,
+        "files": 1,
+        "bytes": 43639943,
+        "sample": [
+          "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/validation.json"
+        ]
+      },
+      "test": {
+        "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/test.json",
+        "exists": false,
+        "files": 0,
+        "bytes": 0,
+        "sample": []
+      },
+      "mot17_train": {
+        "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/MOT17/annotations/train.json",
+        "exists": true,
+        "files": 1,
+        "bytes": 17562575,
+        "sample": [
+          "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/MOT17/annotations/train.json"
+        ]
+      }
+    }
+  },
+  "feature_caches": [
+    {
+      "directory": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache",
+      "exists": true,
+      "file_count": 1976,
+      "video_count": 988,
+      "files_per_video": {
+        "4": 2,
+        "20": 2,
+        "22": 2,
+        "23": 2,
+        "24": 2,
+        "25": 2,
+        "26": 2,
+        "30": 2,
+        "31": 2,
+        "35": 2,
+        "36": 2,
+        "37": 2,
+        "39": 2,
+        "45": 2,
+        "49": 2,
+        "52": 2,
+        "54": 2,
+        "55": 2,
+        "58": 2,
+        "59": 2
+      },
+      "split_overlap": {
+        "train": 0,
+        "validation": 988,
+        "mot17_train": 1
+      },
+      "sample_files": [
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache/video_1000_v_2224db7a1ecb7ba6eb7287fcd7dc0aa.pt",
+          "bytes": 2047290,
+          "sha256": "bae91f3af763ea4ec34452597d855702b7f548b08cc96320661026059ca36561"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache/video_1000_v_bfd966c8ec08aa2ed8346fcda589289.pt",
+          "bytes": 2075130,
+          "sha256": "c9cdfaafdb6dcdfd71a2a1cf7a26a23182bd697e834427359669885da0b15001"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache/video_1003_v_8e431b831b8ba6e8d92b61db8778567.pt",
+          "bytes": 2155194,
+          "sha256": "8218a8f0f120aa60616bbcdc686e54870c98830466620485637369fd2e7b51c4"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache/video_1003_v_bfd966c8ec08aa2ed8346fcda589289.pt",
+          "bytes": 2146490,
+          "sha256": "a32a6a2cad055660bfed669fd22264f618fb71aa8681e52d0f4e00f5e064bfd6"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache/video_1007_v_8e431b831b8ba6e8d92b61db8778567.pt",
+          "bytes": 2146234,
+          "sha256": "9b5e775e9a3234d1e48977ac2c0f5fdd501a5509275407d2d77a4c38800c19b3"
+        }
+      ]
+    },
+    {
+      "directory": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache_aggressive",
+      "exists": true,
+      "file_count": 984,
+      "video_count": 984,
+      "files_per_video": {
+        "4": 1,
+        "20": 1,
+        "22": 1,
+        "23": 1,
+        "24": 1,
+        "25": 1,
+        "26": 1,
+        "30": 1,
+        "31": 1,
+        "35": 1,
+        "36": 1,
+        "37": 1,
+        "39": 1,
+        "45": 1,
+        "49": 1,
+        "52": 1,
+        "54": 1,
+        "55": 1,
+        "58": 1,
+        "59": 1
+      },
+      "split_overlap": {
+        "train": 0,
+        "validation": 984,
+        "mot17_train": 1
+      },
+      "sample_files": [
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache_aggressive/video_1000_v_bfd966c8ec08aa2ed8346fcda589289.pt",
+          "bytes": 2075130,
+          "sha256": "c9cdfaafdb6dcdfd71a2a1cf7a26a23182bd697e834427359669885da0b15001"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache_aggressive/video_1003_v_8e431b831b8ba6e8d92b61db8778567.pt",
+          "bytes": 2155194,
+          "sha256": "8218a8f0f120aa60616bbcdc686e54870c98830466620485637369fd2e7b51c4"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache_aggressive/video_1007_v_e3919198858e7ac1a61aae1e486c7664.pt",
+          "bytes": 2155238,
+          "sha256": "c9e6b2cd29be52990f159a5452d757eb91d639648042a122dec92dbc8b06813b"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache_aggressive/video_1015_v_68ecc17c75df204856d396f18efcfc.pt",
+          "bytes": 2131790,
+          "sha256": "eec69722c31bdea596656d73ece9d8da8194e49722ac611c6ec3a3816908d8e6"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache_aggressive/video_1016_v_e0cf80f114f0ec12dc677f7d83a6920.pt",
+          "bytes": 2137338,
+          "sha256": "0ad281e498341711893cf5f11abc46c621b0aa1153254865b1af141f3240037b"
+        }
+      ]
+    },
+    {
+      "directory": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/gt_embed_cache",
+      "exists": true,
+      "file_count": 0,
+      "video_count": 0,
+      "files_per_video": {},
+      "split_overlap": {
+        "train": 0,
+        "validation": 0,
+        "mot17_train": 0
+      },
+      "sample_files": []
+    },
+    {
+      "directory": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research/features",
+      "exists": false,
+      "file_count": 0,
+      "video_count": 0,
+      "files_per_video": {},
+      "split_overlap": {
+        "train": 0,
+        "validation": 0,
+        "mot17_train": 0
+      },
+      "sample_files": []
+    }
+  ],
+  "authorized_resources": {
+    "cloud_purchase": false,
+    "network_downloads": false
+  },
+  "missing_or_blocking": [],
+  "inventory_hash": "d8a589c33cdfc69bf44279b2c6081eca7a502f1026e852280c6c35a1f022d2e1"
+}

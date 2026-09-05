@@ -1,0 +1,26 @@
+schema_version: 1
+name: s5_rl_edit
+environment:
+  actions:
+    - ADD
+    - REMOVE
+    - REWIRE
+    - STOP
+  max_edits: min(2N,256)
+  observation_contains_gt: false
+  reward: delta_pairwise_identity_f1_minus_edit_cost
+training:
+  bc_steps: 30000
+  ppo_transitions: 2000000
+  clip: 0.2
+  gamma: 1.0
+  gae_lambda: 0.95
+  entropy: 0.01
+  value: 0.5
+  epochs: 4
+  grad_clip: 1.0
+controls:
+  - greedy
+  - beam
+  - local_search
+  - bc_only

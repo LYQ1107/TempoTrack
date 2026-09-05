@@ -97,8 +97,7 @@ class EmbedCache:
             # print(f"[EmbedCache] ✓ 保存缓存成功: {cache_path} ({frame_count}帧)")  # 注释掉以节省时间
             self.dirty = False
         except Exception as e:
-            # print(f"[EmbedCache] ✗ 保存缓存失败: {e}")  # 注释掉以节省时间
-            pass
+            raise RuntimeError(f"[EmbedCache] 保存缓存失败: {cache_path}: {e}") from e
 
     def get_frame_embeds(self, video_id, frame_id, bboxes, device='cuda'):
         """
@@ -128,18 +127,20 @@ class EmbedCache:
         cached_bboxes = cached_frame['bboxes']
         cached_embeds = cached_frame['embeds']
 
-        # 快速检查：数量和第一个bbox是否匹配
-        if bboxes.shape[0] == len(cached_bboxes):
-            # 只比较第一个bbox（快速验证）
-            if abs(bboxes[0, 0].item() - cached_bboxes[0][0]) < 1e-3:
-                # 直接返回，移动到目标设备
-                return cached_embeds.to(device, non_blocking=True)
-            else:
-                # print(f"[EmbedCache] ! 警告: video={video_id}, frame={frame_id} bbox不匹配，跳过缓存")  # 注释掉以节省时间
-                return None
-        else:
-            # print(f"[EmbedCache] ! 警告: video={video_id}, frame={frame_id} bbox数量不一致 (缓存:{len(cached_bboxes)} vs 当前:{bboxes.shape[0]})")  # 注释掉以节省时间
+        # Validate every coordinate and the row order.  Checking only the
+        # first box can silently attach embeddings to a different detection
+        # after filtering or sorting.
+        if bboxes.shape[0] != len(cached_bboxes):
             return None
+        current = bboxes.detach().cpu()
+        cached = torch.as_tensor(cached_bboxes, dtype=current.dtype)
+        if current.ndim != 2 or cached.ndim != 2 or current.shape != cached.shape:
+            return None
+        if not torch.allclose(current, cached, rtol=0.0, atol=1e-3):
+            return None
+        if not torch.isfinite(cached_embeds).all():
+            return None
+        return cached_embeds.to(device, non_blocking=True)
 
     def cache_frame_embeds(self, video_id, frame_id, bboxes, embeds, labels=None):
         """

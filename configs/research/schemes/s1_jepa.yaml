@@ -1,0 +1,21 @@
+schema_version: 1
+name: s1_jepa
+encoder:
+  hidden: 256
+  layers: 4
+  heads: 8
+  feedforward: 1024
+  dynamic_dim: 64
+target:
+  momentum_start: 0.99
+  momentum_end: 0.9999
+  update_after_successful_optimizer_step: true
+loss:
+  prediction: smooth_l1
+  identity: supervised_contrastive
+  regularization: vicreg_style
+inference:
+  modes:
+    - forward_only
+    - bidirectional_inpainting
+  chain_refinement_rounds: 2

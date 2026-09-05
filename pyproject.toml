@@ -41,11 +41,11 @@ dependencies = [
 ]
 
 [tool.setuptools]
-package-dir = {"masa" = "masa"}
 include-package-data = false
 license-files = ["LICENSE"]
 zip-safe = true
 
 [tool.setuptools.packages.find]
-include = ["masa*"]
+where = ["."]
+include = ["masa*", "tempotrack_research*"]
 exclude = ["docs*", "tests*", "third_party*", "assets*"]

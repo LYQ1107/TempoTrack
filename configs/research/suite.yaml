@@ -1,0 +1,70 @@
+schema_version: 1
+project: tempotrack_iclr
+research_goal: fixed_observation_identity_association
+priority:
+  - s1_jepa
+  - s3_graph_fm
+  - s2_state_fm
+  - s4_graph_diffusion
+  - s5_rl_edit
+required_schemes:
+  - m0_no_offline
+  - m0_stable_emd
+  - m0_ordinary_metric
+  - m0_s1_jepa
+  - m0_s2_state_fm
+  - m0_s3_graph_fm
+  - m0_s4_graph_diffusion
+  - m0_s5_bc
+  - m0_s5_ppo
+  - m1_no_offline
+  - m1_stable_emd
+  - m1_s1_jepa
+  - m1_s2_state_fm
+  - m1_s3_graph_fm
+  - m1_s4_graph_diffusion
+  - m1_s5_ppo
+frontends:
+  - fixed_dual
+  - predictive_dual
+protocol:
+  mode: offline_id_only
+  immutable_observations: true
+  change_boxes: false
+  change_scores: false
+  change_categories: false
+  track_category_vote: false
+  allow_gt_at_inference: false
+  allow_extra_frames_per_method: false
+verification:
+  level: build
+  skip_unchanged_passes: true
+  broad_test_suite: false
+  synthetic_smoke_by_default: false
+training:
+  stages:
+    - trial
+    - full
+  trial_seed: 0
+  full_seeds:
+    - 0
+    - 1
+    - 2
+  first_complete_seed0_for_all: true
+  frozen_visual_encoder: true
+  freeze_detector: true
+  resume: auto
+  amp: bf16_if_supported
+  resources: auto_authorized
+  cloud_purchase: false
+  on_missing_resources: record_block_and_continue
+execution:
+  implement_all_before_waiting_long_jobs: true
+  keep_going: true
+  skip_completed_same_signature: true
+  max_identical_failure_retries: 1
+  output_dir: outputs/research
+report:
+  path: reports/ICLR_RECONSTRUCTION_FINAL.md
+  language: zh-CN
+  final_chat_link_only: true

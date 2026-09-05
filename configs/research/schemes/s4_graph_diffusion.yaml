@@ -1,0 +1,15 @@
+schema_version: 1
+name: s4_graph_diffusion
+graph:
+  layers: 4
+  hidden: 128
+  sparse_edges: true
+diffusion:
+  type: vp_ddpm_epsilon
+  training_steps: 1000
+  schedule: cosine_verified
+  sampler: ddim
+  inference_steps: 50
+  k: 4
+condition_graph: fixed_emd_or_gnn_y0
+projection: legal_path_cover_with_birth_end_dummies

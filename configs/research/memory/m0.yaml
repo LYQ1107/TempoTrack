@@ -1,0 +1,14 @@
+schema_version: 1
+name: m0_shared_memory_controls
+alpha_fast: 0.7
+alpha_slow: 0.02
+single_alpha: 0.8
+confidence_threshold: 0.55
+logit_scale: 10.0
+match_metric: bisoftmax
+candidate:
+  max_gap: 90
+  top_k: 20
+  with_cats: false
+path_cover:
+  solver: hungarian_with_birth_end_dummies

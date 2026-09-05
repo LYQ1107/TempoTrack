@@ -83,6 +83,14 @@ class MasaOVMOTTracker(BaseTracker):
         self.merge_max_overlap = kwargs.pop("merge_max_overlap", 0.10)
         self.merge_bdry_cos = kwargs.pop("merge_bdry_cos", 0.68)
         self.merge_bdry_dist = kwargs.pop("merge_bdry_dist", 2.5)
+        # Research memory is opt-in and lazily constructed after the first
+        # embedding reveals its dimension.  The default remains the legacy
+        # fixed dual EMA, so existing detector configs are unchanged.
+        self.memory_mode = kwargs.pop("memory_mode", "fixed_dual")
+        if self.memory_mode not in {"single_ema", "fixed_dual", "confidence_gated_dual", "predictive_dual"}:
+            raise ValueError(f"Unknown memory_mode: {self.memory_mode}")
+        self.memory_controller_hidden = int(kwargs.pop("memory_controller_hidden", 128))
+        self.memory_confidence_threshold = float(kwargs.pop("memory_confidence_threshold", 0.55))
 
         super().__init__(**kwargs)
         assert 0 <= memo_momentum <= 1.0
@@ -107,6 +115,10 @@ class MasaOVMOTTracker(BaseTracker):
         # Ablation switches
         self.use_dual_speed = use_dual_speed
         self.use_emd = use_emd
+        if self.memory_mode == "single_ema":
+            self.use_dual_speed = False
+        else:
+            self.use_dual_speed = self.use_dual_speed or self.memory_mode in {"fixed_dual", "confidence_gated_dual", "predictive_dual"}
 
         # Dual-speed prototypes
         self.memo_momentum_fast = memo_momentum_fast
@@ -116,12 +128,57 @@ class MasaOVMOTTracker(BaseTracker):
         # EMD: 初始化合并记录容器
         self.merged_pairs = []
         self._logged_pairs = set()
+        self.predictive_memory = None
+        self.memory_diagnostics = []
 
     def reset(self):
         """Reset the buffer of the tracker."""
         self.num_tracks = 0
         self.tracks = dict()
         self.backdrops = []
+        self.memory_diagnostics = []
+
+    def _ensure_predictive_memory(self, embedding_dim: int, device: torch.device):
+        """Create M1's controller only after the frozen feature dimension is known."""
+        if self.predictive_memory is None:
+            from tempotrack_research.memory.predictive_dual import PredictiveDualMemory
+
+            self.predictive_memory = PredictiveDualMemory(
+                history_dim=2 * embedding_dim,
+                observation_dim=embedding_dim,
+                evidence_dim=8,
+                hidden_dim=self.memory_controller_hidden,
+            ).to(device)
+            self.predictive_memory.eval()
+        return self.predictive_memory
+
+    @torch.no_grad()
+    def _update_predictive_memory(self, track: dict, z: Tensor, bbox: Tensor, score: Tensor, frame_id: int) -> dict:
+        """Causal M1 write: caller invokes this only after matching/ID assignment."""
+        memory = self._ensure_predictive_memory(z.numel(), z.device)
+        state = track.get("memory_state")
+        if state is None:
+            state = memory.initialize(track.get("embed", z).to(z.device), track.get("last_frame", frame_id))
+        previous_bbox = track.get("bbox", bbox).to(z.device)
+        gap = torch.as_tensor(float(max(frame_id - int(track.get("last_frame", frame_id)), 0)), device=z.device)
+        geometry_delta = bbox[:4].to(z.device) - previous_bbox[:4].to(z.device)
+        history = torch.cat((state.fast, state.slow), dim=-1)
+        updated, diagnostics = memory.update_from_match(
+            state,
+            z,
+            history,
+            gap,
+            score.to(z.device),
+            geometry_delta,
+            gap,
+            frame_id,
+        )
+        track["memory_state"] = updated
+        track["embed_fast"] = updated.fast
+        track["embed_slow"] = updated.slow
+        track["embed"] = updated.fast
+        self.memory_diagnostics.append({key: float(value.detach().mean().cpu()) for key, value in diagnostics.items() if torch.is_tensor(value) and value.numel()})
+        return diagnostics
 
     def update(
         self,
@@ -158,7 +215,9 @@ class MasaOVMOTTracker(BaseTracker):
 
             # update the tracked ones and initialize new tracks
             if id in self.tracks.keys():
-                if self.use_dual_speed:
+                if self.memory_mode == "predictive_dual":
+                    self._update_predictive_memory(self.tracks[id], z, bbox, score, frame_id)
+                elif self.use_dual_speed:
                     # Dual-speed: initialize fast/slow if not exist
                     if "embed_fast" not in self.tracks[id]:
                         self.tracks[id]["embed_fast"] = F.normalize(
@@ -174,6 +233,10 @@ class MasaOVMOTTracker(BaseTracker):
                     p_slow = self.tracks[id]["embed_slow"]
                     sf = self.memo_momentum_fast
                     sl = self.memo_momentum_slow
+                    if self.memory_mode == "confidence_gated_dual":
+                        gate = float(score.detach().cpu()) >= self.memory_confidence_threshold
+                        sf *= float(gate)
+                        sl *= float(gate)
                     p_fast = F.normalize((1.0 - sf) * p_fast + sf * z, p=2, dim=0)
                     p_slow = F.normalize((1.0 - sl) * p_slow + sl * z, p=2, dim=0)
                     self.tracks[id]["embed_fast"] = p_fast
@@ -242,6 +305,9 @@ class MasaOVMOTTracker(BaseTracker):
                 if self.use_dual_speed:
                     track_data['embed_fast'] = z0.clone()
                     track_data['embed_slow'] = z0.clone()
+                if self.memory_mode == "predictive_dual":
+                    memory = self._ensure_predictive_memory(z0.numel(), z0.device)
+                    track_data["memory_state"] = memory.initialize(z0, frame_id)
 
                 if self.use_emd:
                     track_data['mem_bank'] = [{
@@ -512,8 +578,8 @@ class MasaOVMOTTracker(BaseTracker):
                     id = int(memo_ids[track_idx])  # tensor -> python int
 
                     # 应用阈值过滤
-                if conf > self.match_score_thr:
-                    if id > -1:
+                    if conf > self.match_score_thr:
+                        if id > -1:
                             # 保持高分检测并移除背景
                             if scores[det_idx] > self.obj_score_thr:
                                 ids[det_idx] = id
@@ -521,7 +587,7 @@ class MasaOVMOTTracker(BaseTracker):
 
         # initialize new tracks
         new_inds = (ids == -1) & (scores > self.init_score_thr).cpu()
-        num_news = new_inds.sum()
+        num_news = int(new_inds.sum().item())
         ids[new_inds] = torch.arange(
             self.num_tracks, self.num_tracks + num_news, dtype=torch.long
         )

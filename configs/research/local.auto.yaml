@@ -1,0 +1,23 @@
+schema_version: 1
+repo_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa
+data_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data
+annotation_paths:
+  train: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/train.json
+  val_base: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/validation.json
+  mot17_train: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/MOT17/annotations/train.json
+feature_cache_candidates:
+- /data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache
+- /data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache_aggressive
+selected_feature_cache: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/embed_cache
+checkpoint_candidates:
+- /data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models/masa_models/gdino_masa.pth
+- /data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models/masa_models/detic_masa.pth
+feature_policy: frozen_external_cache_only
+protocol:
+  mode: offline_id_only
+  immutable_observations: true
+  change_boxes: false
+  change_scores: false
+  change_categories: false
+  allow_gt_at_inference: false
+inventory_hash: d8a589c33cdfc69bf44279b2c6081eca7a502f1026e852280c6c35a1f022d2e1
