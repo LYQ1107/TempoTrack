@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TempoTrack | Project Page</title>
+  <meta name="description" content="TempoTrack: Memory as Anchor: Temporal Association for Open-Vocabulary Trackers" />
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --bg-soft: #eef3fb;
+      --card: #ffffff;
+      --text: #152033;
+      --muted: #5f6b85;
+      --line: #d9e2f1;
+      --primary: #2d61f0;
+      --primary-2: #6d8fff;
+      --accent: #edf3ff;
+      --shadow: 0 14px 48px rgba(22, 36, 75, 0.08);
+      --radius-xl: 28px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+      --maxw: 1160px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+      color: var(--text);
+      line-height: 1.68;
+    }
+    a { color: inherit; text-decoration: none; }
+    img, video { display: block; max-width: 100%; height: auto; }
+    code, pre {
+      font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+    }
+    .container {
+      width: min(calc(100% - 32px), var(--maxw));
+      margin: 0 auto;
+    }
+    .narrow { width: min(calc(100% - 32px), 860px); margin: 0 auto; }
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(14px);
+      background: rgba(248, 251, 255, 0.88);
+      border-bottom: 1px solid rgba(217, 226, 241, 0.82);
+    }
+    .nav-wrap {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .brand,
+    nav a,
+    .btn,
+    .section-kicker,
+    .update-date {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand {
+      font-size: 0.98rem;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+    }
+    .brand-mark,
+    .nav-icon,
+    .btn-icon,
+    .section-icon,
+    .update-icon {
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      vertical-align: middle;
+      flex: 0 0 16px;
+    }
+    .brand-mark svg,
+    .nav-icon svg,
+    .btn-icon svg,
+    .section-icon svg,
+    .update-icon svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    nav {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    nav a {
+      color: var(--muted);
+      font-size: 0.91rem;
+      transition: color .2s ease;
+    }
+    nav a:hover { color: var(--primary); }
+    .hero {
+      padding: 56px 0 14px;
+      background:
+        radial-gradient(circle at right top, rgba(109,143,255,.16), transparent 26%),
+        radial-gradient(circle at left top, rgba(45,97,240,.08), transparent 20%);
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 22px;
+      align-items: start;
+    }
+    .hero-intro {
+      max-width: 1080px;
+      margin: 0 auto;
+      text-align: center;
+    }
+    .eyebrow, .section-kicker {
+      margin: 0 0 10px;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-size: .74rem;
+      font-weight: 800;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.7rem, 2.8vw, 3rem);
+      line-height: 1.06;
+      letter-spacing: -0.035em;
+    }
+    .hero-title-line {
+      display: block;
+      white-space: nowrap;
+    }
+    .hero-subtitle {
+      margin: 16px auto 0;
+      font-size: 1rem;
+      color: var(--muted);
+      max-width: 700px;
+    }
+    .authors {
+      margin-top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      font-weight: 600;
+      font-size: .97rem;
+      justify-content: center;
+    }
+    .authors span::after {
+      content: "·";
+      margin-left: 14px;
+      color: #a9b5cb;
+    }
+    .authors span:last-child::after { content: ""; margin: 0; }
+    .affiliation {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: .96rem;
+    }
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+      justify-content: center;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 16px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-weight: 700;
+      font-size: .96rem;
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+    }
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(45,97,240,.10);
+      border-color: #c9d4ec;
+    }
+    .btn.primary {
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      color: #fff;
+      border-color: transparent;
+    }
+    .hero-points {
+      margin: 22px auto 0;
+      padding-left: 20px;
+      color: var(--muted);
+      max-width: 760px;
+      text-align: left;
+      font-size: .97rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid rgba(217,226,241,.95);
+      box-shadow: var(--shadow);
+      border-radius: var(--radius-xl);
+    }
+    .wide-figure img, .gallery-item img {
+      width: 100%;
+      border-radius: 18px;
+      border: 1px solid #e6edf7;
+      background: #fbfdff;
+    }
+    .caption {
+      margin: 12px 2px 0;
+      color: var(--muted);
+      font-size: .89rem;
+    }
+    .section { padding: 30px 0 20px; }
+    .soft-section {
+      background: linear-gradient(180deg, rgba(237,243,255,.72) 0%, rgba(244,247,251,0) 100%);
+    }
+    .section-heading { margin-bottom: 16px; }
+    h2 {
+      margin: 0;
+      font-size: clamp(1.4rem, 1.95vw, 1.82rem);
+      line-height: 1.14;
+      letter-spacing: -0.025em;
+    }
+    h3 { margin: 0 0 10px; font-size: 1.02rem; letter-spacing: -0.015em; }
+    .prose { padding: 26px 28px; }
+    .prose p { margin: 0 0 14px; font-size: .97rem; }
+    .prose p:last-child { margin-bottom: 0; }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .feature-card, .method-card, .table-card, .gallery-item, .media-card, .bib-card {
+      padding: 20px;
+    }
+    .feature-card p, .method-card p, .table-card p, .media-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: .96rem;
+    }
+    .pill {
+      display: inline-flex;
+      min-height: 26px;
+      align-items: center;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: var(--primary);
+      font-size: .78rem;
+      font-weight: 800;
+      margin-bottom: 10px;
+    }
+    .wide-figure { padding: 18px; }
+    .two-col {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .method-card ul {
+      margin: 12px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+      font-size: .96rem;
+    }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .stat-card {
+      padding: 20px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: clamp(1.45rem, 2.25vw, 1.95rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: var(--primary);
+    }
+    .stat-label {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 18px;
+      align-items: start;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .92rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 11px 10px;
+      border-bottom: 1px solid #ebf0f7;
+      white-space: nowrap;
+    }
+    th { color: var(--muted); font-weight: 700; }
+    .highlight-row td {
+      background: #f7faff;
+      font-weight: 700;
+    }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .gallery-item p { color: var(--muted); margin: 12px 0 0; font-size: .96rem; }
+    .media-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+    .code-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+    .video-wrap {
+      position: relative;
+      overflow: hidden;
+      border-radius: 18px;
+      border: 1px solid #e6edf7;
+      background: #f9fbff;
+    }
+    .video-wrap video, .video-wrap img { width: 100%; }
+    .placeholder-note {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: #f7faff;
+      color: var(--muted);
+      font-size: .92rem;
+      border: 1px dashed #d7e1f2;
+    }
+    .updates-wrap {
+      width: min(calc(100% - 32px), 1160px);
+      margin: 0 auto;
+    }
+    .updates-panel {
+      padding: 18px 22px;
+      border-radius: 18px;
+      background: rgba(255,255,255,.78);
+      border: 1px solid rgba(217,226,241,.95);
+      box-shadow: var(--shadow);
+    }
+    .updates-list {
+      display: grid;
+      gap: 8px;
+    }
+    .update-item {
+      display: grid;
+      grid-template-columns: 148px 1fr;
+      gap: 18px;
+      align-items: center;
+      padding: 8px 0;
+    }
+    .update-date {
+      color: #5e7297;
+      font-size: .92rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+    .update-body {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 1rem;
+    }
+    .update-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 0 12px;
+      border-radius: 9px;
+      background: #dbe8ff;
+      color: var(--primary);
+      font-size: .9rem;
+      font-weight: 700;
+    }
+    .update-text {
+      color: #263a60;
+      font-size: clamp(0.96rem, 1.05vw, 1.03rem);
+    }
+    pre {
+      margin: 0;
+      overflow-x: auto;
+      padding: 18px;
+      border-radius: 18px;
+      background: #0f1729;
+      color: #e7eefc;
+      font-size: .9rem;
+      line-height: 1.6;
+    }
+    .footer {
+      padding: 34px 0 52px;
+      color: var(--muted);
+      font-size: .92rem;
+    }
+    .footer .card { padding: 18px 20px; }
+    @media (max-width: 1024px) {
+      .hero-grid, .results-grid, .media-grid, .two-col {
+        grid-template-columns: 1fr;
+      }
+      .feature-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .gallery-grid { grid-template-columns: 1fr 1fr; }
+      .stats-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .code-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 900px) {
+      .hero-title-line {
+        white-space: normal;
+      }
+      .update-item {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+    }
+    @media (max-width: 720px) {
+      nav { display: none; }
+      .hero { padding-top: 42px; }
+      .feature-grid, .gallery-grid, .stats-row { grid-template-columns: 1fr; }
+      .prose, .feature-card, .method-card, .table-card, .gallery-item, .media-card, .bib-card { padding: 18px; }
+      .update-body {
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav-wrap">
+      <a class="brand" href="#top">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 12h6l2-4 4 8 2-4h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span>TempoTrack</span>
+      </a>
+      <nav>
+        <a href="#updates">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/>
+            </svg>
+          </span>
+          <span>Updates</span>
+        </a>
+        <a href="#abstract">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M6 7h12M6 12h12M6 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span>Abstract</span>
+        </a>
+        <a href="#contributions">Contributions</a>
+        <a href="#method">Method</a>
+        <a href="#results">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M5 16l4-4 3 3 7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span>Results</span>
+        </a>
+        <a href="#visuals">Visuals</a>
+        <a href="#video">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M8 7.5v9l8-4.5-8-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span>Video</span>
+        </a>
+        <a href="#getting-started">Getting Started</a>
+        <a href="#citation">Citation</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-intro">
+          <p class="eyebrow">Open-Vocabulary Multi-Object Tracking</p>
+          <h1>
+            <span class="hero-title-line">Memory as Anchor:</span>
+            <span class="hero-title-line">Temporal Association for Open-Vocabulary Trackers</span>
+          </h1>
+          <p class="hero-subtitle">
+            A training-free temporal association framework that stabilizes frozen open-vocabulary features with dual-timescale prototypes and EMD-based tracklet consolidation.
+          </p>
+
+          <div class="authors">
+            <span>Author 1</span>
+            <span>Author 2</span>
+            <span>Author 3</span>
+            <span>Author 4</span>
+          </div>
+          <p class="affiliation">Affiliation 1 · Affiliation 2 · Under Review</p>
+
+          <div class="button-row">
+            <a class="btn primary" href="#" target="_blank" rel="noopener">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M7 4.5h7l3 3V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M14 4.5V8h3.5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span>Paper</span>
+            </a>
+            <a class="btn" href="#" target="_blank" rel="noopener">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M8 12h8M12 8v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+              </span>
+              <span>arXiv</span>
+            </a>
+            <a class="btn" href="#" target="_blank" rel="noopener">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M8 16c-2 0-3.5-1.5-3.5-3.5S6 9 8 9h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <path d="M16 8c2 0 3.5 1.5 3.5 3.5S18 15 16 15h-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <path d="M9.5 12h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span>Code</span>
+            </a>
+            <a class="btn" href="#video">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M8 7.5v9l8-4.5-8-4.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span>Video</span>
+            </a>
+          </div>
+
+          <ul class="hero-points">
+            <li>Stabilizes temporal association under frozen open-vocabulary embeddings.</li>
+            <li>Combines fast/slow prototypes for adaptation and long-term identity anchoring.</li>
+            <li>Reconnects fragmented tracklets through set-to-set Earth Mover’s Distance matching.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="updates">
+      <div class="updates-wrap">
+        <div class="section-heading">
+          <p class="section-kicker">
+            <span class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 8v4l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+            </span>
+            <span>Latest</span>
+          </p>
+          <h2>Project Updates</h2>
+        </div>
+        <div class="updates-panel">
+          <div class="updates-list">
+            <div class="update-item">
+              <div class="update-date">2026-04-09</div>
+              <div class="update-body">
+                <span class="update-badge">New</span>
+                <span class="update-text">Initial repository created.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="abstract">
+      <div class="narrow">
+        <div class="section-heading">
+          <p class="section-kicker">Overview</p>
+          <h2>Abstract</h2>
+        </div>
+        <div class="card prose">
+          <p>Open-Vocabulary Multi-Object Tracking (OV-MOT) leverages pre-trained open-vocabulary detectors to track arbitrary categories without category-specific training. However, frozen open-vocabulary embeddings are highly unstable on unseen, blurred, or heavily deformed targets, making conventional frame-to-frame matching brittle and causing frequent identity switches and fragmented tracklets.</p>
+          <p>TempoTrack addresses this issue through the principle of memory as anchor. Instead of modifying the detector or retraining the representation learner, it improves identity consistency by exploiting trajectory history. The framework maintains dual-timescale appearance prototypes for each tracklet and performs set-to-set identity consolidation with Earth Mover’s Distance to reconnect temporally disconnected fragments.</p>
+          <p>Extensive experiments show that TempoTrack serves as a robust, plug-and-play enhancement across diverse open-vocabulary trackers. On the OVMOT benchmark, it reaches 48.4 TETA and 47.0 AssocA, demonstrating that memory-driven temporal association effectively mitigates the instability of frozen zero-shot video features.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section soft-section" id="contributions">
+      <div class="container">
+        <div class="section-heading">
+          <p class="section-kicker">Why it matters</p>
+          <h2>Key contributions</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="card feature-card">
+            <h3>Memory as anchor</h3>
+            <p>Trajectory history is explicitly used to stabilize association when frozen open-vocabulary features drift over time.</p>
+          </article>
+          <article class="card feature-card">
+            <h3>Dual-timescale prototypes</h3>
+            <p>A fast prototype adapts to recent appearance changes, while a slow prototype preserves long-term identity consistency.</p>
+          </article>
+          <article class="card feature-card">
+            <h3>Set-to-set consolidation</h3>
+            <p>Tracklet memory banks are treated as feature sets, and EMD is used to reconnect temporally compatible fragments globally.</p>
+          </article>
+          <article class="card feature-card">
+            <h3>Plug-and-play</h3>
+            <p>The framework works as a training-free association enhancement without changing the detector or retraining the feature encoder.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="method">
+      <div class="container">
+        <div class="section-heading">
+          <p class="section-kicker">Approach</p>
+          <h2>Method overview</h2>
+        </div>
+
+        <div class="card wide-figure">
+          <img src="assets/images/pipline.png" alt="Method overview" />
+          <p class="caption">Overview of the TempoTrack pipeline. This figure should summarize the dual-timescale prototype association stage and the subsequent set-to-set tracklet consolidation stage.</p>
+        </div>
+
+        <div class="two-col">
+          <article class="card method-card">
+            <span class="pill">Stage 1</span>
+            <h3>Dual-timescale prototype association</h3>
+            <p>Each tracklet maintains a fast prototype and a slow prototype. The fast prototype captures recent appearance changes, while the slow prototype serves as a stable long-term anchor against drift.</p>
+            <ul>
+              <li>Robust to blur, deformation, and viewpoint variation</li>
+              <li>Compatible with existing OV-MOT association pipelines</li>
+              <li>Improves identity consistency without retraining</li>
+            </ul>
+          </article>
+
+          <article class="card method-card">
+            <span class="pill">Stage 2</span>
+            <h3>Set-to-set identity consolidation</h3>
+            <p>Historical appearance features are stored in a memory bank for each tracklet. TempoTrack then measures set-level similarity with Earth Mover’s Distance to reconnect fragmented trajectories globally.</p>
+            <ul>
+              <li>Repairs fragmentation caused by local matching errors</li>
+              <li>Moves beyond strict adjacent-frame association</li>
+              <li>Provides a global trajectory-level correction stage</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section soft-section" id="results">
+      <div class="container">
+        <div class="section-heading">
+          <p class="section-kicker">Experiments</p>
+          <h2>Main results</h2>
+        </div>
+
+        <div class="stats-row">
+          <div class="card stat-card"><div class="stat-value">48.4</div><div class="stat-label">TETA on OVMOT</div></div>
+          <div class="card stat-card"><div class="stat-value">47.0</div><div class="stat-label">AssocA on OVMOT</div></div>
+          <div class="card stat-card"><div class="stat-value">+3.6</div><div class="stat-label">Novel-class AssocA over OVTrack</div></div>
+          <div class="card stat-card"><div class="stat-value">Training-free</div><div class="stat-label">Plug-and-play enhancement</div></div>
+        </div>
+
+        <div class="results-grid">
+          <article class="card table-card">
+            <h3>Representative benchmark snapshot</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    <th>Base TETA</th>
+                    <th>Base AssocA</th>
+                    <th>Novel TETA</th>
+                    <th>Novel AssocA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>OVTrack†</td><td>36.3</td><td>36.3</td><td>32.0</td><td>33.2</td></tr>
+                  <tr><td>MASA (R50)†</td><td>36.9</td><td>36.4</td><td>30.0</td><td>34.6</td></tr>
+                  <tr><td>TempoTrack (R50)†</td><td>38.4</td><td>40.1</td><td>32.3</td><td>41.0</td></tr>
+                  <tr class="highlight-row"><td>TempoTrack (Detic)†</td><td>48.4</td><td>47.0</td><td>42.0</td><td>44.0</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card table-card">
+            <h3>Parameter sensitivity analysis</h3>
+            <img src="assets/images/TETA_3d.png" alt="Parameter sensitivity analysis" />
+            <p class="caption">Sensitivity analysis of the main hyperparameters in TempoTrack, showing how temporal memory and consolidation settings affect association performance and overall tracking quality.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="visuals">
+      <div class="container">
+        <div class="section-heading">
+          <p class="section-kicker">Visualization</p>
+          <h2>Qualitative comparisons</h2>
+        </div>
+        <div class="gallery-grid">
+          <article class="card gallery-item">
+            <h3>Case 1</h3>
+            <img src="assets/images/vis_sup_3.png" alt="Qualitative comparison case 1" />
+            <p>Qualitative comparison under challenging conditions such as occlusion, blur, or target deformation, illustrating how temporal memory improves identity continuity.</p>
+          </article>
+          <article class="card gallery-item">
+            <h3>Case 2</h3>
+            <img src="assets/images/vis_sup_4.png" alt="Qualitative comparison case 2" />
+            <p>Another representative example showing more stable identity preservation and reduced trajectory fragmentation compared with a baseline open-vocabulary tracker.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section soft-section" id="video">
+      <div class="container">
+        <div class="section-heading">
+          <p class="section-kicker">Demo</p>
+          <h2>Video</h2>
+        </div>
+
+        <div class="media-grid">
+          <article class="card media-card">
+            <h3>Demo video</h3>
+            <div class="video-wrap">
+              <video controls poster="assets/images/video_poster_placeholder.png">
+                <source src="assets/media/demo.mp4" type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
+            </div>
+            <div class="placeholder-note">This demo section can be used to present tracking behaviors over time, such as identity preservation across occlusion, recovery after missed detections, and improvements in long-term association stability.</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="getting-started">
+      <div class="container">
+        <div class="section-heading">
+          <p class="section-kicker">Usage</p>
+          <h2>Getting Started</h2>
+        </div>
+
+        <div class="code-grid">
+          <article class="card media-card">
+            <h3>Environment setup</h3>
+<pre><code>conda create -n tempotrack python=3.10 -y
+conda activate tempotrack
+
+pip install -r requirements.txt
+
+pip install -U openmim
+mim install mmengine
+pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.1/index.html
+pip install git+https://github.com/open-mmlab/mmdetection.git@v3.3.0
+python demo.py</code></pre>
+            <div class="placeholder-note">This block describes the recommended environment setup for reproducing the project, including the Python version, package installation, and the core dependencies required for evaluation or demo scripts.</div>
+          </article>
+
+          <article class="card media-card">
+            <h3>Dataset organization</h3>
+<pre><code>data/
+├── tao/
+│   ├── frames/
+│   │   ├── train/
+│   │   └── val/
+│   │   └── test/  
+│   ├── annotations/
+├── bdd/
+│   ├── bdd100k/
+│   │   ├── images/
+│   └── annotations/
+└── checkpoints/</code></pre>
+            <div class="placeholder-note">This panel shows a typical dataset layout for organizing image sequences, annotations, detector outputs, checkpoints, and tracking results in a way that is easy to reproduce and extend.</div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="citation">
+      <div class="narrow">
+        <div class="section-heading">
+          <p class="section-kicker">Reference</p>
+          <h2>BibTeX</h2>
+        </div>
+        <div class="card bib-card">
+<pre><code>@inproceedings{tempotrack2026,
+  title     = {Memory as Anchor: Temporal Association for Open-Vocabulary Trackers},
+  author    = {Author 1 and Author 2 and Author 3 and Author 4},
+  booktitle = {Conference Name},
+  year      = {2026}
+}</code></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="card">
+        All code will be made publicly available after the paper is accepted. Thank you for your patience.
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
