@@ -145,6 +145,10 @@ def collect_environment_inventory(repo: str | Path) -> dict[str, Any]:
             fields = [field.strip() for field in line.split(",")]
             if len(fields) >= 4:
                 gpus.append({"index": fields[0], "name": fields[1], "memory_total_mib": fields[2], "memory_free_mib": fields[3]})
+    stable_gpus = [
+        {key: gpu.get(key) for key in ("index", "name", "memory_total_mib")}
+        for gpu in gpus
+    ]
 
     paths = {
         "repo": _file_summary(repo),
@@ -174,7 +178,9 @@ def collect_environment_inventory(repo: str | Path) -> dict[str, Any]:
         "feature_caches": caches,
         "authorized_resources": {"cloud_purchase": False, "network_downloads": False},
         "missing_or_blocking": missing,
-        "inventory_hash": object_hash({"modules": modules, "gpus": gpus, "paths": paths, "caches": caches}),
+        # Free memory is intentionally excluded: it is a volatile diagnostic,
+        # not an input/configuration identity and must not defeat resume de-dupe.
+        "inventory_hash": object_hash({"modules": modules, "gpus": stable_gpus, "paths": paths, "caches": caches}),
     }
 
 

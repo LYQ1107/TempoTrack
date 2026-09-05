@@ -24,6 +24,12 @@ def _scheme_method(scheme: str) -> str:
     return {"no_offline": "single_ema", "s5_bc": "s5_rl_edit"}.get(name, name)
 
 
+def _implementation_hash(repo: Path) -> str:
+    paths = list((repo / "tempotrack_research").rglob("*.py"))
+    paths.extend(repo / name for name in ("pyproject.toml", "masa/models/tracker/embed_cache.py", "masa/models/tracker/masa_ovmot_tracker.py"))
+    return object_hash({str(path.relative_to(repo)): file_hash(path) for path in sorted(set(paths)) if path.exists()})
+
+
 def _normalize_jobs(path: Path, inventory: Mapping[str, Any]) -> None:
     """Backfill the mandatory job schema for records made by older runners."""
     if not path.exists():
@@ -61,6 +67,7 @@ def run_suite(repo: str | Path, suite: Mapping[str, Any], inventory: Mapping[str
     ready, reason = training_ready(inventory, prepared)
     jobs_path = repo / "reports" / "jobs.jsonl"
     _normalize_jobs(jobs_path, inventory)
+    implementation_hash = _implementation_hash(repo)
     results = {"started_at": _now(), "stage": stage, "training_ready": ready, "reason": reason, "schemes": {}}
     schemes = suite.get("required_schemes", RESEARCH_SCHEMES)
     for scheme in schemes:
@@ -68,19 +75,25 @@ def run_suite(repo: str | Path, suite: Mapping[str, Any], inventory: Mapping[str
         signature = object_hash({"scheme": scheme, "method": method, "stage": stage, "inventory_hash": inventory.get("inventory_hash"), "prepared_hash": prepared.get("observation_hash"), "suite": suite})
         current = ensure_progress(progress_path)["schemes"][scheme]
         if current.get("run_signature") == signature and current.get("training") in {"RUNNING", "COMPLETED", "BLOCKED_DATA"} and resume == "auto":
+            if current.get("code_hash") != implementation_hash:
+                update_scheme(progress_path, scheme, code_hash=implementation_hash)
             results["schemes"][scheme] = {"status": "SKIPPED_EXISTING_SIGNATURE", "run_signature": signature}
             continue
         if not ready:
             evidence = reason
             command = f"python -m tempotrack_research.cli prepare --suite configs/research/suite.yaml --local configs/research/local.auto.yaml --resume auto"
-            update_scheme(progress_path, scheme, implementation="BUILT", build_status="PASS", source_review="recorded", training="BLOCKED_DATA", trial_status="BLOCKED_DATA", full_status="BLOCKED_DATA", evaluation="NOT_RUN", eval_status="NOT_RUN", run_signature=signature, code_hash=file_hash(repo / "tempotrack_research" / "__init__.py"), blocking_evidence=evidence, next_command=command, limitations=[evidence])
+            if current.get("training") == "BLOCKED_DATA" and current.get("blocking_evidence") == evidence:
+                update_scheme(progress_path, scheme, run_signature=signature, code_hash=implementation_hash, next_command=command)
+                results["schemes"][scheme] = {"status": "BLOCKED_DATA_ALREADY_RECORDED", "evidence": evidence, "run_signature": signature}
+                continue
+            update_scheme(progress_path, scheme, implementation="BUILT", build_status="PASS", source_review="recorded", training="BLOCKED_DATA", trial_status="BLOCKED_DATA", full_status="BLOCKED_DATA", evaluation="NOT_RUN", eval_status="NOT_RUN", run_signature=signature, code_hash=implementation_hash, blocking_evidence=evidence, next_command=command, limitations=[evidence])
             append_jsonl({"job_id": f"blocked-{scheme}", "scheme": scheme, "command": command, "cwd": str(repo), "env_name": inventory.get("environment_name", "unknown"), "devices": [gpu.get("index") for gpu in inventory.get("gpus", [])], "started_at": _now(), "pid": None, "scheduler_id": None, "log_path": None, "checkpoint_path": None, "exit_code": None, "status": "BLOCKED_DATA", "blocking_evidence": evidence}, jobs_path)
             results["schemes"][scheme] = {"status": "BLOCKED_DATA", "evidence": evidence}
             continue
         # The data path is intentionally explicit: an available cache must be
         # materialized as NPZ episodes before a trainer is allowed to start.
         evidence = "train cache indexed; invoke method-specific train entrypoint"
-        update_scheme(progress_path, scheme, implementation="BUILT", build_status="PASS", source_review="recorded", training="NOT_RUN", trial_status="NOT_RUN", full_status="NOT_RUN", run_signature=signature, code_hash=file_hash(repo / "tempotrack_research" / "__init__.py"), next_command=f"python -m tempotrack_research.cli train --method {method} --profile trial --seed 0 --resume auto")
+        update_scheme(progress_path, scheme, implementation="BUILT", build_status="PASS", source_review="recorded", training="NOT_RUN", trial_status="NOT_RUN", full_status="NOT_RUN", run_signature=signature, code_hash=implementation_hash, next_command=f"python -m tempotrack_research.cli train --method {method} --profile trial --seed 0 --resume auto")
         results["schemes"][scheme] = {"status": "READY_TO_TRAIN", "evidence": evidence}
         if not keep_going:
             break

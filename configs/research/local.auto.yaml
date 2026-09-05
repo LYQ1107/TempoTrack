@@ -20,4 +20,4 @@ protocol:
   change_scores: false
   change_categories: false
   allow_gt_at_inference: false
-inventory_hash: d8a589c33cdfc69bf44279b2c6081eca7a502f1026e852280c6c35a1f022d2e1
+inventory_hash: 5988a4e47879d0018993004b6485fe4dab06285cbe81aa054dd73b5561108f39

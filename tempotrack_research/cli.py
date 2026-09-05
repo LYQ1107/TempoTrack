@@ -22,7 +22,7 @@ from .evaluation.result_writer import append_jsonl, atomic_json
 from .orchestration.plan import load_suite
 from .orchestration.report import generate_report
 from .orchestration.resources import evaluator_ready, training_ready
-from .orchestration.runner import run_suite
+from .orchestration.runner import _implementation_hash, run_suite
 from .orchestration.state import ensure_progress, update_scheme
 from .registry import METHODS, RESEARCH_SCHEMES, get_method
 
@@ -272,8 +272,9 @@ def _build_check_command(args: argparse.Namespace) -> int:
             smoke = {"passed": False, "error": str(exc)}
     result = {"generated_at": _now(), "files_checked": len(files), "syntax_failures": failures, "wheel": {"returncode": wheel_code, "output_tail": wheel_output[-4000:]}, "smoke": smoke, "passed": not failures and wheel_code == 0}
     _write_json(repo / "reports" / "build_check.json", result)
+    implementation_hash = _implementation_hash(repo)
     for scheme in RESEARCH_SCHEMES:
-        update_scheme(repo / "reports" / "progress.json", scheme, implementation="BUILT" if not failures else "PARTIAL", build_status="PASS" if result["passed"] else "FAIL", implemented_files=[str(path.relative_to(repo)) for path in files])
+        update_scheme(repo / "reports" / "progress.json", scheme, implementation="BUILT" if not failures else "PARTIAL", build_status="PASS" if result["passed"] else "FAIL", code_hash=implementation_hash, implemented_files=[str(path.relative_to(repo)) for path in files])
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["passed"] else 1
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-05T16:03:04.741672+00:00",
+  "generated_at": "2026-09-05T16:06:50.116671+00:00",
   "repo": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa",
   "python": {
     "executable": "/home/lwr/anaconda3/envs/masaenv/bin/python",
@@ -51,13 +51,13 @@
       "index": "0",
       "name": "NVIDIA A100-SXM4-40GB",
       "memory_total_mib": "40960",
-      "memory_free_mib": "37323"
+      "memory_free_mib": "36757"
     },
     {
       "index": "1",
       "name": "NVIDIA A100-SXM4-40GB",
       "memory_total_mib": "40960",
-      "memory_free_mib": "40335"
+      "memory_free_mib": "31047"
     },
     {
       "index": "2",
@@ -326,5 +326,5 @@
     "network_downloads": false
   },
   "missing_or_blocking": [],
-  "inventory_hash": "d8a589c33cdfc69bf44279b2c6081eca7a502f1026e852280c6c35a1f022d2e1"
+  "inventory_hash": "5988a4e47879d0018993004b6485fe4dab06285cbe81aa054dd73b5561108f39"
 }

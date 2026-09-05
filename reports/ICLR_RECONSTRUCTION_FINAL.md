@@ -1,10 +1,10 @@
 # TempoTrack ICLR 重建执行报告
 
-> 生成时间：2026-09-05T16:04:40.073919+00:00。本报告只汇总仓库中真实记录的状态；未运行指标统一记为“— / 未运行”，不复制论文旧表数字。
+> 生成时间：2026-09-05T16:09:36.573789+00:00。本报告只汇总仓库中真实记录的状态；未运行指标统一记为“— / 未运行”，不复制论文旧表数字。
 
 ## 1. 执行结论
 
-代码基线 `70b15c1f761e9c0d86489afcf3760397890bb616`，当前 head `70b15c1f761e9c0d86489afcf3760397890bb616`。实现状态与实验状态分轴记录。当前未将任何未实际运行的方案写成性能结论；训练是否完成以 `reports/progress.json` 和 `reports/jobs.jsonl` 为准。
+代码基线 `70b15c1f761e9c0d86489afcf3760397890bb616`，当前 head `1a04a430c48937346afa16a2a09c88121f930b92`。实现状态与实验状态分轴记录。当前未将任何未实际运行的方案写成性能结论；训练是否完成以 `reports/progress.json` 和 `reports/jobs.jsonl` 为准。
 
 环境阻塞摘要：缺少 train split 的合法冻结 appearance cache；当前缓存仅覆盖 validation 或其他 split。当前核验环境：`masaenv`。
 
@@ -85,4 +85,4 @@ python -m tempotrack_research.cli report --run-root outputs/research --output re
 
 研究包位于 `tempotrack_research/`，配置位于 `configs/research/`，状态/报告位于 `reports/`，来源位于 `docs/research/`。构建检查必须同时保留 py_compile 与 wheel 结果；构建通过不等于算法验证通过。
 
-报告内容 hash：`0cbf084f15ce58783cfb8af9691bcf678f6446fc8d47cd533f26e55bbdf5b991`。
+报告内容 hash：`ecc1e3148549ad5c7f81539b09aa4e2c9c6fc329c35fb2fe3ec366fab61924cb`。
