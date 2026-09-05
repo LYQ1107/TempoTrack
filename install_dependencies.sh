@@ -25,7 +25,7 @@ pip install einops
 pip install seaborn
 pip install fairscale
 pip install git+https://github.com/openai/CLIP.git --no-deps
-pip install git+https://github.com/siyuanliii/TrackEval.git
+pip install git+https://github.com/JonathonLuiten/TrackEval.git
 pip install git+https://github.com/SysCV/tet.git#subdirectory=teta
 pip install git+https://github.com/scalabel/scalabel.git@scalabel-evalAPI
 pip install git+https://github.com/TAO-Dataset/tao

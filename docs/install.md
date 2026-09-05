@@ -1,10 +1,10 @@
 
-# Project Setup Instructions
+# TempoTrack Project Setup Instructions
 
 ## Step 1: Clone the Repository
 Clone the project repository to your local machine using:
 ```bash
-git clone https://github.com/siyuanliii/masa.git
+git clone https://github.com/LYQ1107/TempoTrack.git
 ```
 
 ## Step 2: Create and Activate the Conda Environment

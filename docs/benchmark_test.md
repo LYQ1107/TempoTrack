@@ -1,7 +1,7 @@
 
 # Testing on Standard Benchmarks
 
-This document describes how to run MASA for the standard benchmarks testing.
+This document describes how to run TempoTrack on standard tracking benchmarks.
 
 
 ## Prepare Datasets
@@ -16,9 +16,9 @@ a. Please follow [TAO download](https://github.com/TAO-Dataset/tao/blob/master/d
 
 b. Please download converted TAO annotations and put them in `data/tao/annotations/`.
 
-You can download the annotations `tao_val_lvis_v05_classes.json` from [here](https://huggingface.co/dereksiyuanli/masa/resolve/main/tao_val_lvis_v05_classes.json). 
+Place the converted `tao_val_lvis_v05_classes.json` annotations in `data/tao/annotations/`.
 
-You can download the annotations `tao_val_lvis_v1_classes.json` from [here](https://huggingface.co/dereksiyuanli/masa/resolve/main/tao_val_lvis_v1_classes.json). 
+Place the converted `tao_val_lvis_v1_classes.json` annotations in `data/tao/annotations/`.
 
 Note that the original TAO annotations has some mistakes regarding class names. We have fixed the class names in the converted annotations and make it consistent with the LVIS dataset.
 ##### Optional: generate the annotations by yourself
@@ -89,7 +89,7 @@ Our folder structure follows
 
 The official BDD100K annotations are in the format of [scalabel](https://doc.bdd100k.com/format.html).
 
-You can directly download the converted annotations: [mot](https://huggingface.co/dereksiyuanli/masa/resolve/main/bdd_box_track_val_cocofmt.json) and [mots](https://huggingface.co/dereksiyuanli/masa/resolve/main/bdd_seg_track_val_cocofmt.json) and put them in the `data/bdd/annotations/` folder.
+Place the converted MOT and MOTS annotations in the `data/bdd/annotations/` folder.
 
 
 (Optional) If you want to convert the annotations by yourself, you can use bdd100k toolkit. Please install the bdd100k toolkit by following the instructions [here](https://github.com/bdd100k/bdd100k).
@@ -105,9 +105,9 @@ Create a folder named 'results' under the root.
 ```bash
 mkdir results
 ```
-Download the public detections from [here](https://huggingface.co/dereksiyuanli/masa/resolve/main/public_dets_masa.zip) and unzip it under the 'results' folder.
+Prepare the public detections required by your benchmark and put them under the `results` folder.
 
-## Run MASA
+## Run TempoTrack
 This codebase is inherited from [mmdetection](https://github.com/open-mmlab/mmdetection).
 You can refer to the [offical instructions](https://github.com/open-mmlab/mmdetection/blob/master/docs/getting_started.md).
 You can also refer to the short instructions below.
@@ -137,14 +137,14 @@ Optional arguments:
 
 #### Test on TAO TETA benchmark
 
-We provide the config file for testing on the TAO TETA benchmark. Use MASA-GroundingDINO for example.
+We provide the config file for testing on the TAO TETA benchmark. The GroundingDINO-based TempoTrack configuration is shown below.
 
 ```angular2html
 tools/dist_test.sh configs/masa-gdino/tao_teta_test/masa_gdino_swinb_tao_test_detic_dets.py saved_models/masa_models/gdino_masa.pth 8 
 ```
 
 #### Test on Open-vocabulary MOT benchmark
-We provide the config file for testing on the open-vocabulary MOT benchmark. Use MASA-Detic for example.
+We provide the config file for testing on the open-vocabulary MOT benchmark. The Detic-based TempoTrack configuration is shown below.
 ```angular2html
 tools/dist_test.sh configs/masa-detic/open_vocabulary_mot_test/masa_detic_swinb_open_vocabulary_test.py saved_models/masa_models/detic_masa.pth 8 
 ```

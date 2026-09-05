@@ -3,14 +3,11 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "masa"
+name = "tempotrack"
 version = "0.1.0"  # Replace with your actual version
-description = "MASA: Matching Anything By Segmenting Anything"
+description = "TempoTrack: Memory as Anchor for Open-Vocabulary Tracking"
 readme = "README.md"
 keywords = ["instance matching", "object tracking"]
-authors = [
-    { name = "Siyuan Li", email = "siyuan.li@vision.ee.ethz.ch" },
-]
 license = {text = "Apache-2.0"}
 
 classifiers = [
