@@ -1,0 +1,283 @@
+#!/usr/bin/env python
+"""
+Generate sparse failure case visualizations showing only predictions.
+File names include scene info for easy identification.
+"""
+import argparse
+import json
+import os
+from collections import defaultdict
+from pathlib import Path
+import cv2
+import numpy as np
+from tqdm import tqdm
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--pred-json', required=True)
+    parser.add_argument('--gt-json', required=True)
+    parser.add_argument('--img-root', required=True)
+    parser.add_argument('--output-dir', default='results/rebuttal_figures/failure_cases_sparse')
+    parser.add_argument('--iou-threshold', type=float, default=0.5)
+    parser.add_argument('--num-cases', type=int, default=10)
+    parser.add_argument('--frames-per-case', type=int, default=4)
+    parser.add_argument('--max-objects', type=int, default=3)
+    return parser.parse_args()
+
+
+def calculate_iou(boxA, boxB):
+    x1_a, y1_a, x2_a, y2_a = boxA[0], boxA[1], boxA[0] + boxA[2], boxA[1] + boxA[3]
+    x1_b, y1_b, x2_b, y2_b = boxB[0], boxB[1], boxB[0] + boxB[2], boxB[1] + boxB[3]
+    x1_i, y1_i = max(x1_a, x1_b), max(y1_a, y1_b)
+    x2_i, y2_i = min(x2_a, x2_b), min(y2_a, y2_b)
+    if x2_i <= x1_i or y2_i <= y1_i:
+        return 0.0
+    inter = (x2_i - x1_i) * (y2_i - y1_i)
+    union = boxA[2] * boxA[3] + boxB[2] * boxB[3] - inter
+    return inter / union if union > 0 else 0.0
+
+
+def get_color_for_id(track_id):
+    np.random.seed(int(track_id) % 10000)
+    hue = (track_id * 137.508) % 360
+    saturation = 0.85 + (track_id % 2) * 0.1
+    value = 0.95
+    h, s, v = hue / 360.0, saturation, value
+    c = v * s
+    x = c * (1 - abs((h * 6) % 2 - 1))
+    m = v - c
+    if h < 1/6:
+        r, g, b = c, x, 0
+    elif h < 2/6:
+        r, g, b = x, c, 0
+    elif h < 3/6:
+        r, g, b = 0, c, x
+    elif h < 4/6:
+        r, g, b = 0, x, c
+    elif h < 5/6:
+        r, g, b = x, 0, c
+    else:
+        r, g, b = c, 0, x
+    return (int((b + m) * 255), int((g + m) * 255), int((r + m) * 255))
+
+
+def load_data(json_path, is_pred=False):
+    print(f"Loading {json_path}...")
+    with open(json_path) as f:
+        data = json.load(f)
+    if is_pred:
+        tracks_by_video = defaultdict(lambda: defaultdict(list))
+        for ann in data:
+            if ann.get('iscrowd', 0):
+                continue
+            video_id = ann.get('video_id', 0)
+            track_id = ann.get('track_id', ann.get('id'))
+            tracks_by_video[video_id][track_id].append(ann)
+        return data, {}, tracks_by_video
+    else:
+        img_map = {img['id']: img for img in data['images']}
+        video_map = {v['id']: v for v in data.get('videos', [])}
+        tracks_by_video = defaultdict(lambda: defaultdict(list))
+        for ann in data['annotations']:
+            if ann.get('iscrowd', 0):
+                continue
+            img_id = ann['image_id']
+            video_id = img_map[img_id].get('video_id', 0)
+            track_id = ann.get('track_id', ann.get('id'))
+            tracks_by_video[video_id][track_id].append(ann)
+        return data, img_map, video_map, tracks_by_video
+
+
+def count_objects_per_frame(tracks, img_map):
+    frame_counts = defaultdict(int)
+    for track_anns in tracks.values():
+        for ann in track_anns:
+            frame_counts[ann['image_id']] += 1
+    return np.mean(list(frame_counts.values())) if frame_counts else 0
+
+
+def get_video_name(video_id, video_map):
+    if video_id in video_map:
+        name = video_map[video_id].get('name', '')
+        if name:
+            return name.split('/')[-1].replace('.mp4', '').replace('.avi', '')[:30]
+    return f"video{video_id}"
+
+
+def find_id_switches(pred_tracks, gt_tracks, img_map, video_map, iou_thresh, max_objects):
+    switches = []
+    avg_objects = count_objects_per_frame(gt_tracks, img_map)
+    if avg_objects > max_objects:
+        return []
+    for gt_id, gt_anns in gt_tracks.items():
+        if len(gt_anns) < 20:
+            continue
+        gt_sorted = sorted(gt_anns, key=lambda x: img_map[x['image_id']]['frame_index'])
+        pred_ids = []
+        for gt_ann in gt_sorted:
+            img_id = gt_ann['image_id']
+            frame_pred = [a for t in pred_tracks.values() for a in t if a['image_id'] == img_id]
+            best_iou, best_id = 0, None
+            for p in frame_pred:
+                iou = calculate_iou(gt_ann['bbox'], p['bbox'])
+                if iou > best_iou and iou > iou_thresh:
+                    best_iou, best_id = iou, p.get('track_id', p.get('id'))
+            if best_id is not None:
+                pred_ids.append((img_id, best_id))
+        unique = set([pid for _, pid in pred_ids])
+        if len(unique) > 1:
+            for i in range(1, len(pred_ids)):
+                if pred_ids[i][1] != pred_ids[i-1][1]:
+                    switch_idx = i
+                    start_idx = max(0, switch_idx - 2)
+                    end_idx = min(len(pred_ids), switch_idx + 2)
+                    video_id = img_map[pred_ids[0][0]].get('video_id', 0)
+                    switches.append({
+                        'gt_id': gt_id,
+                        'frames': [pred_ids[j][0] for j in range(start_idx, end_idx)],
+                        'num_switches': len(unique) - 1,
+                        'avg_objects': avg_objects,
+                        'video_name': get_video_name(video_id, video_map),
+                        'pred_ids': list(unique)
+                    })
+                    break
+    return sorted(switches, key=lambda x: x['num_switches'], reverse=True)
+
+
+def find_fragmentations(pred_tracks, gt_tracks, img_map, video_map, iou_thresh, max_objects):
+    frags = []
+    avg_objects = count_objects_per_frame(gt_tracks, img_map)
+    if avg_objects > max_objects:
+        return []
+    for gt_id, gt_anns in gt_tracks.items():
+        if len(gt_anns) < 25:
+            continue
+        matched = defaultdict(int)
+        for gt_ann in gt_anns:
+            img_id = gt_ann['image_id']
+            for pred_id, pred_anns in pred_tracks.items():
+                for p in pred_anns:
+                    if p['image_id'] == img_id and calculate_iou(gt_ann['bbox'], p['bbox']) > iou_thresh:
+                        matched[pred_id] += 1
+        if len(matched) > 1:
+            gt_sorted = sorted(gt_anns, key=lambda x: img_map[x['image_id']]['frame_index'])
+            indices = np.linspace(0, len(gt_sorted) - 1, 4).astype(int)
+            video_id = img_map[gt_sorted[0]['image_id']].get('video_id', 0)
+            frags.append({
+                'gt_id': gt_id,
+                'frames': [gt_sorted[i]['image_id'] for i in indices],
+                'num_frags': len(matched),
+                'avg_objects': avg_objects,
+                'video_name': get_video_name(video_id, video_map),
+                'pred_ids': list(matched.keys())
+            })
+    return sorted(frags, key=lambda x: x['num_frags'], reverse=True)
+
+
+def draw_boxes_on_frame(img, anns, scale=1.0):
+    for ann in anns:
+        track_id = ann.get('track_id', ann.get('id'))
+        x, y, w, h = ann['bbox']
+        x, y, w, h = int(x * scale), int(y * scale), int(w * scale), int(h * scale)
+        color = get_color_for_id(track_id)
+        cv2.rectangle(img, (x, y), (x + w, y + h), color, 3)
+        label = f"ID:{track_id}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        thickness = 2
+        (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, thickness)
+        label_y = y - 10 if y > 30 else y + h + 25
+        cv2.rectangle(img, (x, label_y - text_h - 5), (x + text_w + 6, label_y + 5), color, -1)
+        cv2.putText(img, label, (x + 3, label_y), font, font_scale, (255, 255, 255), thickness)
+    return img
+
+
+def create_sparse_grid(frames, pred_tracks, gt_img_map, img_root, output_path, title):
+    if not frames:
+        return False
+    first_img_path = os.path.join(img_root, gt_img_map[frames[0]]['file_name'])
+    first_img = cv2.imread(first_img_path)
+    if first_img is None:
+        return False
+    orig_h, orig_w = first_img.shape[:2]
+    scale = 640 / orig_w if orig_w > 640 else 1.0
+    new_w, new_h = int(orig_w * scale), int(orig_h * scale)
+    margin, title_h = 15, 70
+    canvas_w = 2 * new_w + 3 * margin
+    canvas_h = title_h + 2 * (new_h + margin) + margin
+    canvas = np.ones((canvas_h, canvas_w, 3), dtype=np.uint8) * 255
+    cv2.putText(canvas, title, (margin, 45), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    for idx, img_id in enumerate(frames[:4]):
+        img_info = gt_img_map[img_id]
+        img_path = os.path.join(img_root, img_info['file_name'])
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+        img = cv2.resize(img, (new_w, new_h))
+        pred_anns = [a for t in pred_tracks.values() for a in t if a['image_id'] == img_id]
+        pred_frame = draw_boxes_on_frame(img.copy(), pred_anns, scale)
+        row = idx // 2
+        col = idx % 2
+        x_offset = margin + col * (new_w + margin)
+        y_offset = title_h + row * (new_h + margin) + margin
+        canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = pred_frame
+        frame_label = f"Frame {img_info['frame_index']}"
+        cv2.putText(canvas, frame_label, (x_offset + 5, y_offset + 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.rectangle(canvas, (x_offset, y_offset), (x_offset + 120, y_offset + 35), (0, 0, 0), -1)
+        cv2.putText(canvas, frame_label, (x_offset + 5, y_offset + 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.imwrite(str(output_path), canvas)
+    return True
+
+
+def main():
+    args = parse_args()
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pred_data, _, pred_tracks_by_video = load_data(args.pred_json, is_pred=True)
+    gt_data, gt_img_map, video_map, gt_tracks_by_video = load_data(args.gt_json, is_pred=False)
+    all_cases = {'id_switches': [], 'fragmentations': []}
+    print("\nAnalyzing sparse failure cases...")
+    for video_id in tqdm(list(gt_tracks_by_video.keys())):
+        gt_tracks = gt_tracks_by_video[video_id]
+        pred_tracks = pred_tracks_by_video.get(video_id, {})
+        for case in find_id_switches(pred_tracks, gt_tracks, gt_img_map, video_map, args.iou_threshold, args.max_objects):
+            case['video_id'] = video_id
+            all_cases['id_switches'].append(case)
+        for case in find_fragmentations(pred_tracks, gt_tracks, gt_img_map, video_map, args.iou_threshold, args.max_objects):
+            case['video_id'] = video_id
+            all_cases['fragmentations'].append(case)
+        if len(all_cases['id_switches']) >= args.num_cases * 2 and len(all_cases['fragmentations']) >= args.num_cases * 2:
+            break
+    print(f"\nFound {len(all_cases['id_switches'])} ID switches, {len(all_cases['fragmentations'])} fragmentations")
+    print("\nGenerating sparse images...")
+    for case_type, cases in all_cases.items():
+        type_dir = output_dir / case_type
+        type_dir.mkdir(exist_ok=True)
+        created = 0
+        for case in cases:
+            if created >= args.num_cases:
+                break
+            frames = case['frames'][:args.frames_per_case]
+            if len(frames) < 3:
+                continue
+            video_id = case['video_id']
+            video_name = case['video_name']
+            gt_id = case['gt_id']
+            pred_ids_str = '_'.join([str(pid) for pid in sorted(case['pred_ids'])[:3]])
+            if case_type == 'id_switches':
+                title = f"ID Switch: GT#{gt_id}"
+                filename = f"idswitch_{video_name}_gt{gt_id}_pred{pred_ids_str}.jpg"
+            else:
+                title = f"Fragmentation: GT#{gt_id}"
+                filename = f"frag_{video_name}_gt{gt_id}_{case['num_frags']}parts.jpg"
+            if create_sparse_grid(frames, pred_tracks_by_video.get(video_id, {}), gt_img_map, args.img_root, type_dir / filename, title):
+                created += 1
+                print(f"  Created {case_type} image {created}/{args.num_cases}: {filename}")
+    print(f"\nDone. Images saved to {output_dir}")
+
+
+if __name__ == '__main__':
+    main()

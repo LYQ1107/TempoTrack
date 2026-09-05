@@ -131,5 +131,41 @@ venus_run.sh
 # lint.sh
 ./lint.sh
 
+# Local datasets, checkpoints, caches, and experiment outputs
+/data/
+/saved_models/
+/results/
+/logs/
+/outputs/
+/demo_outputs/
+/embed_cache/
+/embed_cache_*/
+/gt_embed_cache/
+/motion_analysis_results/
+/paper_examples/
+/paper_examples_*/
+/clean_masa/
+/tao_test_submission/
+
+# Vendored or separately cloned repositories and downloaded archives
+/HybridSORT/
+/COVTrack-main/
+/VOVTrack-main/
+/ovtrack/
+/mmdetection-3.3.0/
+/*.zip
+/*.tar.gz
+
+# Local run state and generated reports
+/*.log
+/*.pid
+/*.stats
+/*.csv
+/*.tsv
+/*.json
+/*.png
+/*.pdf
+/*.mp4
+/*.gif
 
 

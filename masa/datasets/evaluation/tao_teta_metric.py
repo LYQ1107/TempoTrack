@@ -22,9 +22,9 @@ import mmengine.fileio as fileio
 from mmdet.datasets.api_wrappers import COCO
 from mmdet.evaluation.metrics.base_video_metric import BaseVideoMetric
 from mmdet.registry import METRICS, TASK_UTILS
-from mmengine.dist import (all_gather_object, barrier, broadcast,
-                           broadcast_object_list, get_dist_info,
-                           is_main_process)
+from mmengine.dist import (
+    all_gather_object, barrier, broadcast, broadcast_object_list, get_dist_info,
+    is_main_process)
 from mmengine.logging import MMLogger
 
 
@@ -45,41 +45,6 @@ def get_tmpdir() -> str:
 
 @METRICS.register_module()
 class TaoTETAMetric(BaseVideoMetric):
-    """Evaluation metrics for TAO TETA and open-vocabulary MOT benchmark.
-
-    Args:
-        metric (str | list[str]): Metrics to be evaluated. Options are
-            'TETA'
-            Defaults to ['TETA'].
-        outfile_prefix (str, optional): Path to save the formatted results.
-            Defaults to None.
-        track_iou_thr (float): IoU threshold for tracking evaluation.
-            Defaults to 0.5.
-        benchmark (str): Benchmark to be evaluated. Defaults to 'MOT17'.
-        format_only (bool): If True, only formatting the results to the
-            official format and not performing evaluation. Defaults to False.
-        postprocess_tracklet_cfg (List[dict], optional): configs for tracklets
-            postprocessing methods. `InterpolateTracklets` is supported.
-            Defaults to []
-            - InterpolateTracklets:
-                - min_num_frames (int, optional): The minimum length of a
-                    track that will be interpolated. Defaults to 5.
-                - max_num_frames (int, optional): The maximum disconnected
-                    length in a track. Defaults to 20.
-                - use_gsi (bool, optional): Whether to use the GSI (Gaussian-
-                    smoothed interpolation) method. Defaults to False.
-                - smooth_tau (int, optional): smoothing parameter in GSI.
-                    Defaults to 10.
-        collect_device (str): Device name used for collecting results from
-            different ranks during distributed training. Must be 'cpu' or
-            'gpu'. Defaults to 'cpu'.
-        prefix (str, optional): The prefix that will be added in the metric
-            names to disambiguate homonymous metrics of different evaluators.
-            If prefix is not provided in the argument, self.default_prefix
-            will be used instead. Default: None
-    Returns:
-    """
-
     TRACKER = "masa-tracker"
     allowed_metrics = ["TETA"]
     default_prefix: Optional[str] = "tao_teta_metric"
@@ -87,7 +52,7 @@ class TaoTETAMetric(BaseVideoMetric):
     def __init__(
         self,
         metric: Union[str, List[str]] = ["TETA"],
-        outfile_prefix: Optional[str] = default_prefix,
+        outfile_prefix: Optional[str] = None,
         track_iou_thr: float = 0.5,
         format_only: bool = False,
         ann_file: Optional[str] = None,
@@ -102,8 +67,8 @@ class TaoTETAMetric(BaseVideoMetric):
         super().__init__(collect_device=collect_device, prefix=prefix)
         if teta is None:
             raise RuntimeError(
-                "teta is not installed,"
-                "please install it by:  python -m pip install git+https://github.com/SysCV/tet.git/#subdirectory=teta "
+                "teta is not installed, please install it by: "
+                "python -m pip install git+https://github.com/SysCV/tet.git/#subdirectory=teta "
             )
 
         if isinstance(metric, list):
@@ -118,9 +83,10 @@ class TaoTETAMetric(BaseVideoMetric):
         self.metrics = metrics
         self.format_only = format_only
         if self.format_only:
-            assert outfile_prefix is not None, "outfile_prefix must be not"
-            "None when format_only is True, otherwise the result files will"
-            "be saved to a temp directory which will be cleaned up at the end."
+            assert outfile_prefix is not None, (
+                'outfile_prefix must be not None when format_only is True, '
+                'otherwise the result files will be saved to a temp directory '
+                'which will be cleaned up at the end.')
         self.use_postprocess = use_postprocess
         self.postprocess_tracklet_cfg = postprocess_tracklet_cfg.copy()
         self.postprocess_tracklet_methods = [
@@ -130,63 +96,64 @@ class TaoTETAMetric(BaseVideoMetric):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.tmp_dir.name = get_tmpdir()
         self.seq_pred = defaultdict(lambda: [])
-        self.gt_dir = self._get_gt_dir()
-        self.pred_dir = self._get_pred_dir(outfile_prefix)
         self.outfile_prefix = outfile_prefix
 
         self.ann_file = ann_file
+        self.dataset_type = dataset_type
         self.tcc = tcc
         self.open_vocabulary = open_vocabulary
 
-        with fileio.get_local_path(self.ann_file) as local_path:
-            self.coco = COCO(local_path)
+        # --- Lazy-loaded attributes ---
+        self.coco = None
+        self.cat_ids = None
+        self.class_list = None
 
-        # get the class list according to the dataset type
-        assert dataset_type in ["Taov05Dataset", "Taov1Dataset"]
-        if dataset_type == "Taov05Dataset":
-            from masa.datasets import Taov05Dataset
+    def _lazy_init(self):
+        """Lazy initialization for attributes that require loading large files."""
+        if self.coco is None:
+            logger: MMLogger = MMLogger.get_current_instance()
+            logger.info('Lazily initializing COCO API for TETA metric...')
+            with fileio.get_local_path(self.ann_file) as local_path:
+                self.coco = COCO(local_path)
 
-            self.class_list = Taov05Dataset.METAINFO["classes"]
-        if dataset_type == "Taov1Dataset":
-            from masa.datasets import Taov1Dataset
-
-            self.class_list = Taov1Dataset.METAINFO["classes"]
-        self.cat_ids = self.coco.get_cat_ids(cat_names=self.class_list)
+            assert self.dataset_type in ["Taov05Dataset", "Taov1Dataset"]
+            if self.dataset_type == "Taov05Dataset":
+                from masa.datasets import Taov05Dataset
+                self.class_list = Taov05Dataset.METAINFO["classes"]
+            if self.dataset_type == "Taov1Dataset":
+                from masa.datasets import Taov1Dataset
+                self.class_list = Taov1Dataset.METAINFO["classes"]
+            self.cat_ids = self.coco.get_cat_ids(cat_names=self.class_list)
 
     def __del__(self):
-        # To avoid tmpdir being cleaned up too early, because in multiple
-        # consecutive ValLoops, the value of `self.tmp_dir.name` is unchanged,
-        # and calling `tmp_dir.cleanup()` in compute_metrics will cause errors.
         self.tmp_dir.cleanup()
 
-    def _get_pred_dir(self, outfile_prefix):
-        """Get directory to save the prediction results."""
-        logger: MMLogger = MMLogger.get_current_instance()
+    def process_video(self, data_samples):
+        self._lazy_init()
+        video_len = len(data_samples)
+        for frame_id in range(video_len):
+            img_data_sample = data_samples[frame_id].to_dict()
+            video_id = img_data_sample["video_id"]
+            pred_instances = img_data_sample["pred_track_instances"]
+            pred_instances_list = []
+            for i in range(len(pred_instances["instances_id"])):
+                data_dict = dict()
+                data_dict["image_id"] = img_data_sample["img_id"]
+                data_dict["track_id"] = int(pred_instances["instances_id"][i])
+                data_dict["bbox"] = self.xyxy2xywh(pred_instances["bboxes"][i])
+                data_dict["score"] = float(pred_instances["scores"][i])
+                data_dict["category_id"] = self.cat_ids[pred_instances["labels"][i]]
+                data_dict["video_id"] = img_data_sample["video_id"]
+                pred_instances_list.append(data_dict)
+            self.seq_pred[video_id].extend(pred_instances_list)
 
-        if outfile_prefix is None:
-            outfile_prefix = self.tmp_dir.name
-        else:
-            if osp.exists(outfile_prefix) and is_main_process():
-                logger.info("remove previous results.")
-                shutil.rmtree(outfile_prefix)
-        pred_dir = osp.join(outfile_prefix, self.TRACKER)
-        os.makedirs(pred_dir, exist_ok=True)
-        return pred_dir
-
-    def _get_gt_dir(self):
-        """Get directory to save the gt files."""
-        output_dir = osp.join(self.tmp_dir.name, "gt")
-        os.makedirs(output_dir, exist_ok=True)
-        return output_dir
-
-    def transform_gt_and_pred(self, img_data_sample):
-
-        # load predictions
-        assert "pred_track_instances" in img_data_sample
+    def process_image(self, data_samples, video_len):
+        """Process a single frame when sampling is image-based."""
+        self._lazy_init()
+        img_data_sample = data_samples[0].to_dict()
+        video_id = img_data_sample["video_id"]
         pred_instances = img_data_sample["pred_track_instances"]
-
         pred_instances_list = []
-
         for i in range(len(pred_instances["instances_id"])):
             data_dict = dict()
             data_dict["image_id"] = img_data_sample["img_id"]
@@ -196,30 +163,11 @@ class TaoTETAMetric(BaseVideoMetric):
             data_dict["category_id"] = self.cat_ids[pred_instances["labels"][i]]
             data_dict["video_id"] = img_data_sample["video_id"]
             pred_instances_list.append(data_dict)
-
-        return pred_instances_list
-
-    def process_image(self, data_samples, video_len):
-
-        img_data_sample = data_samples[0].to_dict()
-        video_id = img_data_sample["video_id"]
-        pred_instances_list = self.transform_gt_and_pred(img_data_sample)
         self.seq_pred[video_id].extend(pred_instances_list)
 
-    def process_video(self, data_samples):
-
-        video_len = len(data_samples)
-        for frame_id in range(video_len):
-            img_data_sample = data_samples[frame_id].to_dict()
-            # load basic info
-            video_id = img_data_sample["video_id"]
-            pred_instances_list = self.transform_gt_and_pred(img_data_sample)
-            self.seq_pred[video_id].extend(pred_instances_list)
-
     def compute_metrics(self, results: list = None) -> dict:
-
+        self._lazy_init()
         logger: MMLogger = MMLogger.get_current_instance()
-
         eval_results = dict()
 
         if self.format_only:
@@ -228,7 +176,6 @@ class TaoTETAMetric(BaseVideoMetric):
 
         resfile_path = self.outfile_prefix
 
-        # Command line interface:
         default_eval_config = teta.config.get_default_eval_config()
         default_eval_config["PRINT_ONLY_COMBINED"] = True
         default_eval_config["DISPLAY_LESS_PROGRESS"] = True
@@ -275,38 +222,21 @@ class TaoTETAMetric(BaseVideoMetric):
         return eval_results
 
     def evaluate(self, size: int = 1) -> dict:
-        """Evaluate the model performance of the whole dataset after processing
-        all batches.
-
-        Args:
-            size (int): Length of the entire validation dataset.
-                Defaults to None.
-
-        Returns:
-            dict: Evaluation metrics dict on the val dataset. The keys are the
-            names of the metrics, and the values are corresponding results.
-
-        """
+        self._lazy_init()
         logger: MMLogger = MMLogger.get_current_instance()
 
         logger.info(f"Wait for all processes to complete prediction.")
-        # wait for all processes to complete prediction.
         barrier()
 
         logger.info(f"Start gathering tracking results.")
-
-        # gather seq_info and convert the list of dict to a dict.
-        # convert self.seq_info to dict first to make it picklable.
         gathered_seq_info = all_gather_object(dict(self.seq_pred))
 
         if is_main_process():
-
             all_seq_pred = dict()
             for _seq_info in gathered_seq_info:
                 all_seq_pred.update(_seq_info)
             all_seq_pred = self.compute_global_track_id(all_seq_pred)
 
-            # merge all the values (list of pred in each videos) into a single long list
             all_seq_pred_json = list(chain.from_iterable(all_seq_pred.values()))
 
             if self.tcc and all_seq_pred_json:
@@ -318,15 +248,13 @@ class TaoTETAMetric(BaseVideoMetric):
             mmengine.dump(all_seq_pred_json, result_files_path)
 
             logger.info(f"Start evaluation")
-
             _metrics = self.compute_metrics()
 
-            # Add prefix to metric names
             if self.prefix:
                 _metrics = {"/".join((self.prefix, k)): v for k, v in _metrics.items()}
             metrics = [_metrics]
         else:
-            metrics = [None]  # type: ignore
+            metrics = [None]
 
         broadcast_object_list(metrics)
         self.seq_pred.clear()
@@ -334,58 +262,38 @@ class TaoTETAMetric(BaseVideoMetric):
         return metrics[0]
 
     def compute_global_track_id(self, all_seq_pred):
-
         max_track_id = 0
+        # Sort by video_id to ensure deterministic order
+        for video_id in sorted(all_seq_pred.keys()):
+            seq_pred = all_seq_pred[video_id]
+            if not seq_pred:
+                continue
 
-        for video_id, seq_pred in all_seq_pred.items():
-            track_ids = []
-
+            # Find the max local track ID in the current video
+            max_local_id = 0
             for frame_pred in seq_pred:
-                track_ids.append(frame_pred["track_id"])
+                if frame_pred["track_id"] > max_local_id:
+                    max_local_id = frame_pred["track_id"]
+
+            # Apply the offset
+            for frame_pred in seq_pred:
                 frame_pred["track_id"] += max_track_id
-            track_ids = list(set(track_ids))
 
-            if track_ids:
-                max_track_id += max(track_ids) + 1
-
+            # Update the global max track ID for the next video
+            max_track_id += max_local_id + 1
         return all_seq_pred
 
     def majority_vote(self, prediction):
-
-        tid_res_mapping = {}
-        for res in prediction:
-            tid = res["track_id"]
-            if tid not in tid_res_mapping:
-                tid_res_mapping[tid] = [res]
-            else:
-                tid_res_mapping[tid].append(res)
-        # change the results to data frame
         df_pred_res = pd.DataFrame(prediction)
-        # group the results by track_id
-        # df_pred_res = df_pred_res.apply(changebbox, axis=1)
         groued_df_pred_res = df_pred_res.groupby("track_id")
-
-        # change the majority
         class_by_majority_count_res = []
-        for tid, group in tqdm.tqdm(groued_df_pred_res):
+        for _, group in tqdm.tqdm(groued_df_pred_res):
             cid = group["category_id"].mode()[0]
             group["category_id"] = cid
-            dict_list = group.to_dict("records")
-            class_by_majority_count_res += dict_list
+            class_by_majority_count_res.extend(group.to_dict("records"))
         return class_by_majority_count_res
 
     def xyxy2xywh(self, bbox):
-        """Convert ``xyxy`` style bounding boxes to ``xywh`` style for COCO
-        evaluation.
-
-        Args:
-            bbox (numpy.ndarray): The bounding boxes, shape (4, ), in
-                ``xyxy`` order.
-
-        Returns:
-            list[float]: The converted bounding boxes, in ``xywh`` order.
-        """
-
         _bbox = bbox.tolist()
         return [
             _bbox[0],
@@ -407,38 +315,22 @@ class TaoTETAMetric(BaseVideoMetric):
                 rare_teta.append(np.array(teta_res[key]["TETA"][50]).astype(float))
 
         print("Base and Novel classes performance")
-
-        # print the header
         print(
             "{:<10} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10}".format(
-                "TETA50:",
-                "TETA",
-                "LocA",
-                "AssocA",
-                "ClsA",
-                "LocRe",
-                "LocPr",
-                "AssocRe",
-                "AssocPr",
-                "ClsRe",
-                "ClsPr",
+                "TETA50:", "TETA", "LocA", "AssocA", "ClsA", "LocRe", "LocPr",
+                "AssocRe", "AssocPr", "ClsRe", "ClsPr"
             )
         )
 
         if frequent_teta:
             freq_teta_mean = np.mean(np.stack(frequent_teta), axis=0)
-
-            # print the frequent teta mean
             print("{:<10} ".format("Base"), end="")
             print(*["{:<10.3f}".format(num) for num in freq_teta_mean])
-
         else:
             print("No Base classes to evaluate!")
             freq_teta_mean = None
         if rare_teta:
             rare_teta_mean = np.mean(np.stack(rare_teta), axis=0)
-
-            # print the rare teta mean
             print("{:<10} ".format("Novel"), end="")
             print(*["{:<10.3f}".format(num) for num in rare_teta_mean])
         else:

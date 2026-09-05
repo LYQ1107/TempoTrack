@@ -1,5 +1,3 @@
-import os
-
 _base_ = [
     '../../../projects/grounding_dino/grounding_dino_swin-b_pretrain_mixeddata_masa.py',
     '../../datasets/tao/tao_dataset_v1.py',
@@ -11,15 +9,12 @@ detector = _base_.model
 detector.pop('data_preprocessor')
 detector['init_cfg'] = dict(
     type='Pretrained',
-    checkpoint= 'saved_models/tsa_models/groundingdino_swinb_cogcoor_mmdet-55949c9c.pth'
+    checkpoint= 'saved_models/pretrain_weights/groundingdino_swinb_cogcoor_mmdet-55949c9c.pth'
     # noqa: E501
 )
+detector['language_model']['name'] = 'saved_models/bert-base-uncased'
+detector['test_cfg']['chunked_size'] = 128
 detector['type'] = 'GroundingDINOMasa'
-detector['language_model'] = dict(
-    name=os.environ.get(
-        'MASA_BERT_MODEL_PATH', 'saved_models/bert-base-uncased'
-    )
-)
 
 del _base_.model
 
@@ -27,9 +22,9 @@ model = dict(
     type='MASA',
     freeze_detector=True,
     unified_backbone=True,
-    load_public_dets = True,
+    load_public_dets = False,
     benchmark = 'tao',
-    public_det_path = 'results/public_dets/tao_val_dets/teta_50_internms/detic_tao_val_det/',
+    public_det_path = None,
     data_preprocessor=dict(
         type='TrackDataPreprocessor',
         # Image normalization parameters
@@ -187,7 +182,7 @@ model = dict(
                 pos_sampler=dict(type='InstanceBalancedPosSampler'),
                 neg_sampler=dict(type='RandomSampler')))),
     tracker=dict(
-        type='MasaTaoTracker',
+        type='MasaOVMOTTracker',
         init_score_thr=0.0001,
         obj_score_thr=0.0001,
         match_score_thr=0.5,
@@ -210,7 +205,9 @@ test_pipeline = [
                 keep_ratio=True),
             dict(type='LoadTrackAnnotations')
         ]),
-    dict(type='PackTrackInputs')
+    dict(
+        type='PackTrackInputs',
+        meta_keys=('text', 'caption_prompt', 'custom_entities'))
 ]
 
 # runtime settings
@@ -231,12 +228,15 @@ visualizer = dict(
 
 val_dataloader = dict(
     dataset=dict(
-        ann_file='data/tao/annotations/tao_val_lvis_v1_classes.json',
+        ann_file='data/tao/annotations/tao_test_lvis_v1_classes.json',
         pipeline=test_pipeline,
+        return_classes=True,
     )
 )
 test_dataloader = val_dataloader
 test_evaluator = dict(
-    ann_file='data/tao/annotations/tao_val_lvis_v1_classes.json',
-outfile_prefix='results/masa_results/masa-groundingdino-release_detic_dets-test',
+    ann_file='data/tao/annotations/tao_test_lvis_v1_classes.json',
+    outfile_prefix='results/masa_results/masa-groundingdino-release-ovmot-test',
+    open_vocabulary=True,
+    format_only=True,
 )

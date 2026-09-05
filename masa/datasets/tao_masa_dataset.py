@@ -15,8 +15,11 @@ class Taov05Dataset(BaseVideoDataset):
 
     METAINFO = LVISV05Dataset.METAINFO
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, return_classes: bool = False,
+                 caption_prompt: str = None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.return_classes = return_classes
+        self.caption_prompt = caption_prompt
         self.flag = np.zeros(len(self), dtype=np.uint8)
 
     def _rand_another(self, idx):
@@ -68,11 +71,22 @@ class Taov05Dataset(BaseVideoDataset):
             final_data_info["video_length"] = [len(frames_idx_list)] * len(
                 frames_idx_list
             )
+            if self.return_classes:
+                classes = self.METAINFO["classes"]
+                final_data_info["text"] = [classes] * len(frames_idx_list)
+                final_data_info["caption_prompt"] = [self.caption_prompt] * len(
+                    frames_idx_list
+                )
+                final_data_info["custom_entities"] = [True] * len(frames_idx_list)
             return self.pipeline(final_data_info)
         else:
             # Specify `key_frame_id` for the frame sampling in the pipeline
             if frame_idx is not None:
                 data_info["key_frame_id"] = frame_idx
+            if self.return_classes:
+                data_info["text"] = self.METAINFO["classes"]
+                data_info["caption_prompt"] = self.caption_prompt
+                data_info["custom_entities"] = True
 
             for i in range(self.max_refetch):
                 # To confirm the results passed the training pipeline

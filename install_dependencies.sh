@@ -12,7 +12,7 @@ pip install -U openmim
 echo "Installing packages with MIM..."
 mim install mmengine
 pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.1/index.html
-pip install git+https://github.com/open-mmlab/mmdetection.git@v3.3.0
+# MMDetection will be added to PYTHONPATH at runtime, no installation needed.
 
 # Install various Python packages using pip
 echo "Installing various Python packages..."
