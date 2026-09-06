@@ -1,13 +1,16 @@
-"""Data contracts shared by preparation, models, and evaluation.
+"""Typed facts shared by the TempoTrack research pipeline.
 
-The contracts deliberately keep training labels out of model inputs.  The
-objects are lightweight dataclasses so they can also be used by inventory and
-build-check commands without importing torch.
+The module intentionally has no torch import at module import time.  This is
+important for inventory/build commands which may run outside the legacy
+MMDetection environment.  Tensor annotations are therefore represented by
+``Any`` at runtime while the dataclasses still document the actual model
+contract.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 
@@ -20,22 +23,154 @@ class ObservationKey:
 
     @property
     def uid(self) -> str:
+        # dataset_id is a namespace/version, so equal numeric video IDs from
+        # different sources can never silently join.
         return (
             f"{self.dataset_id}:{self.video_id}:"
             f"{self.frame_index}:{self.detection_index}"
         )
 
 
+@dataclass(frozen=True)
+class FrameRecord:
+    dataset_id: str
+    split: str
+    video_id: int
+    frame_index: int
+    image_id: int
+    file_name: str
+    image_width: int
+    image_height: int
+    frame_time: float
+    time_unit: str = "frame"
+    source_frame_id: Optional[int] = None
+
+
 @dataclass
 class ObservationBatch:
     keys: Sequence[ObservationKey]
     image_ids: Any
+    frame_indices: Any
     timestamps: Any
     bboxes_xyxy: Any
     scores: Any
     category_ids: Any
     appearance: Any
+    video_ids: Any = None
+    image_widths: Any = None
+    image_heights: Any = None
     original_payload: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
+    # Absolute row references are routing metadata only.  They let the pure
+    # replay layer write assignments back to the immutable ledger without
+    # copying or re-numbering observations.
+    rows: Any = None
+    frame_index: Any = None
+
+    @property
+    def frame_times(self) -> Any:
+        return self.timestamps
+
+
+@dataclass
+class SegmentInputs:
+    appearance: Any
+    geometry: Any
+    relative_time: Any
+    valid: Any
+
+    @property
+    def time_offsets(self) -> Any:
+        return self.relative_time
+
+
+@dataclass
+class GraphInputs:
+    node_features: Any
+    edge_features: Any
+    edge_index: Any
+    node_valid: Any
+    edge_valid: Any
+    initial_graph: Any
+    node_times: Any = None
+
+
+@dataclass
+class Supervision:
+    # These fields are labels/reward targets only.  They must not be appended
+    # to SegmentInputs or GraphInputs.
+    known: Any
+    positive_mask: Any = None
+    candidate_known_mask: Any = None
+    target_graph: Any = None
+    loss_edge_mask: Any = None
+    existence_target: Any = None
+    existence_known: Any = None
+    target_state_valid: Any = None
+    gt_identity: Any = None
+    gt_category: Any = None
+
+
+@dataclass
+class EncodedSegment:
+    """S1 representation with the pre-normalisation tensors retained."""
+
+    pre_tokens: Any
+    summary: Any
+    identity_raw: Any
+    identity: Any
+    dynamic: Any
+    valid: Any
+
+
+@dataclass(frozen=True)
+class PredictionQuery:
+    relative_times: Any
+    valid: Any = None
+    mode: str = "forward_only"
+
+
+@dataclass
+class ActionTable:
+    """Complete executable action vocabulary for one padded batch."""
+
+    kind: Any
+    edge_index: Any
+    replacement_edge_index: Any
+    valid: Any
+
+
+@dataclass
+class AssociationResult:
+    observation_uids: Sequence[str]
+    local_track_ids: Any
+    selected_edges: Any = None
+    decisions: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ExtractorSpec:
+    config: Path
+    model_checkpoint: Path
+    detector_checkpoint: Optional[Path] = None
+    input_recipe: Mapping[str, Any] = field(default_factory=dict)
+    category_mapping_path: Optional[Path] = None
+    admission_config: Mapping[str, Any] = field(default_factory=dict)
+    observation_source: str = "predicted_boxes"
+
+
+@dataclass
+class ExtractedFrame:
+    frame: FrameRecord
+    bboxes_xyxy: Any
+    scores: Any
+    category_ids: Any
+    appearance: Any
+    source_detection_indices: Any
+    raw_labels: Any = None
+    raw_instances: Any = None
+    gt_appearance: Any = None
+    provenance: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,6 +196,19 @@ class TrainingLabels:
 
 
 @dataclass
+class LabelShard:
+    observation_uid: Sequence[str]
+    known_identity: Any
+    gt_identity: Any
+    gt_category: Any
+    matched_iou: Any
+    ambiguous: Any
+    supervision_allowed: Any
+    reason_code: Sequence[str]
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class EpisodeBatch:
     appearance: Any
     geometry: Any
@@ -75,12 +223,7 @@ class EpisodeBatch:
 
 @dataclass
 class CandidateGraph:
-    """Sparse candidate graph over tracklets.
-
-    ``edge_index`` has shape ``[2, E]`` and stores source/target tracklet
-    indices.  Edges are always filtered by the same-video and strict-time
-    rules before a model sees them.
-    """
+    """Sparse candidate graph over non-oracle tracklet nodes."""
 
     edge_index: Any
     edge_features: Any
@@ -88,10 +231,38 @@ class CandidateGraph:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class RunSpec:
+    method: str
+    frontend: str
+    phase: Optional[str]
+    model: Mapping[str, Any]
+    data: Mapping[str, Any]
+    optimizer: Mapping[str, Any]
+    schedule: Mapping[str, Any]
+    train: Mapping[str, Any]
+    infer: Mapping[str, Any]
+    evaluation: Mapping[str, Any]
+    seed: int
+    run_root: Path
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TrainResult:
+    status: str
+    run_dir: Path
+    checkpoint: Optional[Path] = None
+    optimizer_steps: int = 0
+    transitions: int = 0
+    metrics: Mapping[str, Any] = field(default_factory=dict)
+    blocking_evidence: Optional[str] = None
+
+
 @dataclass
 class SchemeStatus:
     scheme: str
-    implementation: str = "NOT_STARTED"
+    implementation: str = "TODO"
     training: str = "NOT_RUN"
     evaluation: str = "NOT_RUN"
     run_signature: str = ""

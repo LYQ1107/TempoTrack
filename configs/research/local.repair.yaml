@@ -1,0 +1,65 @@
+schema_version: 2
+repo_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa
+run_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v2
+legacy_python: /home/lwr/anaconda3/envs/masaenv/bin/python
+research_python: /home/lwr/anaconda3/envs/masaenv/bin/python
+legacy_env:
+  ld_preload: /home/lwr/anaconda3/envs/masaenv/lib/libsqlite3.so.3.52.0
+resources:
+  allowed_devices:
+  - 0
+  max_parallel_jobs: 1
+  allow_paid_services: false
+  allow_downloads: false
+extractor:
+  config: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/configs/masa-detic/open_vocabulary_mot_test/masa_detic_swinb_open_vocabulary_test.py
+  model_checkpoint: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models/masa_models/detic_masa.pth
+  detector_checkpoint: null
+  category_mapping: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_val_lvis_v1_classes.json
+  observation_source: predicted_boxes
+  optional_gt_boxes: false
+  admission:
+    score_thr: 0.0001
+    nms_iou: null
+    max_per_frame: 50
+  input_recipe:
+    batch_size: 4
+splits:
+  train_annotation: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/train.json
+  validation_annotation: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/validation.json
+  category_protocol: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_val_lvis_v1_classes.json
+  frame_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/frames
+protocol:
+  name: offline_id_only
+  immutable_observations: true
+  change_boxes: false
+  change_scores: false
+  change_categories: false
+  allow_gt_at_inference: false
+  allow_extra_frames_per_method: false
+data:
+  episode_split: train_base
+  frontend:
+    max_gap: 90
+    match_score_thr: 0.5
+    with_cats: false
+  candidate:
+    max_gap: 90
+    top_k: 20
+    with_cats: false
+optimizer:
+  lr: 0.0002
+  weight_decay: 0.05
+train:
+  amp: bf16_if_supported
+  grad_clip: 1.0
+  save_every: 500
+  validate_every: 0
+infer:
+  mode: forward_only
+  samples: 4
+  steps: 32
+  max_edits: 256
+evaluation:
+  cores: 1
+inventory_hash: 5988a4e47879d0018993004b6485fe4dab06285cbe81aa054dd73b5561108f39

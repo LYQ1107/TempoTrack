@@ -1,0 +1,73 @@
+schema_version: 2
+project: tempotrack_iclr_repair
+base_commit: 75d529bf100d479e4a49a97d3496bff48e861475
+research_goal: fixed_observation_identity_association
+required_schemes:
+  - m0_no_offline
+  - m0_stable_emd
+  - m0_ordinary_metric
+  - m0_s1_jepa
+  - m0_s2_state_fm
+  - m0_s3_graph_fm
+  - m0_s4_graph_diffusion
+  - m0_s5_bc
+  - m0_s5_ppo
+  - m1_no_offline
+  - m1_stable_emd
+  - m1_s1_jepa
+  - m1_s2_state_fm
+  - m1_s3_graph_fm
+  - m1_s4_graph_diffusion
+  - m1_s5_ppo
+protocol:
+  mode: offline_id_only
+  immutable_observations: true
+  change_boxes: false
+  change_scores: false
+  change_categories: false
+  allow_gt_at_inference: false
+  allow_extra_frames_per_method: false
+training:
+  trial_seed: 0
+  microbatch_size: 4
+  effective_batch: 4
+  accumulation_steps: 1
+  num_workers: 0
+  pin_memory: false
+  max_edits: 256
+  # PPO update minibatch is explicit/configured; it is not a synthetic fixed
+  # training batch and still consumes the complete real rollout buffer.
+  ppo_microbatch_size: 2048
+  budgets:
+    predictive_dual: 3000
+    ordinary_metric: 3000
+    s1_jepa: 3000
+    s2_state_fm: 3000
+    s3_graph_fm: 3000
+    s4_graph_diffusion: 3000
+    s5_bc: 3000
+    s5_ppo_transitions: 50000
+  full_budgets:
+    predictive_dual: 60000
+    ordinary_metric: 100000
+    s1_jepa: 100000
+    s2_state_fm: 100000
+    s3_graph_fm: 120000
+    s4_graph_diffusion: 120000
+    s5_bc: 30000
+    s5_ppo_transitions: 2000000
+  full_seeds: [0, 1, 2]
+  frozen_visual_encoder: true
+  freeze_detector: true
+  resume: auto
+  on_missing_resources: record_block_and_continue
+execution:
+  integration_limit_videos: 2
+  keep_going: true
+  run_full: false
+  skip_completed_same_signature: true
+  max_parallel_jobs: 1
+evaluation:
+  official_script: tools/eval_ovmot_teta.py
+  name_prefix: tempotrack_repair
+  cores: 1

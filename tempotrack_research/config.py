@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, MutableMapping
+
+from .schemas import RunSpec
 
 
 def canonical_json(value: Any) -> str:
@@ -13,7 +18,22 @@ def canonical_json(value: Any) -> str:
 
 
 def object_hash(value: Any) -> str:
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical_json(_jsonable(value)).encode("utf-8")).hexdigest()
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            return value.item()
+        except Exception:
+            pass
+    return value
 
 
 def file_hash(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
@@ -64,7 +84,16 @@ def dump_yaml(data: Mapping[str, Any], path: str | Path) -> None:
         text = yaml.safe_dump(dict(data), allow_unicode=True, sort_keys=False)
     except ImportError:
         text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
-    path.write_text(text, encoding="utf-8")
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
 
 
 def deep_get(mapping: Mapping[str, Any], *keys: str, default: Any = None) -> Any:
@@ -81,3 +110,68 @@ def resolve_path(repo: str | Path, value: str | None) -> Path | None:
         return None
     path = Path(value).expanduser()
     return path if path.is_absolute() else Path(repo) / path
+
+
+def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    """Merge mappings recursively; lists/scalars are explicit replacements."""
+
+    result: dict[str, Any] = {str(key): value for key, value in base.items()}
+    for key, value in override.items():
+        if isinstance(result.get(key), Mapping) and isinstance(value, Mapping):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def reject_unknown_keys(value: Mapping[str, Any], allowed: set[str], *, path: str = "config") -> None:
+    unknown = set(value).difference(allowed)
+    if unknown:
+        raise ValueError(f"unknown {path} keys: {sorted(unknown)}")
+
+
+def resolved_config(
+    method_config: Mapping[str, Any],
+    suite_override: Mapping[str, Any] | None = None,
+    local_override: Mapping[str, Any] | None = None,
+    cli_override: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Apply the documented precedence and return a JSON-safe snapshot."""
+
+    value = deep_merge(method_config, suite_override or {})
+    value = deep_merge(value, local_override or {})
+    value = deep_merge(value, cli_override or {})
+    value.setdefault("schema_version", 2)
+    return _jsonable(value)
+
+
+def build_run_spec(
+    *,
+    method: str,
+    frontend: str,
+    phase: str | None,
+    config: Mapping[str, Any],
+    run_root: str | Path,
+    seed: int,
+    provenance: Mapping[str, Any] | None = None,
+) -> RunSpec:
+    """Normalize a resolved mapping into the one runtime contract."""
+
+    for name in ("model", "data", "optimizer", "schedule", "train", "infer", "evaluation"):
+        if name not in config:
+            config = {**config, name: {}}
+    return RunSpec(
+        method=method,
+        frontend=frontend,
+        phase=phase,
+        model=dict(config.get("model", {})),
+        data=dict(config.get("data", {})),
+        optimizer=dict(config.get("optimizer", {})),
+        schedule=dict(config.get("schedule", {})),
+        train=dict(config.get("train", {})),
+        infer=dict(config.get("infer", {})),
+        evaluation=dict(config.get("evaluation", {})),
+        seed=int(seed),
+        run_root=Path(run_root).resolve(),
+        provenance=dict(provenance or {}),
+    )

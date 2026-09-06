@@ -68,6 +68,13 @@ def stable_emd(left: Mapping[str, Any], right: Mapping[str, Any], sink_eps: floa
     cost = cost + lam_time * min(max(float(time_gap), 0.0) / max(float(max_gap), 1.0), 1.0)
     if not torch.isfinite(cost).all():
         return _empty_result("nonfinite_cost")
+    # For two one-token segments the transport polytope has exactly one
+    # feasible plan.  Returning that plan's cost is the exact Sinkhorn result
+    # (mass=1, zero marginal residual) and avoids 100 Python iterations for
+    # the dominant short-tracklet case in a TAO candidate graph.
+    if a.shape[0] == 1 and b.shape[0] == 1:
+        distance = cost[0, 0]
+        return {"edge_score": float(distance), "transport_mass": 1.0, "marginal_residual": 0.0, "valid": bool(torch.isfinite(distance)), "solver": "log_sinkhorn_degenerate", "iterations": 0}
     weights_a = torch.full((a.shape[0],), 1.0 / a.shape[0], dtype=cost.dtype, device=cost.device)
     weights_b = torch.full((b.shape[0],), 1.0 / b.shape[0], dtype=cost.dtype, device=cost.device)
     log_k = (-cost / sink_eps).clamp_min(-80.0)

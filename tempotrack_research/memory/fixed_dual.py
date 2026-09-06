@@ -70,7 +70,15 @@ class FixedDualMemory:
         slow = safe_normalize((1 - alpha_slow) * state.slow + alpha_slow * z, state.slow)
         last_seen = state.last_seen if frame is None else torch.as_tensor(frame, device=z.device)
         count = (state.write_count if state.write_count is not None else torch.zeros_like(conf.squeeze(-1))) + (alpha_fast.squeeze(-1) > 0).to(z.dtype)
-        updated = MemoryState(fast, slow, last_seen, count, dict(state.diagnostics))
+        updated = MemoryState(
+            fast=fast,
+            slow=slow,
+            last_seen=last_seen,
+            write_count=count,
+            birth_time=state.birth_time,
+            last_bbox=state.last_bbox,
+            diagnostics=dict(state.diagnostics),
+        )
         diagnostics = {
             "alpha_fast": alpha_fast.squeeze(-1),
             "alpha_slow": alpha_slow.squeeze(-1),

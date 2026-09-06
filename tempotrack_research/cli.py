@@ -1,4 +1,4 @@
-"""Command line entrypoint required by the TempoTrack research plan."""
+"""Command line entrypoint for the R01--R33 repair and experiment suite."""
 
 from __future__ import annotations
 
@@ -6,25 +6,17 @@ import argparse
 import compileall
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Mapping
 
-from .config import dump_yaml, file_hash, load_yaml, object_hash, resolve_path
-from .data.manifests import collect_environment_inventory, write_local_config, write_repository_audit
-from .data.episodes import build_episode_manifests
-from .evaluation.protocol import check_immutable_protocol
-from .evaluation.result_writer import append_jsonl, atomic_json
-from .orchestration.plan import load_suite
-from .orchestration.report import generate_report
-from .orchestration.resources import evaluator_ready, training_ready
-from .orchestration.runner import _implementation_hash, run_suite
-from .orchestration.state import ensure_progress, update_scheme
-from .registry import METHODS, RESEARCH_SCHEMES, get_method
+from .config import build_run_spec, deep_merge, dump_yaml, file_hash, load_yaml, object_hash
+from .data.manifests import collect_environment_inventory, write_repository_audit
+from .errors import DataUnavailable, DependencyUnavailable, GateNotPassed, ImplementationIncomplete, WeightUnavailable
+from .registry import METHODS, RESEARCH_SCHEMES, get_method, get_scheme
 
 
 def _now() -> str:
@@ -35,403 +27,569 @@ def _repo(value: str | None) -> Path:
     return Path(value or ".").resolve()
 
 
+def _path(repo: Path, value: str | Path | None) -> Path | None:
+    if value is None:
+        return None
+    result = Path(value)
+    return result if result.is_absolute() else repo / result
+
+
 def _json(path: str | Path, default: Any = None) -> Any:
     path = Path(path)
     if not path.exists():
         return default
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json(path: str | Path, value: Mapping[str, Any]) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise RuntimeError(f"Cannot parse JSON artifact: {path}") from exc
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(dict(value), handle, ensure_ascii=False, indent=2, default=str)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
-def _write_json(path: str | Path, payload: Any) -> None:
-    atomic_json(payload, path)
+def _load_local(repo: Path, value: str | None) -> dict[str, Any]:
+    path = _path(repo, value or "configs/research/local.repair.yaml")
+    if path is None or not path.exists():
+        raise DataUnavailable(f"local repair config missing: {path}")
+    return load_yaml(path)
 
 
-def _research_root(repo: Path) -> Path:
-    root = repo / "outputs" / "research"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+def _load_suite(repo: Path, value: str | None) -> dict[str, Any]:
+    path = _path(repo, value or "configs/research/suite.repair.yaml")
+    if path is None or not path.exists():
+        raise DataUnavailable(f"repair suite config missing: {path}")
+    suite = load_yaml(path)
+    missing = set(suite.get("required_schemes", [])) - set(RESEARCH_SCHEMES)
+    if missing:
+        raise ValueError(f"suite contains unknown schemes: {sorted(missing)}")
+    if suite.get("protocol", {}).get("change_boxes", False):
+        raise ValueError("fixed-observation protocol forbids changing boxes")
+    return suite
 
 
-def _inventory_command(args: argparse.Namespace) -> int:
+def _repair_local_config(repo: Path, inventory: Mapping[str, Any], output: Path) -> dict[str, Any]:
+    """Write the explicit v2 local config without selecting validation cache."""
+    payload = {
+        "schema_version": 2,
+        "repo_root": str(repo),
+        "run_root": str(repo / "outputs" / "research_v2"),
+        "legacy_python": "/home/lwr/anaconda3/envs/masaenv/bin/python",
+        "research_python": "/home/lwr/anaconda3/envs/masaenv/bin/python",
+        "legacy_env": {"ld_preload": "/home/lwr/anaconda3/envs/masaenv/lib/libsqlite3.so.3.52.0"},
+        "resources": {"allowed_devices": [0], "max_parallel_jobs": 1, "allow_paid_services": False, "allow_downloads": False},
+        "extractor": {
+            "config": str(repo / "configs/masa-detic/open_vocabulary_mot_test/masa_detic_swinb_open_vocabulary_test.py"),
+            "model_checkpoint": str(repo / "saved_models/masa_models/detic_masa.pth"),
+            "detector_checkpoint": None,
+            "category_mapping": str(repo / "data/tao/annotations/tao_val_lvis_v1_classes.json"),
+            "observation_source": "predicted_boxes",
+            "optional_gt_boxes": False,
+            "admission": {"score_thr": 0.0001, "nms_iou": None, "max_per_frame": 50},
+        },
+        "splits": {
+            "train_annotation": str(repo / "data/tao/annotations/train.json"),
+            "validation_annotation": str(repo / "data/tao/annotations/validation.json"),
+            "category_protocol": str(repo / "data/tao/annotations/tao_val_lvis_v1_classes.json"),
+            "frame_root": str(repo / "data/tao/frames"),
+        },
+        "protocol": {"name": "offline_id_only", "immutable_observations": True, "change_boxes": False, "change_scores": False, "change_categories": False, "allow_gt_at_inference": False, "allow_extra_frames_per_method": False},
+        "data": {"episode_split": "train_base", "frontend": {"max_gap": 90, "match_score_thr": 0.5, "with_cats": False}, "candidate": {"max_gap": 90, "top_k": 20, "with_cats": False}},
+        "optimizer": {"lr": 2e-4, "weight_decay": 0.05},
+        "train": {"amp": "bf16_if_supported", "grad_clip": 1.0, "save_every": 500, "validate_every": 0},
+        "infer": {"mode": "forward_only", "samples": 4, "steps": 32, "max_edits": 256},
+        "evaluation": {"cores": 1},
+        "inventory_hash": inventory.get("inventory_hash", ""),
+    }
+    dump_yaml(payload, output)
+    return payload
+
+
+def _inventory(args: argparse.Namespace) -> int:
     repo = _repo(args.repo)
     inventory = collect_environment_inventory(repo)
-    report_path = Path(args.report) if Path(args.report).is_absolute() else repo / args.report
-    output_path = Path(args.out) if Path(args.out).is_absolute() else repo / args.out
-    _write_json(report_path, inventory)
-    write_local_config(repo, inventory, output_path)
-    audit_path = repo / "reports" / "repository_audit.json"
-    write_repository_audit(repo, audit_path)
-    print(json.dumps({"inventory": str(report_path), "local_config": str(output_path), "repository_audit": str(audit_path), "missing_or_blocking": inventory.get("missing_or_blocking", [])}, ensure_ascii=False, indent=2))
+    report = _path(repo, args.report) or repo / "reports" / "environment_inventory_repair.json"
+    output = _path(repo, args.out) or repo / "configs/research/local.repair.yaml"
+    _write_json(report, inventory)
+    local = _repair_local_config(repo, inventory, output)
+    audit = write_repository_audit(repo, repo / "reports" / "repository_audit_repair.json")
+    print(json.dumps({"inventory": str(report), "local_config": str(output), "repository_audit": audit, "missing_or_blocking": inventory.get("missing_or_blocking", []), "observation_source": local["extractor"]["observation_source"]}, ensure_ascii=False, indent=2))
     return 0
 
 
-def _load_local(repo: Path, path: str | None) -> dict[str, Any]:
-    path = path or "configs/research/local.auto.yaml"
-    candidate = Path(path) if Path(path).is_absolute() else repo / path
-    return load_yaml(candidate) if candidate.exists() else {}
+def _extractor_spec(repo: Path, local: Mapping[str, Any]):
+    from .schemas import ExtractorSpec
+    cfg = local.get("extractor", {})
+    return ExtractorSpec(
+        config=_path(repo, cfg.get("config")) or repo / "configs/masa-detic/open_vocabulary_mot_test/masa_detic_swinb_open_vocabulary_test.py",
+        model_checkpoint=_path(repo, cfg.get("model_checkpoint")) or repo / "saved_models/masa_models/detic_masa.pth",
+        detector_checkpoint=_path(repo, cfg.get("detector_checkpoint")),
+        category_mapping_path=_path(repo, cfg.get("category_mapping")),
+        admission_config=dict(cfg.get("admission", {})),
+        observation_source=str(cfg.get("observation_source", "predicted_boxes")),
+        input_recipe=dict(cfg.get("input_recipe", {"batch_size": 4})),
+    )
 
 
-def _prepare_command(args: argparse.Namespace) -> int:
+def _prepare(args: argparse.Namespace) -> int:
+    from .data.feature_export import ExportSpec, FeatureExportManager, iter_manifest_ledgers, load_dataset_manifest
+    from .data.label_builder import TrainObservationLabeler, save_label_shard
+    from .data.observation_store import FrameIndex
+    from .data.splits import SplitManifestBuilder, add_official_validation
+
     repo = _repo(args.repo)
-    suite_path = Path(args.suite) if Path(args.suite).is_absolute() else repo / args.suite
-    suite = load_suite(suite_path)
     local = _load_local(repo, args.local)
-    inventory_path = repo / "reports" / "environment_inventory.json"
-    inventory = _json(inventory_path)
-    if inventory is None:
-        inventory = collect_environment_inventory(repo)
-        _write_json(inventory_path, inventory)
-        write_local_config(repo, inventory, repo / "configs/research/local.auto.yaml")
-    train_ready, train_reason = training_ready(inventory)
-    cache_candidates = inventory.get("feature_caches", [])
-    selected = local.get("selected_feature_cache") or next((item.get("directory") for item in cache_candidates if item.get("file_count")), None)
-    annotation_paths = local.get("annotation_paths", {})
-    train_annotation = Path(annotation_paths.get("train", repo / "data/tao/annotations/train.json"))
-    val_annotation = Path(annotation_paths.get("val_base", repo / "data/tao/annotations/validation.json"))
-    train_label_hash = file_hash(train_annotation) if train_annotation.exists() else None
-    val_label_hash = file_hash(val_annotation) if val_annotation.exists() else None
-    prepared = {
-        "schema_version": 1,
-        "generated_at": _now(),
-        "suite_hash": object_hash(suite),
-        "inventory_hash": inventory.get("inventory_hash"),
-        "selected_feature_cache": selected,
-        "train_feature_ready": bool(train_ready),
-        "train_feature_reason": train_reason,
-        "val_cache_videos": max((int(item.get("split_overlap", {}).get("validation", 0)) for item in cache_candidates), default=0),
-        "train_cache_videos": max((int(item.get("split_overlap", {}).get("train", 0)) for item in cache_candidates), default=0),
-        "annotation_paths": annotation_paths,
-        "train_label_hash": train_label_hash,
-        "val_label_hash": val_label_hash,
-        "safe_storage": "npz_only_for_new_ledgers; legacy_pt_indexed_but_not_copied",
-        "notes": ["TAO labels are not used as model inputs", "unlabeled and censored successors remain unknown", "validation cache is not substituted for train supervision"],
+    suite = _load_suite(repo, args.suite)
+    split_names = [value.strip() for value in args.split.split(",") if value.strip()]
+    split_cfg = local["splits"]
+    train_annotation = _path(repo, split_cfg["train_annotation"]) or repo / "data/tao/annotations/train.json"
+    validation_annotation = _path(repo, split_cfg["validation_annotation"]) or repo / "data/tao/annotations/validation.json"
+    category_protocol = _path(repo, split_cfg["category_protocol"])
+    run_root = _path(repo, args.run_root) if args.run_root else None
+    prepared_root = _path(repo, args.output_root) or (run_root / "prepared" if run_root is not None else repo / "outputs/research_v2/prepared")
+    prepared_root.mkdir(parents=True, exist_ok=True)
+    split_path = prepared_root / "split_manifest.json"
+    split_manifest = SplitManifestBuilder(float(args.internal_val_fraction)).build(train_annotation, category_protocol, seed=int(args.seed), output=split_path)
+    split_manifest = add_official_validation(split_manifest, validation_annotation, split_path)
+    extractor_spec = _extractor_spec(repo, local)
+    frame_root = _path(repo, split_cfg["frame_root"]) or repo / "data/tao/frames"
+    dataset_manifests: dict[str, str] = {}
+    label_shards: dict[str, str] = {}
+    split_labels: dict[str, dict[str, str]] = {}
+    for split in split_names:
+        if split not in {"train_base", "val_base_internal", "official_validation"}:
+            raise ValueError("prepare supports train_base, val_base_internal, and official_validation")
+        ids = list(split_manifest["splits"].get(split, []))
+        if args.limit_videos is not None:
+            ids = ids[: int(args.limit_videos)]
+        if not ids:
+            raise DataUnavailable(f"split {split} has no selected videos")
+        is_official = split == "official_validation"
+        annotation = validation_annotation if is_official else train_annotation
+        export = FeatureExportManager().export(ExportSpec(annotation=annotation, frame_root=frame_root, output_dir=prepared_root / "features", split=split, dataset_id="tao_v1", video_ids=ids, extractor_spec=extractor_spec, admission_config=dict(local.get("extractor", {}).get("admission", {})), category_mapping_path=_path(repo, local.get("extractor", {}).get("category_mapping")), device=str(args.device), training_allowed=not is_official), resume=args.resume != "never")
+        manifest_path = prepared_root / "features" / split / "dataset_manifest.json"
+        dataset_manifests[split] = str(manifest_path)
+        labels_for_split: dict[str, str] = {}
+        if not is_official:
+            labeler = TrainObservationLabeler(annotation, {"split": split, "category_protocol": str(category_protocol) if category_protocol else None}, match_iou=float(args.match_iou))
+            frame_index = FrameIndex.load(export["frame_index"])
+            for video_id, ledger in iter_manifest_ledgers(load_dataset_manifest(manifest_path)):
+                label_path = prepared_root / "labels" / split / f"video_{video_id}.npz"
+                shard = labeler.match_video(ledger, frame_index)
+                save_label_shard(shard, label_path, overwrite=True)
+                labels_for_split[str(video_id)] = str(label_path)
+                label_shards[str(video_id)] = str(label_path)
+        split_labels[split] = labels_for_split
+    video_limits = {
+        split: len((_json(path, {}) or {}).get("video_ids", []))
+        for split, path in dataset_manifests.items()
     }
-    prepared_path = _research_root(repo) / "prepared" / "prepared_manifest.json"
-    _write_json(prepared_path, prepared)
-    # Convert a tiny, deterministic validation cache sample only when the
-    # verified torch environment is active.  This validates the NPZ contract
-    # without pretending validation data is a train run.
-    conversion = _convert_cache_sample(repo, selected, _research_root(repo) / "prepared" / "validation_cache_sample.npz")
-    prepared["validation_sample"] = conversion
-    prepared["observation_hash"] = conversion.get("content_hash") if conversion.get("converted") else None
-    _write_json(prepared_path, prepared)
-    ensure_progress(repo / "reports" / "progress.json")
-    print(json.dumps({"prepared": str(prepared_path), "train_feature_ready": train_ready, "reason": train_reason, "validation_sample": conversion}, ensure_ascii=False, indent=2))
+    prepared = {"schema_version": 2, "generated_at": _now(), "suite_hash": object_hash(suite), "split_manifest": str(split_path), "split_manifest_hash": file_hash(split_path), "dataset_manifests": dataset_manifests, "label_shards": label_shards, "split_label_shards": split_labels, "observation_source": "predicted_boxes", "feature_contract": "fixed_Detic_detections_frozen_MASA_features", "gt_supervision": "identity_only_label_shards", "official_validation_not_in_training": True, "video_limits": video_limits}
+    _write_json(prepared_root / "prepared_manifest.json", prepared)
+    print(json.dumps({"status": "COMPLETED", "prepared": str(prepared_root / "prepared_manifest.json"), "dataset_manifests": dataset_manifests, "label_shards": sum(len(value) for value in split_labels.values())}, ensure_ascii=False, indent=2))
     return 0
 
 
-def _convert_cache_sample(repo: Path, cache_dir: str | None, output: Path) -> dict[str, Any]:
-    if not cache_dir:
-        return {"converted": False, "reason": "no feature cache directory"}
-    cache_path = Path(cache_dir)
-    files = sorted(cache_path.glob("video_*.pt")) if cache_path.is_dir() else []
-    if not files:
-        return {"converted": False, "reason": "no video_*.pt files"}
-    try:
-        import numpy as np
-        import torch
-    except ImportError:
-        return {"converted": False, "reason": "torch/numpy unavailable in current Python"}
-    match = re.match(r"video_(\d+)(?:_|\.)", files[0].name)
-    video_id = int(match.group(1)) if match else -1
-    try:
-        payload = torch.load(files[0], map_location="cpu", weights_only=False)
-    except Exception as exc:
-        return {"converted": False, "reason": f"explicit local cache read failed: {exc}"}
-    rows: list[tuple[int, int, list[float], float, int, Any]] = []
-    for frame in sorted(payload)[:64]:
-        frame_data = payload[frame]
-        boxes = frame_data.get("bboxes", [])
-        embeds = frame_data.get("embeds")
-        labels = frame_data.get("labels", [-1] * len(boxes))
-        if embeds is None or len(boxes) != len(embeds):
-            continue
-        for det, (box, embed) in enumerate(zip(boxes, embeds)):
-            box = list(box)[:4]
-            score = float(box[4]) if len(box) > 4 else 1.0
-            rows.append((int(frame), det, box, score, int(labels[det]) if det < len(labels) else -1, embed))
-    if not rows:
-        return {"converted": False, "reason": "cache had no valid rows"}
-    arrays = {
-        "image_ids": np.asarray([video_id * 1_000_000 + frame for frame, _, *_ in rows], dtype=np.int64),
-        "timestamps": np.asarray([float(frame) for frame, _, *_ in rows], dtype=np.float64),
-        "bboxes_xyxy": np.asarray([box for _, _, box, *_ in rows], dtype=np.float32),
-        "scores": np.asarray([score for _, _, _, score, *_ in rows], dtype=np.float32),
-        "category_ids": np.asarray([label for _, _, _, _, label, _ in rows], dtype=np.int64),
-        "appearance": torch.stack([embed.detach().float().cpu() for *_, embed in rows]).numpy(),
-        "video_ids": np.full((len(rows),), video_id, dtype=np.int64),
-        "frame_indices": np.asarray([frame for frame, _, *_ in rows], dtype=np.int64),
-        "detection_indices": np.asarray([det for _, det, *_ in rows], dtype=np.int64),
-    }
-    from .data.observation_store import ObservationLedger
-    ledger = ObservationLedger(arrays, {"dataset_id": "tao_validation_cache_sample", "source_cache": str(files[0]), "feature_dim": int(arrays["appearance"].shape[1]), "split": "validation_only"})
-    metadata = ledger.save(output)
-    return {"converted": True, "source": str(files[0]), "rows": len(rows), "content_hash": metadata["content_hash"], "npz": str(output)}
-
-
-def _build_episodes_command(args: argparse.Namespace) -> int:
+def _export_features(args: argparse.Namespace) -> int:
+    from .data.feature_export import ExportSpec, FeatureExportManager
     repo = _repo(args.repo)
-    suite = load_suite(Path(args.suite) if Path(args.suite).is_absolute() else repo / args.suite)
-    prepared = _json(_research_root(repo) / "prepared" / "prepared_manifest.json", {})
+    local = _load_local(repo, args.local)
+    annotation = _path(repo, args.annotation) or _path(repo, local.get("splits", {}).get("train_annotation"))
+    frame_root = _path(repo, args.frame_root) or _path(repo, local.get("splits", {}).get("frame_root"))
+    if annotation is None or frame_root is None:
+        raise DataUnavailable("export-features requires annotation and frame_root")
+    ids = [int(value) for value in args.video_ids.split(",") if value.strip()] if args.video_ids else None
+    output = _path(repo, args.output) or repo / "outputs/research_v2/features"
+    result = FeatureExportManager().export(ExportSpec(annotation, frame_root, output, args.split, video_ids=ids, limit_videos=args.limit_videos, extractor_spec=_extractor_spec(repo, local), admission_config=dict(local.get("extractor", {}).get("admission", {})), category_mapping_path=_path(repo, local.get("extractor", {}).get("category_mapping")), device=args.device), resume=args.resume != "never")
+    print(json.dumps({"status": "COMPLETED", "manifest": str(output / args.split / "dataset_manifest.json"), "row_count": result["row_count"], "video_ids": result["video_ids"]}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _label_observations(args: argparse.Namespace) -> int:
+    from .data.feature_export import iter_manifest_ledgers, load_dataset_manifest
+    from .data.label_builder import TrainObservationLabeler, save_label_shard
+    from .data.observation_store import FrameIndex
+    repo = _repo(args.repo)
+    manifest_path = _path(repo, args.manifest)
+    annotation = _path(repo, args.annotation)
+    if manifest_path is None or annotation is None:
+        raise DataUnavailable("label-observations requires manifest and annotation")
+    out = _path(repo, args.output) or repo / "outputs/research_v2/labels"
+    manifest = load_dataset_manifest(manifest_path)
+    labeler = TrainObservationLabeler(annotation, {"split": args.split, "category_protocol": str(_path(repo, args.category_protocol)) if args.category_protocol else None}, match_iou=args.match_iou)
+    frame_index = FrameIndex.load(manifest["frame_index"])
+    paths = {}
+    for video_id, ledger in iter_manifest_ledgers(manifest):
+        path = out / args.split / f"video_{video_id}.npz"
+        save_label_shard(labeler.match_video(ledger, frame_index), path, overwrite=True)
+        paths[str(video_id)] = str(path)
+    print(json.dumps({"status": "COMPLETED", "labels": paths}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _build_episodes(args: argparse.Namespace) -> int:
+    from .data.episodes import build_episode_manifests
+    repo = _repo(args.repo)
+    local = _load_local(repo, args.local)
+    suite = _load_suite(repo, args.suite)
+    prepared_path = _path(repo, args.prepared) or repo / "outputs/research_v2/prepared/prepared_manifest.json"
+    prepared = _json(prepared_path)
     if not prepared:
-        raise RuntimeError("prepare must run before build-episodes")
-    kinds = [item.strip() for item in args.kinds.split(",") if item.strip()]
-    manifests = build_episode_manifests(_research_root(repo) / "episodes", kinds, prepared, suite)
-    _write_json(_research_root(repo) / "episodes" / "episodes_manifest.json", manifests)
-    ensure_progress(repo / "reports" / "progress.json")
-    print(json.dumps({"episodes_manifest": str(_research_root(repo) / "episodes" / "episodes_manifest.json"), "kinds": list(manifests["kinds"]), "train_ready": prepared.get("train_feature_ready", False)}, ensure_ascii=False, indent=2))
+        raise DataUnavailable(f"prepared manifest missing: {prepared_path}")
+    run_root = _path(repo, args.run_root) if args.run_root else None
+    output = _path(repo, args.output) or (run_root / "episodes" if run_root is not None else repo / "outputs/research_v2/episodes")
+    kinds = [value.strip() for value in args.kinds.split(",") if value.strip()]
+    result = build_episode_manifests(output, kinds, prepared, suite, split=args.split, frontend_manifest=_path(repo, args.frontend_manifest) if args.frontend_manifest else None, resume=args.resume != "never")
+    print(json.dumps({"status": "COMPLETED", "episodes": str(output / args.split / "episodes_manifest.json"), "kinds": result["kinds"]}, ensure_ascii=False, indent=2))
     return 0
 
 
-def _changed_python_files(repo: Path) -> list[Path]:
-    code, output = _run(["git", "diff", "--name-only", "tempotrack-baseline-20260905", "--", "*.py"], repo)
-    names = [line.strip() for line in output.splitlines() if line.strip()] if code == 0 else []
-    names.extend(str(path.relative_to(repo)) for path in (repo / "tempotrack_research").rglob("*.py"))
-    return sorted({repo / name for name in names if (repo / name).exists()})
-
-
-def _run(command: list[str], cwd: Path) -> tuple[int, str]:
-    try:
-        result = subprocess.run(command, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
-        return result.returncode, result.stdout.strip()
-    except OSError as exc:
-        return 127, str(exc)
-
-
-def _torch_smoke() -> dict[str, Any]:
-    """One targeted tensor-contract check, never used as an algorithm result."""
-    import numpy as np
-    import torch
-    from .association.path_cover import solve_path_cover, validate_path_cover
-    from .memory.fixed_dual import FixedDualMemory
-    from .memory.predictive_dual import PredictiveDualMemory
-    from .models.continuation_flow import ContinuationFlowModel
-    from .models.graph_diffusion import GraphDiffusionMatcher
-    from .models.graph_flow import GraphFlowMatcher
-    from .models.identity_predictor import JEPAIdentityLinker
-
-    torch.manual_seed(0)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    checks: dict[str, Any] = {"device": str(device)}
-    memory = FixedDualMemory("fixed_dual")
-    proto = torch.randn(2, 16, device=device)
-    state, diag = memory.update(memory.initialize(proto), torch.randn(2, 16, device=device), torch.ones(2, device=device))
-    checks["m0_finite"] = bool(torch.isfinite(state.fast).all() and torch.isfinite(diag["alpha_fast"]).all())
-    controller_memory = PredictiveDualMemory(16, 16, 6).to(device)
-    evidence = torch.randn(2, 6, device=device)
-    updated, rates = controller_memory.update(controller_memory.initialize(proto), torch.randn(2, 16, device=device), torch.randn(2, 16, device=device), evidence)
-    checks["m1_rate_order"] = bool((rates["alpha_slow"] <= rates["alpha_fast"]).all() and torch.isfinite(updated.fast).all())
-    appearance = torch.randn(2, 4, 16, device=device)
-    geometry = torch.randn(2, 4, 4, device=device)
-    times = torch.arange(4, device=device).float().repeat(2, 1)
-    linker = JEPAIdentityLinker(16, 32, 2, 4, 64, 8).to(device)
-    context = linker.encode_context(appearance, geometry, times)
-    checks["s1_shape"] = list(context["summary"].shape)
-    continuation = ContinuationFlowModel(12, 8, 32, 2).to(device)
-    checks["s2_loss_finite"] = bool(torch.isfinite(continuation.compute_loss(torch.randn(2, 8, device=device), torch.randn(2, 8, device=device), torch.randn(2, 12, device=device))["total"]))
-    edge_index = torch.tensor([[[0, 1, 0], [1, 2, 2]]], device=device)
-    edge_features = torch.randn(1, 3, 4, device=device)
-    node_features = torch.randn(1, 3, 6, device=device)
-    edge_valid = torch.ones(1, 3, dtype=torch.bool, device=device)
-    graph_flow = GraphFlowMatcher(6, 4, 16, 2).to(device)
-    graph_loss = graph_flow.compute_loss(torch.randint(0, 2, (1, 3), device=device).float(), node_features, edge_features, edge_index, edge_valid)
-    checks["s3_loss_finite"] = bool(torch.isfinite(graph_loss["total"]))
-    graph_diffusion = GraphDiffusionMatcher(6, 4, 16, 2, 20).to(device)
-    diffusion_loss = graph_diffusion.compute_loss(torch.randint(0, 2, (1, 3), device=device).float(), node_features, edge_features, edge_index, edge_valid, torch.zeros(1, 3, device=device))
-    checks["s4_loss_finite"] = bool(torch.isfinite(diffusion_loss["total"]))
-    selected = solve_path_cover(3, np.asarray([[0, 1, 0], [1, 2, 2]]), np.asarray([.9, .2, .3]))
-    checks["path_cover"] = validate_path_cover(3, np.asarray([[0, 1, 0], [1, 2, 2]]), selected)
-    if not all(value if isinstance(value, bool) else True for value in checks.values()):
-        raise RuntimeError(f"targeted smoke check failed: {checks}")
-    return checks
-
-
-def _build_check_command(args: argparse.Namespace) -> int:
+def _replay(args: argparse.Namespace) -> int:
+    from .data.feature_export import iter_manifest_ledgers, load_dataset_manifest
+    from .inference import _replay_video
     repo = _repo(args.repo)
-    files = _changed_python_files(repo) if args.changed_only else sorted((repo / "tempotrack_research").rglob("*.py"))
+    local = _load_local(repo, args.local)
+    manifest_path = _path(repo, args.manifest)
+    if manifest_path is None:
+        raise DataUnavailable("replay requires source manifest")
+    manifest = load_dataset_manifest(manifest_path)
+    run_root = _path(repo, args.run_root) if args.run_root else None
+    output = _path(repo, args.output) or (run_root / "replay" if run_root is not None else repo / "outputs/research_v2/replay")
+    output.mkdir(parents=True, exist_ok=True)
+    values = []
+    for video_id, ledger in iter_manifest_ledgers(manifest):
+        path = output / f"video_{video_id}.tracklets.json"
+        if args.resume != "never" and path.exists():
+            try:
+                existing = _json(path, {})
+                if (existing.get("source_manifest_hash") == file_hash(manifest_path)
+                        and existing.get("frontend") == args.frontend):
+                    values.append(str(path))
+                    continue
+            except (OSError, ValueError):
+                pass
+        store = _replay_video(ledger, manifest, args.frontend, _path(repo, args.memory_checkpoint), dict(local.get("data", {}).get("frontend", {})))
+        _write_json(path, {"schema_version": 2, "video_id": video_id, "source_manifest": str(manifest_path), "source_manifest_hash": file_hash(manifest_path), "frontend": args.frontend, "records": store.to_json()})
+        values.append(str(path))
+    _write_json(output / "replay_manifest.json", {"schema_version": 2, "source_manifest": str(manifest_path), "frontend": args.frontend, "files": values})
+    print(json.dumps({"status": "COMPLETED", "replay_manifest": str(output / "replay_manifest.json"), "videos": len(values)}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _method_config(repo: Path, method: str) -> dict[str, Any]:
+    spec = get_method(method)
+    path = _path(repo, spec.config)
+    return load_yaml(path) if path and path.exists() else {"schema_version": 2}
+
+
+def _promote_method_model_config(config: dict[str, Any], method: str) -> dict[str, Any]:
+    """Translate the checked-in method YAML into the runtime model contract."""
+    model = dict(config.get("model", {}))
+    encoder = config.get("encoder", {})
+    controller = config.get("controller", {})
+    field = config.get("field", {})
+    graph = config.get("graph", {})
+    diffusion = config.get("diffusion", {})
+    if isinstance(encoder, Mapping):
+        for source, target in (("hidden", "hidden_dim"), ("layers", "layers"), ("heads", "heads"), ("feedforward", "ff_dim"), ("dynamic_dim", "dynamic_dim")):
+            if source in encoder:
+                model.setdefault(target, encoder[source])
+    if isinstance(controller, Mapping) and "hidden" in controller:
+        model.setdefault("memory_hidden_dim", controller["hidden"])
+    if isinstance(field, Mapping):
+        for source, target in (("hidden", "hidden_dim"), ("layers", "layers")):
+            if source in field:
+                model.setdefault(target, field[source])
+    if isinstance(graph, Mapping):
+        for source, target in (("hidden", "graph_hidden_dim"), ("layers", "graph_layers")):
+            if source in graph:
+                model.setdefault(target, graph[source])
+    if isinstance(diffusion, Mapping) and "training_steps" in diffusion:
+        model.setdefault("diffusion_steps", diffusion["training_steps"])
+    if method == "s2_state_fm" and "latent_dim" in config:
+        model.setdefault("latent_dim", config["latent_dim"])
+    return {**config, "model": model}
+
+
+def _job_record(repo: Path, record: Mapping[str, Any]) -> None:
+    path = repo / "reports" / "repair_jobs.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(record), ensure_ascii=False, sort_keys=True, default=str) + "\n")
+
+
+def _refresh_repair_progress(repo: Path) -> None:
+    """Derive the new progress file from job/artifact evidence only."""
+    jobs_path = repo / "reports" / "repair_jobs.jsonl"
+    jobs: list[dict[str, Any]] = []
+    if jobs_path.exists():
+        for line in jobs_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    jobs.append(json.loads(line))
+                except ValueError:
+                    continue
+    latest: dict[str, dict[str, Any]] = {}
+    for job in jobs:
+        scheme = job.get("scheme")
+        if scheme:
+            latest[str(scheme)] = job
+    build = _json(repo / "reports" / "build_check_repair.json", {})
+    schemes: dict[str, Any] = {}
+    for name in RESEARCH_SCHEMES:
+        item = latest.get(name, {})
+        profile = str(item.get("profile", ""))
+        status = item.get("status", "NOT_RUN")
+        schemes[name] = {
+            "scheme": name,
+            "implementation": "IMPLEMENTED_CODE_PATH",
+            "build_status": "PASS" if build.get("passed") else ("FAIL" if build else "NOT_RUN"),
+            "trial_status": status if profile == "trial" else "NOT_RUN",
+            "full_status": status if profile == "full" else "NOT_RUN",
+            "training": status,
+            "eval_status": "NOT_RUN",
+            "checkpoint": item.get("checkpoint_path"),
+            "run_signature": item.get("run_signature", ""),
+            "data_hash": item.get("data_hash"),
+            "blocking_evidence": item.get("error"),
+            "updated_at": item.get("finished_at", item.get("started_at", "")),
+        }
+    _write_json(repo / "reports" / "repair_progress.json", {
+        "schema_version": 2,
+        "generated_at": _now(),
+        "base_commit": "75d529bf100d479e4a49a97d3496bff48e861475",
+        "source_jobs": str(jobs_path),
+        "source_build_check": str(repo / "reports" / "build_check_repair.json"),
+        "schemes": schemes,
+    })
+
+
+def _train(args: argparse.Namespace) -> int:
+    repo = _repo(args.repo)
+    local = _load_local(repo, args.local)
+    suite = _load_suite(repo, args.suite)
+    method_spec = get_method(args.method)
+    if not method_spec.trainable:
+        raise ImplementationIncomplete(f"{args.method} is a non-trainable control")
+    scheme = get_scheme(args.scheme) if args.scheme else None
+    if scheme is not None and (scheme.method != args.method or scheme.frontend != args.frontend):
+        raise ValueError(f"scheme {args.scheme} does not map to method/frontend {args.method}/{args.frontend}")
+    if args.ddp:
+        raise ImplementationIncomplete("--ddp was requested, but this single-process repair runtime does not claim DDP support")
+    if args.checkpoint:
+        raise ImplementationIncomplete("--checkpoint warm-start is not enabled for this repair entry; use --resume with the same run lineage")
+    config_path = _path(repo, args.config) if getattr(args, "config", None) else None
+    config = load_yaml(config_path) if config_path is not None else _method_config(repo, args.method)
+    config = _promote_method_model_config(config, args.method)
+    suite_training = dict(suite.get("training", {}))
+    budgets = dict(suite_training.get("budgets", {}))
+    full_budgets = dict(suite_training.get("full_budgets", {}))
+    method_trial_steps = budgets.get(args.method)
+    method_full_steps = full_budgets.get(args.method)
+    if args.method == "s5_rl_edit":
+        method_trial_steps = method_trial_steps or budgets.get("s5_bc")
+        method_full_steps = method_full_steps or full_budgets.get("s5_bc")
+    suite_train = {
+        "trial_steps": method_trial_steps,
+        "full_steps": method_full_steps,
+        "ppo_transitions": budgets.get("s5_ppo_transitions", 50000) if args.profile != "full" else full_budgets.get("s5_ppo_transitions", 2000000),
+    }
+    for key in ("microbatch_size", "batch_size", "effective_batch", "accumulation_steps", "num_workers", "pin_memory", "max_edits", "ppo_microbatch_size"):
+        if key in suite_training:
+            suite_train[key] = suite_training[key]
+    suite_train = {key: value for key, value in suite_train.items() if value is not None}
+    config = deep_merge(config, {"train": suite_train})
+    config = deep_merge(config, {"data": dict(local.get("data", {})), "optimizer": dict(local.get("optimizer", {})), "train": dict(local.get("train", {})), "infer": dict(local.get("infer", {})), "evaluation": dict(local.get("evaluation", {}))})
+    if args.episodes:
+        config.setdefault("data", {})["episode_manifest"] = str(_path(repo, args.episodes))
+    if args.bc_checkpoint:
+        config.setdefault("data", {})["bc_checkpoint"] = str(_path(repo, args.bc_checkpoint))
+    run_root = _path(repo, args.run_root) or _path(repo, local.get("run_root")) or repo / "outputs/research_v2/runs"
+    spec = build_run_spec(method=args.method, frontend=args.frontend, phase=args.phase, config=config, run_root=run_root, seed=args.seed, provenance={"scheme": args.scheme, "base_commit": suite.get("base_commit")})
+    signature = object_hash({"method": args.method, "frontend": args.frontend, "phase": args.phase, "profile": args.profile, "seed": args.seed, "config": config, "episodes": config.get("data", {}).get("episode_manifest")})
+    started = _now()
+    _job_record(repo, {"job_id": f"{args.scheme or args.method}.{args.profile}.seed{args.seed}", "scheme": args.scheme, "method": args.method, "frontend": args.frontend, "phase": args.phase, "profile": args.profile, "seed": args.seed, "status": "RUNNING", "started_at": started, "run_signature": signature, "command": sys.argv})
+    try:
+        from .training.runtime import run_available_training
+        result = run_available_training(repo, args.method, args.frontend, args.profile, args.seed, args.resume, args.device, run_spec=spec, phase=args.phase, episode_manifest=args.episodes, run_root=run_root, max_steps=args.max_steps, ppo_transitions=args.ppo_transitions)
+    except Exception as exc:
+        _job_record(repo, {"job_id": f"{args.scheme or args.method}.{args.profile}.seed{args.seed}", "scheme": args.scheme, "method": args.method, "status": "BLOCKED_DATA" if isinstance(exc, DataUnavailable) else "FAILED", "finished_at": _now(), "run_signature": signature, "error": f"{type(exc).__name__}: {exc}"})
+        raise
+    _job_record(repo, {"job_id": f"{args.scheme or args.method}.{args.profile}.seed{args.seed}", "scheme": args.scheme, "method": args.method, "frontend": args.frontend, "phase": args.phase, "profile": args.profile, "seed": args.seed, "status": result.get("status", "COMPLETED"), "finished_at": _now(), "run_signature": signature, "checkpoint_path": result.get("checkpoint"), "result_path": str(Path(result["run_dir"]) / "train_result.json") if result.get("run_dir") else None, "data_hash": result.get("data_hash"), "optimizer_steps": result.get("optimizer_steps"), "transitions": result.get("transitions")})
+    _refresh_repair_progress(repo)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _resolve_infer_checkpoint(repo: Path, reference: str | None, run_root: Path | None = None) -> Path | None:
+    if not reference or reference in {"none", "no_checkpoint"}:
+        return None
+    if reference == "best":
+        root = run_root or repo / "outputs/research_v2"
+        roots = [root] if root.name == "runs" else [root / "runs", root]
+        candidates = sorted({path for item in roots for path in item.glob("**/last.pt")}, key=lambda path: path.stat().st_mtime, reverse=True)
+        if not candidates:
+            raise WeightUnavailable("no trained checkpoint exists for --checkpoint best")
+        return candidates[0]
+    return _path(repo, reference)
+
+
+def _infer(args: argparse.Namespace) -> int:
+    from .inference import InferenceSpec, run_inference
+    repo = _repo(args.repo)
+    local = _load_local(repo, args.local)
+    source = _path(repo, args.manifest)
+    if source is None and args.training_run:
+        run = _path(repo, args.training_run)
+        if run is not None:
+            resolved = _json(run / "resolved_run.json", {}) if run.is_dir() else _json(run, {})
+            source = _path(repo, resolved.get("episode_manifest")) if resolved.get("episode_manifest") else None
+    if source is None:
+        raise DataUnavailable("infer requires a verified dataset manifest")
+    run_root = _path(repo, args.run_root) if args.run_root else (_path(repo, local.get("run_root")) or repo / "outputs/research_v2")
+    output = _path(repo, args.output) or run_root / "predictions"
+    config = deep_merge({"data": dict(local.get("data", {})), "infer": dict(local.get("infer", {}))}, {"infer": {"mode": args.mode or local.get("infer", {}).get("mode", "forward_only"), "samples": args.samples or local.get("infer", {}).get("samples", 4), "steps": args.steps or local.get("infer", {}).get("steps", 32)}})
+    spec = build_run_spec(method=args.method, frontend=args.frontend, phase=None, config=config, run_root=run_root / "runs", seed=args.seed, provenance={})
+    protocol = local.get("protocol")
+    if args.protocol:
+        protocol_path = _path(repo, args.protocol)
+        protocol = _json(protocol_path, protocol) if protocol_path and protocol_path.exists() else {"name": args.protocol, "immutable_observations": True}
+    checkpoint_reference = args.checkpoint
+    if args.training_run and not checkpoint_reference:
+        run = _path(repo, args.training_run)
+        checkpoint_reference = str(run / "last.pt") if run and run.is_dir() else str(run) if run else None
+    result = run_inference(InferenceSpec(args.method, args.frontend, args.split, source, output, _resolve_infer_checkpoint(repo, checkpoint_reference, run_root), _path(repo, args.memory_checkpoint), protocol, args.seed, spec))
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _evaluate(args: argparse.Namespace) -> int:
+    from .evaluation.official import EvaluationSpec, OfficialEvaluator
+    repo = _repo(args.repo)
+    source = _path(repo, args.manifest)
+    prediction = _path(repo, args.prediction)
+    if source is None or prediction is None:
+        raise DataUnavailable("evaluate requires source manifest and raw prediction list")
+    run_root = _path(repo, args.run_root) if args.run_root else (repo / "outputs/research_v2")
+    output = _path(repo, args.output) or run_root / "evaluations"
+    result = OfficialEvaluator(repo).evaluate(EvaluationSpec(repo, source, prediction, _path(repo, args.annotation), output, args.name, _path(repo, args.evaluator_python), args.cores, _path(repo, args.gt)))
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0 if result.get("status") == "COMPLETED" else 3
+
+
+def _audit(args: argparse.Namespace) -> int:
+    from .orchestration.gates import run_repair_audit
+    repo = _repo(args.repo)
+    level = {"pretrial": "integration", "prefull": "trial"}.get(args.level, args.level)
+    if args.methods not in {None, "all", ""}:
+        raise ValueError("this repair audit is a shared contract gate; method filtering is not supported")
+    result = run_repair_audit(repo, level=level, source_manifest=_path(repo, args.source_manifest) if args.source_manifest else None, output=_path(repo, args.output) or repo / "reports/repair_gates.json", run_root=_path(repo, args.run_root) if args.run_root else None)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    statuses = [value.get("status") for value in result.get("results", [])]
+    return 0 if statuses and all(status == "PASS" for status in statuses) else 3
+
+
+def _build_check(args: argparse.Namespace) -> int:
+    repo = _repo(args.repo)
+    files = sorted((repo / "tempotrack_research").rglob("*.py"))
+    code_hash = object_hash({str(path.relative_to(repo)): file_hash(path) for path in files})
+    previous = _json(repo / "reports/build_check_repair.json", {})
+    if args.skip_passed and previous.get("passed") and previous.get("code_hash") == code_hash:
+        result = dict(previous)
+        result["reused"] = True
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     failures = []
     for path in files:
         try:
-            source = path.read_text(encoding="utf-8")
-            compile(source, str(path), "exec")
+            compile(path.read_text(encoding="utf-8"), str(path), "exec")
         except (OSError, SyntaxError) as exc:
             failures.append({"file": str(path), "error": str(exc)})
-    wheel_dir = Path(tempfile.mkdtemp(prefix="tempotrack-wheel-"))
-    wheel_code, wheel_output = _run([sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", ".", "-w", str(wheel_dir)], repo)
-    smoke = None
-    if args.smoke:
-        try:
-            smoke = _torch_smoke()
-        except ImportError as exc:
-            smoke = {"skipped": True, "reason": f"torch unavailable: {exc}"}
-        except Exception as exc:
-            failures.append({"smoke": str(exc)})
-            smoke = {"passed": False, "error": str(exc)}
-    result = {"generated_at": _now(), "files_checked": len(files), "syntax_failures": failures, "wheel": {"returncode": wheel_code, "output_tail": wheel_output[-4000:]}, "smoke": smoke, "passed": not failures and wheel_code == 0}
-    _write_json(repo / "reports" / "build_check.json", result)
-    implementation_hash = _implementation_hash(repo)
-    for scheme in RESEARCH_SCHEMES:
-        update_scheme(repo / "reports" / "progress.json", scheme, implementation="BUILT" if not failures else "PARTIAL", build_status="PASS" if result["passed"] else "FAIL", code_hash=implementation_hash, implemented_files=[str(path.relative_to(repo)) for path in files])
+    wheel_dir = Path(tempfile.mkdtemp(prefix="tempotrack-repair-wheel-"))
+    configured_builder = os.environ.get("TEMPOTRACK_BUILD_PYTHON")
+    research_builder = Path("/home/lwr/anaconda3/envs/masaenv/bin/python")
+    builder = configured_builder or (str(research_builder) if sys.version_info >= (3, 12) and research_builder.exists() else sys.executable)
+    process = subprocess.run([builder, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", ".", "-w", str(wheel_dir)], cwd=str(repo), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    result = {"schema_version": 2, "generated_at": _now(), "files_checked": len(files), "changed_only_requested": bool(args.changed_only), "smoke_requested": bool(args.smoke), "syntax_failures": failures, "wheel": {"python": builder, "returncode": process.returncode, "output_tail": process.stdout[-5000:]}, "passed": not failures and process.returncode == 0, "code_hash": code_hash, "reused": False}
+    _write_json(repo / "reports/build_check_repair.json", result)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["passed"] else 1
 
 
-def _train_command(args: argparse.Namespace) -> int:
+def _suite(args: argparse.Namespace) -> int:
+    from .orchestration.runner import run_suite
     repo = _repo(args.repo)
-    method = get_method(args.method)
-    progress_path = repo / "reports" / "progress.json"
-    ensure_progress(progress_path)
-    prepared = _json(_research_root(repo) / "prepared" / "prepared_manifest.json", {})
-    inventory = _json(repo / "reports" / "environment_inventory.json", {}) or collect_environment_inventory(repo)
-    ready, reason = training_ready(inventory, prepared)
-    scheme_prefix = "m1" if args.frontend == "predictive_dual" else "m0"
-    if method.name == "predictive_dual":
-        scheme = "m1_no_offline"
-    else:
-        scheme_base = "s5_ppo" if method.name == "s5_rl_edit" else method.name
-        scheme = f"{scheme_prefix}_{scheme_base}"
-    if not ready:
-        command = " ".join(sys.argv)
-        append_jsonl({"job_id": f"blocked-{scheme}-{args.seed}-{args.profile}", "scheme": scheme, "method": method.name, "command": command, "cwd": str(repo), "env_name": Path(sys.executable).parent.parent.name if Path(sys.executable).parent.name == "bin" else "unknown", "devices": [], "started_at": _now(), "pid": None, "scheduler_id": None, "log_path": None, "checkpoint_path": None, "status": "BLOCKED_DATA", "exit_code": None, "blocking_evidence": reason}, repo / "reports" / "jobs.jsonl")
-        update_scheme(progress_path, scheme, implementation="BUILT", build_status="PASS", training="BLOCKED_DATA", trial_status="BLOCKED_DATA" if args.profile == "trial" else "NOT_RUN", full_status="BLOCKED_DATA" if args.profile == "full" else "NOT_RUN", blocking_evidence=reason, next_command="python -m tempotrack_research.cli prepare --suite configs/research/suite.yaml --local configs/research/local.auto.yaml --resume auto", limitations=[reason])
-        print(json.dumps({"status": "BLOCKED_DATA", "method": method.name, "scheme": scheme, "evidence": reason}, ensure_ascii=False, indent=2))
-        return 0
-    from .training.runtime import DataUnavailable, run_available_training
-    try:
-        result = run_available_training(repo, method.name, args.frontend, args.profile, args.seed, args.resume)
-    except DataUnavailable as exc:
-        update_scheme(progress_path, scheme, implementation="BUILT", build_status="PASS", training="BLOCKED_DATA", trial_status="BLOCKED_DATA" if args.profile == "trial" else "NOT_RUN", full_status="BLOCKED_DATA" if args.profile == "full" else "NOT_RUN", blocking_evidence=str(exc), next_command=f"python -m tempotrack_research.cli build-episodes --suite configs/research/suite.yaml --local configs/research/local.auto.yaml --resume auto", limitations=[str(exc)])
-        append_jsonl({"job_id": f"blocked-{scheme}-{args.seed}-{args.profile}", "scheme": scheme, "method": method.name, "command": " ".join(sys.argv), "cwd": str(repo), "env_name": Path(sys.executable).parent.parent.name if Path(sys.executable).parent.name == "bin" else "unknown", "devices": [], "started_at": _now(), "pid": None, "scheduler_id": None, "log_path": None, "checkpoint_path": None, "status": "BLOCKED_DATA", "exit_code": None, "blocking_evidence": str(exc)}, repo / "reports" / "jobs.jsonl")
-        print(json.dumps({"status": "BLOCKED_DATA", "method": method.name, "scheme": scheme, "evidence": str(exc)}, ensure_ascii=False, indent=2))
-        return 0
-    status_field = "trial_status" if args.profile == "trial" else "full_status"
-    update_scheme(progress_path, scheme, implementation="BUILT", build_status="PASS", training="COMPLETED", **{status_field: "COMPLETED"}, checkpoint=result.get("checkpoint"), blocking_evidence=None, next_command=f"python -m tempotrack_research.cli infer --method {method.name} --frontend {args.frontend} --split val_base --checkpoint best")
-    append_jsonl({"job_id": f"{scheme}-{args.seed}-{args.profile}", "scheme": scheme, "method": method.name, "command": " ".join(sys.argv), "cwd": str(repo), "env_name": Path(sys.executable).parent.parent.name if Path(sys.executable).parent.name == "bin" else "unknown", "devices": [], "started_at": _now(), "pid": os.getpid(), "scheduler_id": None, "log_path": str(repo / "reports" / "metrics.jsonl"), "checkpoint_path": result.get("checkpoint"), "status": "COMPLETED", "exit_code": 0, "checkpoint": result.get("checkpoint")}, repo / "reports" / "jobs.jsonl")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    result = run_suite(repo, _path(repo, args.config) or repo / "configs/research/suite.repair.yaml", _path(repo, args.local) or repo / "configs/research/local.repair.yaml", stage=args.stage, verification=args.verification, resume=args.resume, keep_going=args.keep_going, max_steps=args.max_steps, run_root=_path(repo, args.run_root) if args.run_root else None, require_gates=args.require_gates)
+    _refresh_repair_progress(repo)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0 if not result.get("blocked") and all(item.get("status") == "COMPLETED" for item in result.get("jobs", [])) else 3
 
 
-def _suite_command(args: argparse.Namespace) -> int:
+def _status(args: argparse.Namespace) -> int:
     repo = _repo(args.repo)
-    suite = load_suite(Path(args.config) if Path(args.config).is_absolute() else repo / args.config)
-    local = _load_local(repo, args.local)
-    inventory = _json(repo / "reports" / "environment_inventory.json")
-    if inventory is None:
-        inventory = collect_environment_inventory(repo)
-        _write_json(repo / "reports" / "environment_inventory.json", inventory)
-    prepared = _json(_research_root(repo) / "prepared" / "prepared_manifest.json", {})
-    if not prepared:
-        raise RuntimeError("prepare must run before suite")
-    result = run_suite(repo, suite, inventory, prepared, args.stage, args.keep_going, args.resume)
-    _write_json(_research_root(repo) / "suite_last_run.json", result)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
-
-
-def _status_command(args: argparse.Namespace) -> int:
-    repo = _repo(args.repo)
-    progress = _json(repo / "reports" / "progress.json", {"schemes": {}})
-    jobs_path = repo / "reports" / "jobs.jsonl"
-    jobs = []
+    run_root = _path(repo, args.run_root) if args.run_root else repo / "outputs/research_v2"
+    values = {"run_root": str(run_root), "gates": _json(repo / "reports/repair_gates.json", {}), "suite": _json(repo / "reports/repair_suite_last.json", {}), "jobs": []}
+    jobs_path = repo / "reports/repair_jobs.jsonl"
     if jobs_path.exists():
-        for line in jobs_path.read_text(encoding="utf-8").splitlines():
-            try: jobs.append(json.loads(line))
-            except ValueError: continue
-    print(json.dumps({"progress": progress, "recent_jobs": jobs[-20:]}, ensure_ascii=False, indent=2))
+        values["jobs"] = [json.loads(line) for line in jobs_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    print(json.dumps(values, ensure_ascii=False, indent=2, default=str))
     return 0
 
 
-def _infer_command(args: argparse.Namespace) -> int:
+def _report(args: argparse.Namespace) -> int:
+    from .orchestration.report import generate_report
     repo = _repo(args.repo)
-    protocol = {"mode": args.protocol, "immutable_observations": True, "change_boxes": False, "change_scores": False, "change_categories": False}
-    source = Path(args.observations) if args.observations else _research_root(repo) / "prepared" / "validation_cache_sample.npz"
-    if not source.exists():
-        raise RuntimeError(f"observation ledger not found: {source}; run prepare first")
-    if args.method != "no_offline" and args.checkpoint == "best":
-        raise RuntimeError("checkpoint=best cannot resolve because no trained checkpoint is recorded for this method")
-    import numpy as np
-    from .data.observation_store import ObservationLedger
-    ledger = ObservationLedger.load(source)
-    records = [{"observation_uid": key.uid, "track_id": index} for index, key in enumerate(ledger.keys())]
-    output = _research_root(repo) / "inference" / f"{args.method}_{args.frontend}_{args.split}.json"
-    from .association.serialization import serialize_id_only
-    payload = serialize_id_only(records, output, protocol)
-    print(json.dumps({"output": str(output), "records": len(records), "payload_hash": payload["payload_hash"], "warning": "no_offline identity assignment only" if args.method == "no_offline" else None}, ensure_ascii=False, indent=2))
+    output = _path(repo, args.output) or repo / "reports/ICLR_REPAIR_AND_EXPERIMENTS_FINAL.md"
+    result = generate_report(repo, output, run_root=_path(repo, args.run_root) if args.run_root else None)
+    print(json.dumps({"report": str(result)}, ensure_ascii=False, indent=2))
     return 0
 
 
-def _evaluate_command(args: argparse.Namespace) -> int:
-    repo = _repo(args.repo)
-    result_path = _research_root(repo) / "inference" / f"{args.method}_{args.frontend}_{args.split}.json"
-    if not result_path.exists():
-        raise RuntimeError(f"inference artifact not found: {result_path}")
-    result = _json(result_path, {})
-    check = check_immutable_protocol({}, result, args.require_immutable_observations)
-    evaluator = evaluator_ready(_json(repo / "reports" / "environment_inventory.json", {}))
-    payload = {"method": args.method, "frontend": args.frontend, "split": args.split, "protocol": args.protocol, "protocol_check": check, "official_evaluator": evaluator, "metrics": None if not check["valid"] or not evaluator[0] else None, "status": "BLOCKED_EVALUATOR" if not evaluator[0] else "NOT_RUN"}
-    _write_json(_research_root(repo) / "evaluation" / f"{args.method}_{args.frontend}_{args.split}.json", payload)
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
-    return 0 if check["valid"] else 1
-
-
-def _report_command(args: argparse.Namespace) -> int:
-    repo = _repo(args.repo)
-    output = Path(args.output) if Path(args.output).is_absolute() else repo / args.output
-    path = generate_report(repo, output)
-    print(str(path))
-    return 0
-
-
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m tempotrack_research.cli", description="TempoTrack reproducible research orchestration")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="tempotrack-repair")
     sub = parser.add_subparsers(dest="command", required=True)
-
-    inventory = sub.add_parser("inventory", help="核验环境、数据、权重与冻结缓存")
-    inventory.add_argument("--repo", default="."); inventory.add_argument("--out", default="configs/research/local.auto.yaml"); inventory.add_argument("--report", default="reports/environment_inventory.json"); inventory.set_defaults(func=_inventory_command)
-
-    prepare = sub.add_parser("prepare", help="验证/准备不可变 observation cache")
-    prepare.add_argument("--repo", default="."); prepare.add_argument("--suite", default="configs/research/suite.yaml"); prepare.add_argument("--local", default="configs/research/local.auto.yaml"); prepare.add_argument("--resume", default="auto"); prepare.set_defaults(func=_prepare_command)
-
-    episodes = sub.add_parser("build-episodes", help="构造共享 episode manifests")
-    episodes.add_argument("--repo", default="."); episodes.add_argument("--suite", default="configs/research/suite.yaml"); episodes.add_argument("--local", default="configs/research/local.auto.yaml"); episodes.add_argument("--kinds", default="memory,pair,continuation,graph,edit"); episodes.add_argument("--resume", default="auto"); episodes.set_defaults(func=_build_episodes_command)
-
-    check = sub.add_parser("build-check", help="编译受影响源码并构建 wheel")
-    check.add_argument("--repo", default="."); check.add_argument("--changed-only", action="store_true"); check.add_argument("--skip-passed", action="store_true"); check.add_argument("--smoke", action="store_true"); check.set_defaults(func=_build_check_command)
-
-    train = sub.add_parser("train", help="运行或记录一个方法训练任务")
-    train.add_argument("--repo", default="."); train.add_argument("--method", required=True, choices=sorted(METHODS)); train.add_argument("--config"); train.add_argument("--local", default="configs/research/local.auto.yaml"); train.add_argument("--frontend", default="fixed_dual", choices=("fixed_dual", "predictive_dual")); train.add_argument("--profile", default="trial", choices=("trial", "full")); train.add_argument("--seed", type=int, default=0); train.add_argument("--resume", default="auto"); train.add_argument("--ddp", action="store_true"); train.set_defaults(func=_train_command)
-
-    suite = sub.add_parser("suite", help="按依赖顺序执行全部方案并持久化状态")
-    suite.add_argument("--repo", default="."); suite.add_argument("--config", default="configs/research/suite.yaml"); suite.add_argument("--local", default="configs/research/local.auto.yaml"); suite.add_argument("--stage", default="all", choices=("trial", "full", "all")); suite.add_argument("--verification", default="build"); suite.add_argument("--resume", default="auto"); suite.add_argument("--keep-going", action="store_true"); suite.set_defaults(func=_suite_command)
-
-    status = sub.add_parser("status", help="输出真实进度与作业状态")
-    status.add_argument("--repo", default="."); status.add_argument("--run-root", default="outputs/research"); status.set_defaults(func=_status_command)
-
-    infer = sub.add_parser("infer", help="固定观测协议下写 ID-only 输出")
-    infer.add_argument("--repo", default="."); infer.add_argument("--method", required=True); infer.add_argument("--frontend", default="fixed_dual"); infer.add_argument("--local", default="configs/research/local.auto.yaml"); infer.add_argument("--split", default="val_base"); infer.add_argument("--checkpoint", default="best"); infer.add_argument("--observations"); infer.add_argument("--protocol", default="offline_id_only"); infer.add_argument("--seed", type=int, default=0); infer.set_defaults(func=_infer_command)
-
-    evaluate = sub.add_parser("evaluate", help="校验固定 payload 并调用官方 evaluator")
-    evaluate.add_argument("--repo", default="."); evaluate.add_argument("--method", required=True); evaluate.add_argument("--frontend", default="fixed_dual"); evaluate.add_argument("--local", default="configs/research/local.auto.yaml"); evaluate.add_argument("--split", default="val_base"); evaluate.add_argument("--protocol", default="offline_id_only"); evaluate.add_argument("--require-immutable-observations", action="store_true"); evaluate.set_defaults(func=_evaluate_command)
-
-    report = sub.add_parser("report", help="从真实 artifacts 生成中文最终报告")
-    report.add_argument("--repo", default="."); report.add_argument("--run-root", default="outputs/research"); report.add_argument("--output", default="reports/ICLR_RECONSTRUCTION_FINAL.md"); report.set_defaults(func=_report_command)
+    p = sub.add_parser("inventory"); p.add_argument("--repo", default="."); p.add_argument("--out"); p.add_argument("--report"); p.set_defaults(func=_inventory)
+    p = sub.add_parser("prepare"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--suite"); p.add_argument("--split", default="train_base,val_base_internal"); p.add_argument("--output-root"); p.add_argument("--run-root"); p.add_argument("--observations"); p.add_argument("--annotations"); p.add_argument("--limit-videos", type=int); p.add_argument("--internal-val-fraction", type=float, default=0.1); p.add_argument("--match-iou", type=float, default=0.5); p.add_argument("--seed", type=int, default=0); p.add_argument("--device", default="cuda:0"); p.add_argument("--resume", default="auto"); p.set_defaults(func=_prepare)
+    p = sub.add_parser("export-features"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--annotation"); p.add_argument("--frame-root"); p.add_argument("--output"); p.add_argument("--split", required=True); p.add_argument("--video-ids"); p.add_argument("--limit-videos", type=int); p.add_argument("--device", default="cuda:0"); p.add_argument("--resume", default="auto"); p.set_defaults(func=_export_features)
+    p = sub.add_parser("label-observations"); p.add_argument("--repo", default="."); p.add_argument("--manifest", required=True); p.add_argument("--annotation", required=True); p.add_argument("--output"); p.add_argument("--split", required=True); p.add_argument("--category-protocol"); p.add_argument("--match-iou", type=float, default=0.5); p.set_defaults(func=_label_observations)
+    p = sub.add_parser("build-episodes"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--suite"); p.add_argument("--prepared"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--frontend-manifest"); p.add_argument("--observations"); p.add_argument("--split", default="train_base"); p.add_argument("--kinds", default="memory,pair,continuation,graph,edit"); p.add_argument("--resume", default="auto"); p.set_defaults(func=_build_episodes)
+    p = sub.add_parser("replay"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--manifest", required=True); p.add_argument("--split", default="train_base"); p.add_argument("--frontend", choices=["fixed_dual", "predictive_dual"], required=True); p.add_argument("--memory-checkpoint"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); p.set_defaults(func=_replay)
+    p = sub.add_parser("train"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--suite"); p.add_argument("--config"); p.add_argument("--method", choices=sorted(METHODS), required=True); p.add_argument("--frontend", choices=["fixed_dual", "predictive_dual"], required=True); p.add_argument("--scheme"); p.add_argument("--phase", choices=["bc", "ppo", "frontend", "train"], default=None); p.add_argument("--profile", choices=["trial", "full", "integration"], default="trial"); p.add_argument("--seed", type=int, default=0); p.add_argument("--episodes"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); p.add_argument("--checkpoint"); p.add_argument("--ddp", action="store_true"); p.add_argument("--device"); p.add_argument("--max-steps", type=int); p.add_argument("--ppo-transitions", type=int); p.add_argument("--bc-checkpoint"); p.set_defaults(func=_train)
+    p = sub.add_parser("infer"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--manifest"); p.add_argument("--observations", dest="manifest"); p.add_argument("--split", default="val_base_internal"); p.add_argument("--method", choices=["no_offline", "stable_emd", "ordinary_metric", "s1_jepa", "s2_state_fm", "s3_graph_fm", "s4_graph_diffusion", "s5_rl_edit"], required=True); p.add_argument("--frontend", choices=["fixed_dual", "predictive_dual"], required=True); p.add_argument("--phase"); p.add_argument("--checkpoint"); p.add_argument("--training-run"); p.add_argument("--memory-checkpoint"); p.add_argument("--protocol"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--seed", type=int, default=0); p.add_argument("--mode"); p.add_argument("--samples", type=int); p.add_argument("--steps", type=int); p.set_defaults(func=_infer)
+    p = sub.add_parser("evaluate"); p.add_argument("--repo", default="."); p.add_argument("--manifest", required=True); p.add_argument("--observations", dest="manifest"); p.add_argument("--prediction", required=True); p.add_argument("--annotation"); p.add_argument("--annotations", dest="annotation"); p.add_argument("--gt"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--name", required=True); p.add_argument("--evaluator-python"); p.add_argument("--cores", type=int, default=1); p.set_defaults(func=_evaluate)
+    p = sub.add_parser("audit-repairs"); p.add_argument("--repo", default="."); p.add_argument("--level", choices=["static", "integration", "trial", "full", "pretrial", "prefull"], default="static"); p.add_argument("--source-manifest"); p.add_argument("--observations", dest="source_manifest"); p.add_argument("--output"); p.add_argument("--skip-passed", action="store_true"); p.add_argument("--methods", default="all"); p.add_argument("--local"); p.add_argument("--run-root"); p.set_defaults(func=_audit)
+    p = sub.add_parser("build-check"); p.add_argument("--repo", default="."); p.add_argument("--changed-only", action="store_true"); p.add_argument("--skip-passed", action="store_true"); p.add_argument("--smoke", action="store_true"); p.set_defaults(func=_build_check)
+    p = sub.add_parser("suite"); p.add_argument("--repo", default="."); p.add_argument("--config"); p.add_argument("--local"); p.add_argument("--stage", choices=["static", "build", "integration", "trial", "full", "all"], default="all"); p.add_argument("--verification", default="build"); p.add_argument("--require-gates"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); p.add_argument("--keep-going", action=argparse.BooleanOptionalAction, default=True); p.add_argument("--max-steps", type=int); p.set_defaults(func=_suite)
+    p = sub.add_parser("status"); p.add_argument("--repo", default="."); p.add_argument("--run-root"); p.set_defaults(func=_status)
+    p = sub.add_parser("report"); p.add_argument("--repo", default="."); p.add_argument("--run-root"); p.add_argument("--output"); p.set_defaults(func=_report)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _parser()
-    args = parser.parse_args(argv)
+    args = build_parser().parse_args(argv)
     try:
         return int(args.func(args))
-    except KeyboardInterrupt:
-        print("Interrupted", file=sys.stderr)
-        return 130
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+    except (DataUnavailable, WeightUnavailable, DependencyUnavailable) as exc:
+        print(json.dumps({"status": "BLOCKED_DATA", "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), file=sys.stderr)
+        return 3
+    except (GateNotPassed, ImplementationIncomplete) as exc:
+        print(json.dumps({"status": "BLOCKED_GATE_OR_IMPLEMENTATION", "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), file=sys.stderr)
+        return 4
+    except (ValueError, FileNotFoundError) as exc:
+        print(json.dumps({"status": "CONFIG_OR_PROTOCOL_ERROR", "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), file=sys.stderr)
         return 2
+    except Exception as exc:
+        print(json.dumps({"status": "RUNTIME_FAILURE", "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), file=sys.stderr)
+        return 5
 
 
 if __name__ == "__main__":
