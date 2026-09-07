@@ -120,6 +120,8 @@ def _episode_rows(root: Path) -> list[dict[str, Any]]:
 def _training_rows(root: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for result_path in sorted(root.glob("**/train_result.json")):
+        if "invalidated" in result_path.relative_to(root).parts:
+            continue
         result = _json(result_path, {}) or {}
         resolved = _json(result_path.parent / "resolved_run.json", {}) or {}
         checkpoint = Path(str(result.get("checkpoint") or result_path.parent / "last.pt"))
