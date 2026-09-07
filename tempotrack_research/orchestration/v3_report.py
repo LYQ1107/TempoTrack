@@ -71,6 +71,8 @@ def _active_processes(repo: Path) -> list[dict[str, Any]]:
         fields = line.strip().split(None, 3)
         if len(fields) != 4 or fields[1] != uid or "tempotrack_research" not in fields[3]:
             continue
+        if "repair-v3 report" in fields[3] or "orchestration.v3_report" in fields[3]:
+            continue
         tokens = fields[3].split()
         if not ("repair-v3" in tokens or any(command in tokens for command in ("train", "infer", "evaluate"))):
             continue
