@@ -1,0 +1,13 @@
+schema_version: 3
+method: predictive_dual
+model:
+  memory_hidden_dim: 128
+  unroll: 16
+loss:
+  retrieval: 1.0
+  reliability: 1.0
+  consistency: 0.25
+  state: 0.25
+sampling:
+  candidate_k: 8
+  corruption: false

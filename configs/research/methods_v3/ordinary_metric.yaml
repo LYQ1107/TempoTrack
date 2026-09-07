@@ -1,0 +1,12 @@
+schema_version: 3
+method: ordinary_metric
+model:
+  hidden_dim: 256
+  layers: 4
+  heads: 8
+  ff_dim: 1024
+  dynamic_dim: 64
+loss:
+  metric: 1.0
+sampling:
+  candidate_k: 8

@@ -165,6 +165,7 @@ def build_run_spec(
         frontend=frontend,
         phase=phase,
         model=dict(config.get("model", {})),
+        loss=dict(config.get("loss", {})),
         data=dict(config.get("data", {})),
         optimizer=dict(config.get("optimizer", {})),
         schedule=dict(config.get("schedule", {})),

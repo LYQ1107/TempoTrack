@@ -39,9 +39,10 @@ class SchemeSpec:
 
 
 METHODS: Dict[str, MethodSpec] = {
-    "single_ema": MethodSpec("single_ema", "memory", "configs/research/memory/m0.yaml", "memory", "pair", "M0 single EMA", True, "frontend", "memory", "no_offline", ()),
-    "fixed_dual": MethodSpec("fixed_dual", "memory", "configs/research/memory/m0.yaml", "memory", "pair", "M0 fixed dual EMA", True, "frontend", "memory", "no_offline", ()),
-    "confidence_gated_dual": MethodSpec("confidence_gated_dual", "memory", "configs/research/memory/m0.yaml", "memory", "pair", "M0 confidence-gated dual EMA", True, "frontend", "memory", "no_offline", ()),
+    "no_offline": MethodSpec("no_offline", "control", "configs/research/methods_v3/ordinary_metric.yaml", "none", "none", "No offline consolidation control", False, None, None, "no_offline", ()),
+    "single_ema": MethodSpec("single_ema", "memory", "configs/research/memory/m0.yaml", "memory", "pair", "M0 single EMA", False, "frontend", "memory", "no_offline", ()),
+    "fixed_dual": MethodSpec("fixed_dual", "memory", "configs/research/memory/m0.yaml", "memory", "pair", "M0 fixed dual EMA", False, "frontend", "memory", "no_offline", ()),
+    "confidence_gated_dual": MethodSpec("confidence_gated_dual", "memory", "configs/research/memory/m0.yaml", "memory", "pair", "M0 confidence-gated dual EMA", False, "frontend", "memory", "no_offline", ()),
     "predictive_dual": MethodSpec("predictive_dual", "memory", "configs/research/memory/predictive_dual.yaml", "memory", "pair", "M1 predictive dual memory", True, "frontend", "memory", "no_offline", ("train_m1_memory",)),
     "legacy_emd": MethodSpec("legacy_emd", "association", "configs/research/schemes/b0_emd.yaml", "none", "pair", "Traceable legacy EMD", False, None, None, "stable_emd", ()),
     "stable_emd": MethodSpec("stable_emd", "association", "configs/research/schemes/b0_emd.yaml", "none", "pair", "Repaired stable Sinkhorn EMD", False, None, None, "stable_emd", ()),
@@ -66,11 +67,14 @@ RESEARCH_SCHEMES = [
     "m0_s5_ppo",
     "m1_no_offline",
     "m1_stable_emd",
+    "m1_ordinary_metric",
     "m1_s1_jepa",
     "m1_s2_state_fm",
     "m1_s3_graph_fm",
     "m1_s4_graph_diffusion",
+    "m1_s5_bc",
     "m1_s5_ppo",
+    "m1_memory",
 ]
 
 
@@ -79,7 +83,7 @@ def _scheme(name: str, frontend: str, method: str, *, phase: str | None = None, 
 
 
 SCHEMES: Mapping[str, SchemeSpec] = {
-    "m0_no_offline": _scheme("m0_no_offline", "fixed_dual", "single_ema", mode="no_offline", trainable=False, description="shared M0 frontend only"),
+    "m0_no_offline": _scheme("m0_no_offline", "fixed_dual", "no_offline", mode="no_offline", trainable=False, description="shared M0 frontend only"),
     "m0_stable_emd": _scheme("m0_stable_emd", "fixed_dual", "stable_emd", mode="stable_emd", trainable=False, description="M0 frontend plus exact stable EMD"),
     "m0_ordinary_metric": _scheme("m0_ordinary_metric", "fixed_dual", "ordinary_metric", mode="ordinary_metric", dependencies=("m0_no_offline",)),
     "m0_s1_jepa": _scheme("m0_s1_jepa", "fixed_dual", "s1_jepa", mode="forward_only", dependencies=("m0_no_offline",)),
@@ -88,13 +92,19 @@ SCHEMES: Mapping[str, SchemeSpec] = {
     "m0_s4_graph_diffusion": _scheme("m0_s4_graph_diffusion", "fixed_dual", "s4_graph_diffusion", mode="ddim", dependencies=("m0_no_offline",)),
     "m0_s5_bc": _scheme("m0_s5_bc", "fixed_dual", "s5_rl_edit", phase="bc", mode="bc", dependencies=("m0_no_offline",)),
     "m0_s5_ppo": _scheme("m0_s5_ppo", "fixed_dual", "s5_rl_edit", phase="ppo", mode="ppo", dependencies=("m0_s5_bc",)),
-    "m1_no_offline": _scheme("m1_no_offline", "predictive_dual", "predictive_dual", mode="no_offline", dependencies=(), description="trained M1 frontend"),
+    # ``m1_no_offline`` is the actual M1-front-end/no-offline-backend control.
+    # Memory optimization is a separate artifact task below; it must not be
+    # inferred from this paper-facing scheme name.
+    "m1_no_offline": _scheme("m1_no_offline", "predictive_dual", "no_offline", mode="no_offline", trainable=False, dependencies=(), description="M1 frontend with no offline backend"),
     "m1_stable_emd": _scheme("m1_stable_emd", "predictive_dual", "stable_emd", mode="stable_emd", trainable=False, dependencies=("m1_no_offline",)),
     "m1_s1_jepa": _scheme("m1_s1_jepa", "predictive_dual", "s1_jepa", mode="forward_only", dependencies=("m1_no_offline",)),
     "m1_s2_state_fm": _scheme("m1_s2_state_fm", "predictive_dual", "s2_state_fm", mode="flow_matching", dependencies=("m1_no_offline",)),
     "m1_s3_graph_fm": _scheme("m1_s3_graph_fm", "predictive_dual", "s3_graph_fm", mode="flow_matching", dependencies=("m1_no_offline",)),
     "m1_s4_graph_diffusion": _scheme("m1_s4_graph_diffusion", "predictive_dual", "s4_graph_diffusion", mode="ddim", dependencies=("m1_no_offline",)),
+    "m1_s5_bc": _scheme("m1_s5_bc", "predictive_dual", "s5_rl_edit", phase="bc", mode="bc", dependencies=("m1_no_offline",)),
     "m1_s5_ppo": _scheme("m1_s5_ppo", "predictive_dual", "s5_rl_edit", phase="ppo", mode="ppo", dependencies=("m1_no_offline",)),
+    "m1_ordinary_metric": _scheme("m1_ordinary_metric", "predictive_dual", "ordinary_metric", mode="ordinary_metric", dependencies=("m1_no_offline",)),
+    "m1_memory": _scheme("m1_memory", "predictive_dual", "predictive_dual", mode="train_memory", dependencies=(), description="independent M1 memory training task"),
 }
 
 

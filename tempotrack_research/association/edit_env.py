@@ -56,7 +56,7 @@ class EditStep:
 class GraphEditEnv:
     ACTIONS = ("ADD", "REMOVE", "REWIRE", "STOP")
 
-    def __init__(self, num_nodes: int, edge_index: np.ndarray, edge_valid: np.ndarray | None = None, max_edits: int | None = None, edit_cost: float = 0.01, *, node_video_ids: np.ndarray | None = None, node_first_frames: np.ndarray | None = None, node_last_frames: np.ndarray | None = None):
+    def __init__(self, num_nodes: int, edge_index: np.ndarray, edge_valid: np.ndarray | None = None, max_edits: int | None = None, edit_cost: float = 0.01, *, node_video_ids: np.ndarray | None = None, node_first_frames: np.ndarray | None = None, node_last_frames: np.ndarray | None = None, action_table_limit: int | None = None):
         self.num_nodes = int(num_nodes)
         if self.num_nodes < 0:
             raise ValueError("num_nodes must be non-negative")
@@ -76,6 +76,13 @@ class GraphEditEnv:
             raise ValueError("max_edits must be positive")
         self.max_edits = int(max_edits if max_edits is not None else max(1, 2 * self.num_nodes))
         self.edit_cost = float(edit_cost)
+        if action_table_limit is not None and int(action_table_limit) < 1:
+            raise ValueError("action_table_limit must be positive when provided")
+        # This is a bound on the concrete action vocabulary presented to the
+        # policy, not a shortcut around the environment.  Every emitted entry
+        # remains a legal ADD/REMOVE/REWIRE/STOP action over the real edge
+        # indices; a finite vocabulary is required for high-degree TAO graphs.
+        self.action_table_limit = None if action_table_limit is None else int(action_table_limit)
         self.node_video_ids = None if node_video_ids is None else np.asarray(node_video_ids)
         self.node_first_frames = None if node_first_frames is None else np.asarray(node_first_frames)
         self.node_last_frames = None if node_last_frames is None else np.asarray(node_last_frames)
@@ -83,6 +90,7 @@ class GraphEditEnv:
             if value is not None and value.shape != (self.num_nodes,):
                 raise ValueError("node metadata must have shape [num_nodes]")
         self.selected = np.zeros(self.edge_index.shape[1], dtype=bool)
+        self.initial_selected = self.selected.copy()
         self.steps = 0
         self.history: list[EditAction] = []
         self._last_info: dict[str, Any] = {}
@@ -105,7 +113,8 @@ class GraphEditEnv:
                 self.edge_valid = np.asarray(graph.get("edge_valid", np.ones(self.edge_index.shape[1])), dtype=bool).reshape(-1)
             if self.edge_valid.shape != (self.edge_index.shape[1],):
                 raise ValueError("graph edge_valid shape mismatch")
-        self.selected = np.zeros(self.edge_index.shape[1], dtype=bool) if selected is None else np.asarray(selected, dtype=bool).copy()
+        default_selected = getattr(self, "initial_selected", np.zeros(self.edge_index.shape[1], dtype=bool))
+        self.selected = np.asarray(default_selected if selected is None else selected, dtype=bool).copy()
         if self.selected.shape != (self.edge_index.shape[1],) or np.any(self.selected & ~self.edge_valid):
             raise ValueError("initial selected graph is not a valid candidate graph")
         self._assert_legal(self.selected)
@@ -157,8 +166,12 @@ class GraphEditEnv:
                     seen.add(node)
                     node = outgoing[node]
 
-    def enumerate_actions(self) -> list[EditAction]:
+    def enumerate_actions(self, max_actions: int | None = None) -> list[EditAction]:
         actions: list[EditAction] = []
+        limit = self.action_table_limit if max_actions is None else int(max_actions)
+        if limit is not None and limit < 1:
+            raise ValueError("max_actions must be positive when provided")
+        action_budget = None if limit is None else max(0, limit - 1)  # reserve the legal STOP action
         if self.steps < self.max_edits:
             # Build degree masks once.  The old implementation copied and
             # revalidated the full graph for every candidate, which made a
@@ -194,14 +207,35 @@ class GraphEditEnv:
             add_sources = self.edge_index[0, unselected_edges]
             add_targets = self.edge_index[1, unselected_edges]
             add_legal = static[unselected_edges] & (out_degree[add_sources] == 0) & (in_degree[add_targets] == 0)
+            add_quota = action_budget
+            remove_quota = action_budget
+            if action_budget is not None and len(selected_edges):
+                # Keep all three edit families visible when the graph has
+                # enough legal actions.  Remaining capacity is used by
+                # rewires after ADD and REMOVE candidates are admitted.
+                remove_quota = min(len(selected_edges), max(1, action_budget // 4))
+                add_quota = max(1, action_budget // 2)
+
+            def can_append(quota: int | None) -> bool:
+                return quota is None or len(actions) < quota
+
             for edge in unselected_edges[add_legal].tolist():
                 source, target = self.edge_index[:, int(edge)]
                 if not creates_cycle(int(source), int(target), adjacency):
+                    if not can_append(add_quota):
+                        break
                     actions.append(EditAction(0, int(edge)))
+            remove_start = len(actions)
             for edge in selected_edges.tolist():
+                if remove_quota is not None and len(actions) - remove_start >= remove_quota:
+                    break
+                if action_budget is not None and len(actions) >= action_budget:
+                    break
                 actions.append(EditAction(1, int(edge)))
             selected_edges = np.flatnonzero(self.selected).tolist()
             for old in selected_edges:
+                if action_budget is not None and len(actions) >= action_budget:
+                    break
                 old_source, old_target = self.edge_index[:, int(old)]
                 out_after = out_degree.copy(); out_after[int(old_source)] -= 1
                 in_after = in_degree.copy(); in_after[int(old_target)] -= 1
@@ -210,15 +244,19 @@ class GraphEditEnv:
                 rewire_legal = static[unselected_edges] & (out_after[rewire_sources] == 0) & (in_after[rewire_targets] == 0)
                 graph_after = dict(adjacency); graph_after.pop(int(old_source), None)
                 for new in unselected_edges[rewire_legal].tolist():
+                    if action_budget is not None and len(actions) >= action_budget:
+                        break
                     source, target = self.edge_index[:, int(new)]
                     if not creates_cycle(int(source), int(target), graph_after):
                         actions.append(EditAction(2, int(old), int(new)))
+                if action_budget is not None and len(actions) >= action_budget:
+                    break
         # Exactly one STOP is present, and it remains legal at the budget.
         actions.append(EditAction(3))
         return actions
 
-    def action_table(self) -> dict[str, np.ndarray]:
-        actions = self.enumerate_actions()
+    def action_table(self, max_actions: int | None = None) -> dict[str, np.ndarray]:
+        actions = self.enumerate_actions(max_actions=max_actions)
         return {
             "kind": np.asarray([int(action.kind) for action in actions], dtype=np.int64),
             "edge_index": np.asarray([action.edge_index for action in actions], dtype=np.int64),
@@ -281,12 +319,15 @@ class GraphEditEnv:
 class TrainingRewardOracle:
     """GT contingency reward kept outside the deployable environment."""
 
-    def __init__(self, identities: np.ndarray, known_mask: np.ndarray | None = None, *, edit_cost: float = 0.01):
+    def __init__(self, identities: np.ndarray, known_mask: np.ndarray | None = None, *, edit_cost: float = 0.01, observation_counts: np.ndarray | None = None):
         self.identities = np.asarray(identities, dtype=np.int64)
         self.known_mask = np.asarray(known_mask, dtype=bool) if known_mask is not None else self.identities >= 0
         if self.known_mask.shape != self.identities.shape:
             raise ValueError("known_mask and identities disagree")
         self.edit_cost = float(edit_cost)
+        self.observation_counts = np.ones(self.identities.shape, dtype=np.int64) if observation_counts is None else np.asarray(observation_counts, dtype=np.int64)
+        if self.observation_counts.shape != self.identities.shape or np.any(self.observation_counts < 1):
+            raise ValueError("observation_counts must be positive per graph node")
 
     @staticmethod
     def _components(num_nodes: int, edge_index: np.ndarray, selected: np.ndarray) -> np.ndarray:
@@ -303,7 +344,13 @@ class TrainingRewardOracle:
         return np.asarray([find(index) for index in range(num_nodes)], dtype=np.int64)
 
     def phi(self, assignments: np.ndarray) -> float:
-        return pairwise_identity_f1(assignments, self.identities, self.known_mask)
+        # Reward is measured over detector observations, not over graph-node
+        # counts.  A long tracklet therefore contributes proportionally to its
+        # actual observations in the GT contingency table.
+        expanded_assignments = np.repeat(np.asarray(assignments, dtype=np.int64), self.observation_counts)
+        expanded_ids = np.repeat(self.identities, self.observation_counts)
+        expanded_known = np.repeat(self.known_mask, self.observation_counts)
+        return pairwise_identity_f1(expanded_assignments, expanded_ids, expanded_known)
 
     def reward(self, edge_index: np.ndarray, before: np.ndarray, after: np.ndarray, *, action_kind: str = "ADD") -> float:
         before_assignment = self._components(len(self.identities), np.asarray(edge_index), np.asarray(before, dtype=bool))

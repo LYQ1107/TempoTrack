@@ -88,8 +88,10 @@ def _scheme_args(scheme: str, profile: str, local_path: Path, suite_path: Path, 
 
 def _bc_checkpoint(run_root: Path, frontend: str, seed: int = 0) -> Path | None:
     roots = [run_root] if run_root.name == "runs" else [run_root / "runs", run_root]
-    candidates = [root / f"{frontend}_s5_rl_edit_bc_seed{int(seed)}" / "last.pt" for root in roots]
+    candidates = [root / f"{frontend}_s5_rl_edit_bc_seed{int(seed)}_full" / "last.pt" for root in roots]
+    candidates.extend(root / f"{frontend}_s5_rl_edit_bc_seed{int(seed)}" / "last.pt" for root in roots)
     for root in roots:
+        candidates.extend(sorted(root.glob(f"{frontend}_s5_rl_edit_bc_seed{int(seed)}_full/last.pt")))
         candidates.extend(sorted(root.glob(f"{frontend}_s5_rl_edit_bc_seed{int(seed)}/last.pt")))
     return next((path for path in candidates if path.exists()), None)
 
@@ -104,7 +106,8 @@ def _gate_passed(payload: Mapping[str, Any] | None) -> bool:
 def _completed_profile_artifact(profile_root: Path, item: Any, suite: Mapping[str, Any], profile: str, seed: int = 0) -> Path | None:
     """Return a valid completed artifact that can be safely reused."""
     phase = str(item.phase or "train")
-    path = profile_root / "runs" / f"{item.frontend}_{item.method}_{phase}_seed{int(seed)}" / "train_result.json"
+    suffix = "" if profile == "trial" else f"_{profile}"
+    path = profile_root / "runs" / f"{item.frontend}_{item.method}_{phase}_seed{int(seed)}{suffix}" / "train_result.json"
     if not path.exists():
         return None
     try:

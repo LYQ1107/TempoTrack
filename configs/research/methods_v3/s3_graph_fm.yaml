@@ -1,0 +1,11 @@
+schema_version: 3
+method: s3_graph_fm
+model:
+  graph_hidden_dim: 128
+  graph_layers: 4
+loss:
+  flow: 1.0
+  edge: 1.0
+sampling:
+  samples: 4
+  steps: 32

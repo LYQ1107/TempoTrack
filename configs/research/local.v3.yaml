@@ -1,0 +1,74 @@
+schema_version: 3
+repo_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa
+reference_root: outputs/research_v2
+run_root: outputs/research_v3
+research_python: /home/lwr/anaconda3/envs/masaenv/bin/python
+legacy_python: /home/lwr/anaconda3/envs/masaenv/bin/python
+legacy_env:
+  ld_preload: /home/lwr/anaconda3/envs/masaenv/lib/libsqlite3.so.3.52.0
+resources:
+  allowed_devices: [0]
+  max_parallel_jobs: 1
+  allow_downloads: false
+  allow_paid_services: false
+extractor:
+  config: configs/masa-detic/open_vocabulary_mot_test/masa_detic_swinb_open_vocabulary_test.py
+  model_checkpoint: saved_models/masa_models/detic_masa.pth
+  detector_checkpoint: null
+  category_mapping: data/tao/annotations/tao_val_lvis_v1_classes.json
+  observation_source: predicted_boxes
+  ratio: 2
+  optional_gt_boxes: false
+  admission:
+    score_thr: 0.0001
+    nms_iou: null
+    max_per_frame: 50
+splits:
+  train_annotation: data/tao/annotations/train.json
+  validation_annotation: data/tao/annotations/validation.json
+  category_protocol: data/tao/annotations/tao_val_lvis_v1_classes.json
+  frame_root: data/tao/frames
+data:
+  episode_split: train_base
+  candidate:
+    max_gap: 90
+    top_k: 20
+    with_cats: false
+    candidate_k: 8
+    graph_window_max_nodes: 96
+    graph_window_overlap: 16
+  frontend:
+    max_gap: 90
+    match_score_thr: 0.5
+    fast_accept_threshold: 0.55
+    with_cats: false
+    mode: fixed_dual
+    # Finite concrete ADD/REMOVE/REWIRE/STOP vocabulary for high-degree
+    # graphs; actions still reference the real candidate edge indices.
+    action_table_limit: 256
+  transform_snapshot:
+    schema_version: 3
+    time_unit: frame
+    time_scale: 1.0
+    max_source_tokens: 16
+    max_target_tokens: 8
+  cache_videos: 4
+optimizer:
+  lr: 0.0002
+  weight_decay: 0.05
+train:
+  amp: bf16_if_supported
+  grad_clip: 1.0
+  validate_every: 2000
+  save_every: 500
+  num_workers: 0
+infer:
+  mode: forward_only
+  samples: 4
+  steps: 32
+  max_edits: 256
+  action_table_limit: 256
+  deterministic: true
+evaluation:
+  cores: 1
+  evaluator_python: /home/lwr/anaconda3/envs/masaenv/bin/python

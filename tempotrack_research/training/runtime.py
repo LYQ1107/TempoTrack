@@ -44,6 +44,7 @@ from .checkpoint import AtomicCheckpoint
 from .engine import TrainConfig, TrainingEngine, seed_everything
 from .memory_trainer import MemoryInputs, MemoryTargets, MemoryTrainingTask
 from .rollout import PPOTrainer
+from .samplers import ResumablePermutationSampler
 
 
 _BUDGETS = {
@@ -180,17 +181,19 @@ def _materialize_kind_manifest(overall: Path, kind: str, run_dir: Path) -> tuple
 
 def _model_config(run_spec: RunSpec | None, method: str) -> dict[str, Any]:
     values = dict(run_spec.model if run_spec else {})
+    if run_spec is not None and run_spec.loss:
+        values.setdefault("loss_weights", dict(run_spec.loss))
     defaults = {
-        "hidden_dim": 64,
-        "layers": 1,
-        "heads": 4,
-        "ff_dim": 256,
-        "dynamic_dim": 32,
-        "graph_hidden_dim": 64,
-        "graph_layers": 2,
+        "hidden_dim": 256,
+        "layers": 4,
+        "heads": 8,
+        "ff_dim": 1024,
+        "dynamic_dim": 64,
+        "graph_hidden_dim": 128,
+        "graph_layers": 4,
         "latent_dim": 64,
         "diffusion_steps": 1000,
-        "memory_hidden_dim": 64,
+        "memory_hidden_dim": 128,
     }
     for key, value in defaults.items():
         values.setdefault(key, value)
@@ -211,9 +214,10 @@ def _make_model(method: str, sample: Mapping[str, Any], config: Mapping[str, Any
             int(sample["context_appearance"].shape[-1]), int(config["hidden_dim"]),
             int(config["layers"]), int(config["heads"]), int(config["ff_dim"]),
             int(config["dynamic_dim"]),
+            loss_weights=config.get("loss_weights"),
         )
     if method == "predictive_dual":
-        dim = int(sample["observation"].shape[-1])
+        dim = int(sample["initial_feature"].shape[-1])
         return MemoryTrainingTask(
             PredictiveDualMemory(
                 history_dim=2 * dim,
@@ -301,9 +305,10 @@ def _loss_for(method: str, model: nn.Module, batch: Mapping[str, Any], *, device
         return model.compute_loss(batch, {"positive": batch["positive"]})
     if method == "predictive_dual":
         inputs = MemoryInputs(
-            prototype=batch["prototype"], observations=batch["appearance"],
-            history_states=batch["history_state"], causal_evidence=batch["causal_evidence"],
-            frames=batch["relative_time"], bboxes=batch["geometry"],
+            initial_feature=batch["initial_feature"], initial_time=batch["initial_time"], initial_geometry=batch["initial_geometry"],
+            observations=batch["observations"], times=batch["times"], geometry=batch["geometry"],
+            competition_margin=batch["competition_margin"], margin_known=batch["margin_known"],
+            observation_scores=batch["observation_scores"], valid=batch["valid"],
         )
         targets = MemoryTargets(
             future_embedding=batch["future_embedding"],
@@ -321,12 +326,13 @@ def _loss_for(method: str, model: nn.Module, batch: Mapping[str, Any], *, device
         target = {"appearance": batch["target_appearance"], "geometry": batch["target_geometry"], "relative_time": batch["target_time"], "valid": batch["target_valid"]}
         source_valid = batch["source_valid"].bool()
         target_valid = batch["target_valid"].bool()
-        source_last = source["source_time" if False else "relative_time"]
-        source_last_index = source_valid.long().sum(-1) - 1
-        target_first_index = torch.zeros(target_valid.shape[0], dtype=torch.long, device=device)
-        source_last_time = source["relative_time"][torch.arange(source_valid.shape[0], device=device), source_last_index]
-        target_first_time = target["relative_time"][torch.arange(target_valid.shape[0], device=device), target_first_index]
-        gap = target_first_time - source_last_time
+        # Segment clocks are local by construction; the cross-segment gap is
+        # a separate causal datum emitted by the dataset, never reconstructed
+        # from two independently reset local clocks.
+        gap = batch.get("gap")
+        if gap is None:
+            raise ValueError("S2 batch lacks the explicit source-to-target gap")
+        gap = torch.as_tensor(gap, device=device, dtype=source["relative_time"].dtype).reshape(-1)
         target_state = state_transform.encode_target(source, target)
         condition = model.encode_condition(source, gap)
         return model.compute_loss(
@@ -352,16 +358,33 @@ def _loss_for(method: str, model: nn.Module, batch: Mapping[str, Any], *, device
     raise ValueError(f"no loss registered for {method}")
 
 
-def _build_ppo_envs(dataset: EditDemonstrationDataset, *, max_edits: int | None = None) -> tuple[list[GraphEditEnv], list[TrainingRewardOracle]]:
+def _build_ppo_envs(dataset: EditDemonstrationDataset, *, max_edits: int | None = None, action_table_limit: int | None = None) -> tuple[list[GraphEditEnv], list[TrainingRewardOracle]]:
     envs: list[GraphEditEnv] = []
     oracles: list[TrainingRewardOracle] = []
-    for record in dataset.records:
+    # Keep the integer position while iterating.  ``dataset.records.index``
+    # performs an O(n^2) deep equality search over the serialized graph for
+    # every episode; with the real multi-window edit set that turns the PPO
+    # environment construction into an apparent hang and is unrelated to the
+    # actual rollout workload.
+    for record_index, record in enumerate(dataset.records):
         metadata = dict(record.get("metadata", {}))
         identities = np.asarray(metadata.get("node_identities_loss_only", []), dtype=np.int64)
         edges = np.asarray(record.get("edge_index", []), dtype=np.int64).reshape(2, -1)
         valid = np.asarray(record.get("edge_valid", [True] * edges.shape[1]), dtype=bool)
         initial = np.asarray(record.get("initial_graph", [False] * edges.shape[1]), dtype=bool)
-        env = GraphEditEnv(len(identities), edges, valid, max_edits=max_edits if max_edits is not None else max(1, 2 * len(identities)))
+        video_ids = np.asarray(metadata.get("node_video_ids", []), dtype=np.int64) if "node_video_ids" in metadata else None
+        first_frames = np.asarray(metadata.get("node_first_frames", []), dtype=np.float64) if "node_first_frames" in metadata else None
+        last_frames = np.asarray(metadata.get("node_last_frames", []), dtype=np.float64) if "node_last_frames" in metadata else None
+        if any(value is not None and value.shape != (len(identities),) for value in (video_ids, first_frames, last_frames)):
+            raise DataUnavailable(f"edit episode {record.get('episode_uid')} has incomplete node time/video metadata")
+        env = GraphEditEnv(
+            len(identities), edges, valid,
+            max_edits=max_edits if max_edits is not None else max(1, 2 * len(identities)),
+            action_table_limit=action_table_limit,
+            node_video_ids=video_ids,
+            node_first_frames=first_frames,
+            node_last_frames=last_frames,
+        )
         try:
             env.reset(selected=initial)
         except ValueError:
@@ -369,7 +392,8 @@ def _build_ppo_envs(dataset: EditDemonstrationDataset, *, max_edits: int | None 
             # invalid serialized initial state is a data-contract failure,
             # not permission to introduce an oracle graph.
             raise DataUnavailable(f"edit episode {record.get('episode_uid')} has an illegal initial graph")
-        sample = dataset[dataset.records.index(record)]
+        env.initial_selected = initial.copy()
+        sample = dataset[record_index]
         env.policy_inputs = {
             "node_features": sample["node_features"].numpy(),
             "edge_features": sample["edge_features"].numpy(),
@@ -379,7 +403,8 @@ def _build_ppo_envs(dataset: EditDemonstrationDataset, *, max_edits: int | None 
             "initial_graph": sample["initial_graph"].numpy(),
         }
         envs.append(env)
-        oracles.append(TrainingRewardOracle(identities, identities >= 0))
+        counts = np.asarray(metadata.get("node_observation_counts", [1] * len(identities)), dtype=np.int64)
+        oracles.append(TrainingRewardOracle(identities, identities >= 0, observation_counts=counts))
     if not envs:
         raise DataUnavailable("PPO requires at least one real edit episode")
     return envs, oracles
@@ -417,16 +442,18 @@ def run_available_training(
     # on the same lineage.
     if base_run_root.name != "runs":
         base_run_root = base_run_root / "runs"
-    # The profile is a stopping policy, not a new run lineage.  A trial can
-    # therefore resume into the same full-schedule checkpoint instead of
-    # restarting with a short cosine schedule under a different directory.
-    run_dir = base_run_root / f"{frontend}_{method}_{phase}_seed{int(seed)}"
+    # Trial artifacts are kept at their historical lineage path for resume
+    # compatibility.  Full and integration artifacts get an explicit profile
+    # suffix: their episode manifests and schedules are different contracts,
+    # so a full run must never discover and try to resume a trial checkpoint
+    # merely because method/frontend/seed happen to match.
+    profile_suffix = "" if profile == "trial" else f"_{profile}"
+    run_dir = base_run_root / f"{frontend}_{method}_{phase}_seed{int(seed)}{profile_suffix}"
     run_dir.mkdir(parents=True, exist_ok=True)
     kind_manifest, manifest_payload = _materialize_kind_manifest(overall_manifest, kind, run_dir)
-    dataset = _dataset_class(kind)(kind_manifest, transform_snapshot=data.get("transform_snapshot"), cache_videos=int(data.get("cache_videos", 2)), epoch=0)
+    dataset = _dataset_class(kind)(kind_manifest, transform_snapshot=data.get("transform_snapshot"), cache_videos=int(data.get("cache_videos", 2)), epoch=0, history_order=str(data.get("history_order", "canonical")))
     if len(dataset) < 2:
         raise DataUnavailable(f"{kind} training loader has only {len(dataset)} episode; at least two distinct records are required")
-    loader_generator = torch.Generator().manual_seed(int(seed))
     train_config = dict(run_spec.train if run_spec else {})
     microbatch_size = int(train_config.get("microbatch_size", train_config.get("batch_size", 1)))
     accumulation_steps = int(train_config.get("accumulation_steps", 1))
@@ -435,17 +462,29 @@ def run_available_training(
     effective_batch = int(train_config.get("effective_batch", microbatch_size * accumulation_steps))
     if effective_batch != microbatch_size * accumulation_steps:
         raise ValueError("effective_batch must equal microbatch_size * accumulation_steps")
+    sampler = ResumablePermutationSampler(len(dataset), int(seed))
     loader = DataLoader(
-        dataset, batch_size=microbatch_size, shuffle=True,
+        dataset, batch_size=microbatch_size, sampler=sampler,
         num_workers=int(train_config.get("num_workers", 0)),
         pin_memory=bool(train_config.get("pin_memory", False)),
-        collate_fn=collate_training_batches, generator=loader_generator,
+        collate_fn=collate_training_batches,
     )
     sample = dataset[0]
     config = _model_config(run_spec, method)
-    data_hash = object_hash({"manifest": file_hash(overall_manifest), "kind": kind, "count": len(dataset)})
+    dependency = dict(run_spec.provenance if run_spec is not None else {})
+    data_hash = object_hash({
+        "manifest": file_hash(overall_manifest),
+        "episode_content_hash": manifest_payload.get("content_hash"),
+        "kind": kind,
+        "count": len(dataset),
+        "tensor_contract": data.get("tensor_contract_hash"),
+        "category_protocol": data.get("category_protocol_hash"),
+        "dependency_code_hash": dependency.get("dependency_code_hash"),
+    })
+    if method == "predictive_dual":
+        config.update({"history_dim": 2 * int(sample["initial_feature"].shape[-1]), "observation_dim": int(sample["initial_feature"].shape[-1]), "evidence_dim": 8})
     metadata = {
-        "schema_version": 2,
+        "schema_version": 3,
         "method": method,
         "frontend": frontend,
         "phase": phase,
@@ -454,10 +493,18 @@ def run_available_training(
         "episode_manifest": str(overall_manifest),
         "episode_kind": kind,
         "episode_count": len(dataset),
+        "episode_content_hash": manifest_payload.get("content_hash"),
+        "episode_role_counts": dict(manifest_payload.get("role_counts", {})) if isinstance(manifest_payload.get("role_counts", {}), Mapping) else {},
+        "episode_sampling_recipe": dict(manifest_payload.get("sampling_recipe", {})) if isinstance(manifest_payload.get("sampling_recipe", {}), Mapping) else {},
+        "episode_sources": list(manifest_payload.get("sources", [])) if isinstance(manifest_payload.get("sources", []), list) else [],
+        "tensor_contract_hash": data.get("tensor_contract_hash"),
+        "category_protocol_hash": data.get("category_protocol_hash"),
         "data_hash": data_hash,
         "model_config": config,
         "input_contract": "frozen_predicted_boxes_masa_features_gt_identity_supervision_only",
         "loader_config": {"microbatch_size": microbatch_size, "accumulation_steps": accumulation_steps, "effective_batch": effective_batch, "num_workers": int(train_config.get("num_workers", 0))},
+        "dependency_signatures": dependency,
+        "full_schedule_steps": int(train_config.get("full_steps", _BUDGETS.get(method, (3000, 3000))[1])),
     }
     _atomic_json(metadata, run_dir / "resolved_run.json")
 
@@ -470,7 +517,16 @@ def run_available_training(
             raise DataUnavailable("S5 PPO requires an explicit verified BC checkpoint")
         configured_max_edits = train_config.get("max_edits")
         max_edits = None if configured_max_edits is None else int(configured_max_edits)
-        envs, oracles = _build_ppo_envs(dataset, max_edits=max_edits)
+        action_table_limit = train_config.get(
+            "action_table_limit",
+            data.get("frontend", {}).get("action_table_limit", 256),
+        )
+        action_table_limit = None if action_table_limit is None else int(action_table_limit)
+        envs, oracles = _build_ppo_envs(
+            dataset,
+            max_edits=max_edits,
+            action_table_limit=action_table_limit,
+        )
         trainer = PPOTrainer(model)
         declared_transitions = train_config.get("ppo_transitions", data.get("ppo_transitions", 50000))
         ppo_checkpoint = AtomicCheckpoint(run_dir / "last.pt")
@@ -539,24 +595,93 @@ def run_available_training(
     )
     checkpoint = AtomicCheckpoint(run_dir / "last.pt")
     if resume == "auto" and checkpoint.path.exists():
-        payload = checkpoint.load(model, optimizer, scheduler=scheduler, scaler=engine.scaler, expected={"method": method, "frontend": frontend, "data_hash": data_hash}, map_location=selected_device)
+        expected_checkpoint = {"method": method, "frontend": frontend, "data_hash": data_hash}
+        try:
+            payload = checkpoint.load(model, optimizer, scheduler=scheduler, scaler=engine.scaler, expected=expected_checkpoint, map_location=selected_device)
+        except ValueError:
+            # The active V3 repair can change orchestration/report/parser code
+            # while a semantically identical ordinary-metric trial is being
+            # promoted to full.  Permit that narrow, audited continuation only
+            # when the actual episode manifest, content signature, method,
+            # frontend, model configuration and count are unchanged.  A
+            # changed data/label/model contract still raises and invalidates
+            # the legacy checkpoint as required by V3.
+            raw = torch.load(checkpoint.path, map_location="cpu", weights_only=False)
+            old = dict(raw.get("metadata", {}))
+            same_episode = (
+                method == "ordinary_metric"
+                and old.get("episode_manifest") == str(overall_manifest)
+                and old.get("episode_content_hash") == manifest_payload.get("content_hash")
+                and int(old.get("episode_count", -1)) == len(dataset)
+                and old.get("model_config") == config
+                and dict(old.get("dependency_signatures", {})).get("category_protocol_hash") == data.get("category_protocol_hash")
+                and dict(old.get("dependency_signatures", {})).get("tensor_contract_hash") == data.get("tensor_contract_hash")
+            )
+            if not same_episode:
+                raise
+            payload = checkpoint.load(model, optimizer, scheduler=scheduler, scaler=engine.scaler, expected={"method": method, "frontend": frontend}, map_location=selected_device)
+            metadata["resume_compatibility"] = {"reason": "orchestration_only_code_hash_change", "legacy_data_hash": old.get("data_hash"), "current_data_hash": data_hash, "verified_fields": ["method", "frontend", "episode_manifest", "episode_content_hash", "episode_count", "model_config"]}
         engine.global_step = int(payload.get("optimizer_step", payload.get("metadata", {}).get("global_step", 0)))
         engine.optimizer_steps = int(payload.get("optimizer_step", engine.global_step))
         engine.attempted_steps = int(payload.get("attempted_steps", engine.optimizer_steps))
         engine.epoch = int(payload.get("epoch", 0))
         engine.consumed_batch_cursor = int(payload.get("consumed_batch_cursor", 0))
+        saved_sampler = payload.get("sampler_state")
+        if not isinstance(saved_sampler, Mapping) or "permutation" not in saved_sampler:
+            raise ValueError("V3 resume requires the checkpointed episode permutation/cursor")
+        sampler.load_state_dict(dict(saved_sampler))
 
     metrics_path = run_dir / "metrics.jsonl"
     distinct_uids: set[str] = set()
+
+    # Validation is a real fixed internal-tune episode loader.  It is kept
+    # separate from the optimizer sampler and never uses official validation.
+    validation_loader = None
+    validation_manifest_value = data.get("validation_episode_manifest")
+    validation_limit = int(train_config.get("validation_batches", 4))
+    if validation_manifest_value:
+        validation_overall = Path(validation_manifest_value)
+        if not validation_overall.is_absolute():
+            validation_overall = repo / validation_overall
+        if validation_overall.exists():
+            validation_kind_manifest, _ = _materialize_kind_manifest(validation_overall, kind, run_dir / "validation")
+            validation_dataset = _dataset_class(kind)(validation_kind_manifest, transform_snapshot=data.get("transform_snapshot"), cache_videos=int(data.get("cache_videos", 2)), epoch=0, history_order=str(data.get("history_order", "canonical")))
+            if len(validation_dataset):
+                validation_loader = DataLoader(validation_dataset, batch_size=microbatch_size, shuffle=False, num_workers=0, collate_fn=collate_training_batches)
+
+    def validate_fn() -> Mapping[str, float]:
+        if validation_loader is None:
+            return {}
+        training_mode = model.training
+        model.eval()
+        totals: dict[str, float] = {}
+        batches = 0
+        with torch.no_grad():
+            for validation_batch in validation_loader:
+                moved = _move(validation_batch, selected_device)
+                values = _loss_for(method, model, moved, device=selected_device, state_transform=state_transform)
+                for name, value in values.items():
+                    if torch.is_tensor(value) and value.ndim == 0 and bool(torch.isfinite(value)):
+                        totals[name] = totals.get(name, 0.0) + float(value.detach())
+                batches += 1
+                if batches >= validation_limit:
+                    break
+        if training_mode:
+            model.train()
+        return {name: value / max(batches, 1) for name, value in totals.items()}
 
     def loss_fn(batch: Mapping[str, Any]) -> Mapping[str, Tensor]:
         moved = _move(batch, selected_device)
         _collect_episode_uids(moved.get("metadata", {}), distinct_uids)
         return _loss_for(method, model, moved, device=selected_device, state_transform=state_transform)
 
+    best_value: float | None = None
+    best_step: int | None = None
+
     def on_step(step: int, values: Mapping[str, float]) -> None:
+        nonlocal best_value, best_step
         if method == "s1_jepa" and values.get("optimizer_step_success", 0.0) > 0:
-            model.update_target(True, optimizer_step=step, schedule_steps=requested_steps)
+            model.update_target(True, optimizer_step=step, schedule_steps=schedule_steps)
         record = {"step": int(step), "method": method, "frontend": frontend, "phase": phase, "seed": int(seed), **{str(k): float(v) for k, v in values.items()}}
         with metrics_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -566,19 +691,27 @@ def run_available_training(
                 metadata={**metadata, "global_step": step, "optimizer_steps": engine.optimizer_steps},
                 optimizer_step=engine.optimizer_steps, attempted_steps=engine.attempted_steps,
                 epoch=engine.epoch, consumed_batch_cursor=engine.consumed_batch_cursor,
-                sampler_state={"seed": int(seed), "distinct_episode_uids": sorted(distinct_uids)},
-                ema_schedule={"momentum": float(model.current_momentum(requested_steps))} if method == "s1_jepa" else {},
+                sampler_state={**sampler.state_dict(), "distinct_episode_uids": sorted(distinct_uids)},
+                ema_schedule={"momentum": float(model.current_momentum(schedule_steps)), "schedule_steps": schedule_steps} if method == "s1_jepa" else {},
                 components={"state_transform": state_transform.snapshot().to_dict()} if state_transform is not None else {},
             )
+            candidate = values.get("val/total")
+            if candidate is not None and np.isfinite(float(candidate)) and (best_value is None or float(candidate) < best_value):
+                best_value = float(candidate)
+                best_step = int(step)
+                import shutil
+                best_path = run_dir / "best.pt"
+                shutil.copy2(checkpoint.path, best_path)
+                _atomic_json({"selected_step": best_step, "criterion": "val/total", "value": best_value, "split": str(validation_manifest_value), "checkpoint_sha": file_hash(best_path)}, run_dir / "best.json")
 
-    result = engine.run(loader, loss_fn, on_step=on_step)
+    result = engine.run(loader, loss_fn, on_step=on_step, validate_fn=validate_fn if validation_loader is not None else None)
     checkpoint.save(
         model, optimizer, scheduler=scheduler, scaler=engine.scaler,
         metadata={**metadata, "global_step": engine.global_step, "optimizer_steps": engine.optimizer_steps},
         optimizer_step=engine.optimizer_steps, attempted_steps=engine.attempted_steps,
         epoch=engine.epoch, consumed_batch_cursor=engine.consumed_batch_cursor,
-        sampler_state={"seed": int(seed), "distinct_episode_uids": sorted(distinct_uids)},
-        ema_schedule={"momentum": float(model.current_momentum(requested_steps))} if method == "s1_jepa" else {},
+        sampler_state={**sampler.state_dict(), "distinct_episode_uids": sorted(distinct_uids)},
+        ema_schedule={"momentum": float(model.current_momentum(schedule_steps)), "schedule_steps": schedule_steps} if method == "s1_jepa" else {},
         components={"state_transform": state_transform.snapshot().to_dict()} if state_transform is not None else {},
     )
     result_payload = {
@@ -587,6 +720,7 @@ def run_available_training(
         "checkpoint": str(checkpoint.path), "episode_manifest": str(overall_manifest),
         "episode_count": len(dataset), "distinct_episode_uids": len(distinct_uids),
         "optimizer_steps": int(engine.optimizer_steps), "requested_steps": requested_steps,
+        "best_step": best_step, "best_checkpoint": str(run_dir / "best.pt") if best_step is not None else None,
         "data_hash": data_hash, **result,
     }
     _atomic_json(result_payload, run_dir / "train_result.json")

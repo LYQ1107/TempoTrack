@@ -41,6 +41,20 @@ class TrackletStore:
         return [asdict(record) for record in self.records]
 
     @classmethod
+    def from_json(cls, values: Iterable[Mapping[str, Any]]) -> "TrackletStore":
+        records = []
+        for value in values:
+            records.append(TrackletRecord(
+                int(value["local_id"]), int(value["video_id"]),
+                [int(row) for row in value.get("observation_rows", [])],
+                int(value["first_frame"]), int(value["last_frame"]),
+                bool(value.get("active", True)),
+                None if value.get("recent_prototype_row") is None else int(value["recent_prototype_row"]),
+                None if value.get("anchor_prototype_row") is None else int(value["anchor_prototype_row"]),
+            ))
+        return cls(records)
+
+    @classmethod
     def from_assignments(cls, video_ids: np.ndarray, frame_indices: np.ndarray, assignments: np.ndarray) -> "TrackletStore":
         groups: dict[tuple[int, int], list[int]] = {}
         for row, assignment in enumerate(assignments.tolist()):

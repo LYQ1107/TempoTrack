@@ -319,7 +319,10 @@ class PPOTrainer:
             for name, value in sums.items():
                 metrics[name] = value / max(len(buffer.records), 1)
             metrics["grad_norm"] = grad_norm
-        metrics["clip_fraction"] = float(metrics.get("ratio_mean", 1.0) > 1.2 or metrics.get("ratio_mean", 1.0) < 0.8)
+        # ``ppo_loss`` reports the actual fraction of ratios outside the
+        # configured clip interval, aggregated over all concrete rollout
+        # transitions; a boolean derived from the mean is not a PPO metric.
+        metrics["clip_fraction"] = float(metrics.get("clip_fraction", 0.0))
         metrics["transitions"] = float(buffer.transitions)
         return metrics
 

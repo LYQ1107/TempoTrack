@@ -414,7 +414,8 @@ def _train(args: argparse.Namespace) -> int:
     if args.bc_checkpoint:
         config.setdefault("data", {})["bc_checkpoint"] = str(_path(repo, args.bc_checkpoint))
     run_root = _path(repo, args.run_root) or _path(repo, local.get("run_root")) or repo / "outputs/research_v2/runs"
-    spec = build_run_spec(method=args.method, frontend=args.frontend, phase=args.phase, config=config, run_root=run_root, seed=args.seed, provenance={"scheme": args.scheme, "base_commit": suite.get("base_commit")})
+    dependency_code_hash = object_hash({str(path.relative_to(repo)): file_hash(path) for path in sorted((repo / "tempotrack_research").rglob("*.py"))})
+    spec = build_run_spec(method=args.method, frontend=args.frontend, phase=args.phase, config=config, run_root=run_root, seed=args.seed, provenance={"scheme": args.scheme, "base_commit": suite.get("base_commit"), "dependency_code_hash": dependency_code_hash, "category_protocol_hash": config.get("data", {}).get("category_protocol_hash"), "tensor_contract_hash": config.get("data", {}).get("tensor_contract_hash")})
     signature = object_hash({"method": args.method, "frontend": args.frontend, "phase": args.phase, "profile": args.profile, "seed": args.seed, "config": config, "episodes": config.get("data", {}).get("episode_manifest")})
     started = _now()
     _job_record(repo, {"job_id": f"{args.scheme or args.method}.{args.profile}.seed{args.seed}", "scheme": args.scheme, "method": args.method, "frontend": args.frontend, "phase": args.phase, "profile": args.profile, "seed": args.seed, "status": "RUNNING", "started_at": started, "run_signature": signature, "command": sys.argv})
@@ -467,7 +468,7 @@ def _infer(args: argparse.Namespace) -> int:
     if args.training_run and not checkpoint_reference:
         run = _path(repo, args.training_run)
         checkpoint_reference = str(run / "last.pt") if run and run.is_dir() else str(run) if run else None
-    result = run_inference(InferenceSpec(args.method, args.frontend, args.split, source, output, _resolve_infer_checkpoint(repo, checkpoint_reference, run_root), _path(repo, args.memory_checkpoint), protocol, args.seed, spec))
+    result = run_inference(InferenceSpec(method=args.method, frontend=args.frontend, split=args.split, source_manifest=source, output_dir=output, checkpoint=_resolve_infer_checkpoint(repo, checkpoint_reference, run_root), memory_checkpoint=_path(repo, args.memory_checkpoint), protocol=protocol, seed=args.seed, run_spec=spec, tracklet_manifest=_path(repo, args.tracklet_manifest) if args.tracklet_manifest else None))
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0
 
@@ -481,7 +482,7 @@ def _evaluate(args: argparse.Namespace) -> int:
         raise DataUnavailable("evaluate requires source manifest and raw prediction list")
     run_root = _path(repo, args.run_root) if args.run_root else (repo / "outputs/research_v2")
     output = _path(repo, args.output) or run_root / "evaluations"
-    result = OfficialEvaluator(repo).evaluate(EvaluationSpec(repo, source, prediction, _path(repo, args.annotation), output, args.name, _path(repo, args.evaluator_python), args.cores, _path(repo, args.gt)))
+    result = OfficialEvaluator(repo).evaluate(EvaluationSpec(repo, source, prediction, _path(repo, args.annotation), output, args.name, _path(repo, args.evaluator_python), args.cores, _path(repo, args.gt), _path(repo, args.category_protocol)))
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0 if result.get("status") == "COMPLETED" else 3
 
@@ -554,6 +555,64 @@ def _report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _repair_v3(args: argparse.Namespace) -> int:
+    """Run the V3 repair/experiment executor and its read-only inspectors."""
+    from .orchestration.v3_pipeline import inspect_v3, reparse_v3, run_repair_v3, status_v3
+
+    repo = _repo(args.repo)
+    action = args.repair_v3_action
+    if action == "inspect":
+        result = inspect_v3(repo, _path(repo, args.reference_root) or repo / "outputs/research_v2", _path(repo, args.output))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+    if action == "reparse":
+        result = reparse_v3(repo, _path(repo, args.reference_root) or repo / "outputs/research_v2", _path(repo, args.output))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+    if action == "status":
+        result = status_v3(repo, _path(repo, args.run_root) or repo / "outputs/research_v3", _path(repo, args.output))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
+    if action == "report":
+        from .orchestration.v3_report import generate_v3_report
+        run_root = _path(repo, args.run_root) or repo / "outputs/research_v3"
+        output = _path(repo, args.output) or repo / "reports/v3/ICLR_V3_FINAL.md"
+        result = generate_v3_report(repo, run_root, output, final=True)
+        print(json.dumps({"report": str(result)}, ensure_ascii=False, indent=2))
+        return 0
+    if action == "controls":
+        from .orchestration.v3_controls import run_v3_controls
+        run_root = _path(repo, args.run_root) or repo / "outputs/research_v3"
+        prepared = _path(repo, args.prepared) or run_root / "prepared/prepared_manifest.json"
+        result = run_v3_controls(repo, _path(repo, args.local) or repo / "configs/research/local.v3.yaml", prepared, run_root)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0 if result.get("status") == "COMPLETED" else 3
+    if action == "run":
+        config = _path(repo, args.config)
+        local = _path(repo, args.local)
+        if config is None or local is None:
+            raise DataUnavailable("repair-v3 run requires --config and --local")
+        result = run_repair_v3(
+            repo,
+            config,
+            local,
+            _path(repo, args.reference_root) or repo / "outputs/research_v2",
+            _path(repo, args.run_root) or repo / "outputs/research_v3",
+            through=args.through,
+            resume=args.resume,
+            quiesce=args.quiesce_owned,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        terminal = {"COMPLETED", "FAILED", "BLOCKED_EXTERNAL"}
+        statuses = [str(item.get("status")) for item in result.get("tasks", [])]
+        if result.get("through") == "repair":
+            return 0
+        if statuses and all(status in terminal for status in statuses) and not any(status == "FAILED" for status in statuses):
+            return 0
+        return 3
+    raise ValueError(f"unknown repair-v3 action: {action}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tempotrack-repair")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -564,13 +623,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("build-episodes"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--suite"); p.add_argument("--prepared"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--frontend-manifest"); p.add_argument("--observations"); p.add_argument("--split", default="train_base"); p.add_argument("--kinds", default="memory,pair,continuation,graph,edit"); p.add_argument("--resume", default="auto"); p.set_defaults(func=_build_episodes)
     p = sub.add_parser("replay"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--manifest", required=True); p.add_argument("--split", default="train_base"); p.add_argument("--frontend", choices=["fixed_dual", "predictive_dual"], required=True); p.add_argument("--memory-checkpoint"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); p.set_defaults(func=_replay)
     p = sub.add_parser("train"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--suite"); p.add_argument("--config"); p.add_argument("--method", choices=sorted(METHODS), required=True); p.add_argument("--frontend", choices=["fixed_dual", "predictive_dual"], required=True); p.add_argument("--scheme"); p.add_argument("--phase", choices=["bc", "ppo", "frontend", "train"], default=None); p.add_argument("--profile", choices=["trial", "full", "integration"], default="trial"); p.add_argument("--seed", type=int, default=0); p.add_argument("--episodes"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); p.add_argument("--checkpoint"); p.add_argument("--ddp", action="store_true"); p.add_argument("--device"); p.add_argument("--max-steps", type=int); p.add_argument("--ppo-transitions", type=int); p.add_argument("--bc-checkpoint"); p.set_defaults(func=_train)
-    p = sub.add_parser("infer"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--manifest"); p.add_argument("--observations", dest="manifest"); p.add_argument("--split", default="val_base_internal"); p.add_argument("--method", choices=["no_offline", "stable_emd", "ordinary_metric", "s1_jepa", "s2_state_fm", "s3_graph_fm", "s4_graph_diffusion", "s5_rl_edit"], required=True); p.add_argument("--frontend", choices=["fixed_dual", "predictive_dual"], required=True); p.add_argument("--phase"); p.add_argument("--checkpoint"); p.add_argument("--training-run"); p.add_argument("--memory-checkpoint"); p.add_argument("--protocol"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--seed", type=int, default=0); p.add_argument("--mode"); p.add_argument("--samples", type=int); p.add_argument("--steps", type=int); p.set_defaults(func=_infer)
-    p = sub.add_parser("evaluate"); p.add_argument("--repo", default="."); p.add_argument("--manifest", required=True); p.add_argument("--observations", dest="manifest"); p.add_argument("--prediction", required=True); p.add_argument("--annotation"); p.add_argument("--annotations", dest="annotation"); p.add_argument("--gt"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--name", required=True); p.add_argument("--evaluator-python"); p.add_argument("--cores", type=int, default=1); p.set_defaults(func=_evaluate)
+    p = sub.add_parser("infer"); p.add_argument("--repo", default="."); p.add_argument("--local"); p.add_argument("--manifest"); p.add_argument("--observations", dest="manifest"); p.add_argument("--split", default="val_base_internal"); p.add_argument("--method", choices=["no_offline", "stable_emd", "ordinary_metric", "s1_jepa", "s2_state_fm", "s3_graph_fm", "s4_graph_diffusion", "s5_rl_edit"], required=True); p.add_argument("--frontend", choices=["fixed_dual", "predictive_dual"], required=True); p.add_argument("--phase"); p.add_argument("--checkpoint"); p.add_argument("--training-run"); p.add_argument("--memory-checkpoint"); p.add_argument("--protocol"); p.add_argument("--tracklet-manifest"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--seed", type=int, default=0); p.add_argument("--mode"); p.add_argument("--samples", type=int); p.add_argument("--steps", type=int); p.set_defaults(func=_infer)
+    p = sub.add_parser("evaluate"); p.add_argument("--repo", default="."); p.add_argument("--manifest", required=True); p.add_argument("--observations", dest="manifest"); p.add_argument("--prediction", required=True); p.add_argument("--annotation"); p.add_argument("--annotations", dest="annotation"); p.add_argument("--gt"); p.add_argument("--category-protocol"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--name", required=True); p.add_argument("--evaluator-python"); p.add_argument("--cores", type=int, default=1); p.set_defaults(func=_evaluate)
     p = sub.add_parser("audit-repairs"); p.add_argument("--repo", default="."); p.add_argument("--level", choices=["static", "integration", "trial", "full", "pretrial", "prefull"], default="static"); p.add_argument("--source-manifest"); p.add_argument("--observations", dest="source_manifest"); p.add_argument("--output"); p.add_argument("--skip-passed", action="store_true"); p.add_argument("--methods", default="all"); p.add_argument("--local"); p.add_argument("--run-root"); p.set_defaults(func=_audit)
     p = sub.add_parser("build-check"); p.add_argument("--repo", default="."); p.add_argument("--changed-only", action="store_true"); p.add_argument("--skip-passed", action="store_true"); p.add_argument("--smoke", action="store_true"); p.set_defaults(func=_build_check)
     p = sub.add_parser("suite"); p.add_argument("--repo", default="."); p.add_argument("--config"); p.add_argument("--local"); p.add_argument("--stage", choices=["static", "build", "integration", "trial", "full", "all"], default="all"); p.add_argument("--verification", default="build"); p.add_argument("--require-gates"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); p.add_argument("--keep-going", action=argparse.BooleanOptionalAction, default=True); p.add_argument("--max-steps", type=int); p.set_defaults(func=_suite)
     p = sub.add_parser("status"); p.add_argument("--repo", default="."); p.add_argument("--run-root"); p.set_defaults(func=_status)
     p = sub.add_parser("report"); p.add_argument("--repo", default="."); p.add_argument("--run-root"); p.add_argument("--output"); p.set_defaults(func=_report)
+    p = sub.add_parser("repair-v3")
+    v3 = p.add_subparsers(dest="repair_v3_action", required=True)
+    q = v3.add_parser("inspect"); q.add_argument("--repo", default="."); q.add_argument("--reference-root", required=True); q.add_argument("--output"); q.set_defaults(func=_repair_v3)
+    q = v3.add_parser("reparse"); q.add_argument("--repo", default="."); q.add_argument("--reference-root", required=True); q.add_argument("--output"); q.set_defaults(func=_repair_v3)
+    q = v3.add_parser("status"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output"); q.set_defaults(func=_repair_v3)
+    q = v3.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output"); q.set_defaults(func=_repair_v3)
+    q = v3.add_parser("controls"); q.add_argument("--repo", default="."); q.add_argument("--local", required=True); q.add_argument("--run-root", required=True); q.add_argument("--prepared"); q.set_defaults(func=_repair_v3)
+    q = v3.add_parser("run"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--local", required=True); q.add_argument("--reference-root", required=True); q.add_argument("--run-root", required=True); q.add_argument("--through", choices=["repair", "integration", "trial", "full", "complete"], default="complete"); q.add_argument("--resume", choices=["auto", "never", "strict"], default="auto"); q.add_argument("--quiesce-owned", action="store_true"); q.set_defaults(func=_repair_v3)
     return parser
 
 

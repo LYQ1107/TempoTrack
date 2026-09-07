@@ -21,7 +21,9 @@ from typing import Any, Mapping, Sequence
 
 from ..config import file_hash, object_hash
 from ..data.feature_export import load_dataset_manifest
+from ..data.category_protocol import load_category_protocol
 from .protocol import check_immutable_protocol
+from .teta_parser import inspect_installed_teta, parse_teta_summary
 
 
 def _now() -> str:
@@ -108,6 +110,7 @@ class EvaluationSpec:
     evaluator_python: Path | None = None
     cores: int = 1
     gt_path: Path | None = None
+    category_protocol: Path | None = None
 
 
 @dataclass
@@ -145,6 +148,7 @@ class OfficialEvaluator:
             values["output_dir"] = Path(values["output_dir"])
             values["evaluator_python"] = Path(values["evaluator_python"]) if values.get("evaluator_python") else None
             values["gt_path"] = Path(values["gt_path"]) if values.get("gt_path") else None
+            values["category_protocol"] = Path(values["category_protocol"]) if values.get("category_protocol") else None
             spec = EvaluationSpec(**values)
         source = load_dataset_manifest(spec.source_manifest)
         if not spec.prediction_path.exists():
@@ -228,12 +232,15 @@ class OfficialEvaluator:
 
         summary_path = output_dir / spec.name / "teta_summary_results.pth"
         metrics = None
+        named_metrics = None
         parse_error = None
         if process.returncode == 0 and summary_path.exists():
             try:
                 with summary_path.open("rb") as handle:
                     summary = pickle.load(handle)
                 metrics = _summary_metrics(summary)
+                protocol = load_category_protocol(spec.category_protocol) if spec.category_protocol else None
+                named_metrics = parse_teta_summary(summary_path, category_protocol=protocol, teta_schema=inspect_installed_teta(), evaluation_manifest={"source_manifest": str(spec.source_manifest), "prediction": str(spec.prediction_path)})
             except Exception as exc:  # pragma: no cover - depends on TETA version
                 parse_error = str(exc)
         if process.returncode != 0:
@@ -242,7 +249,7 @@ class OfficialEvaluator:
         elif not summary_path.exists():
             status = "PARSE_FAILED"
             evidence = "official evaluator exited 0 but did not create teta_summary_results.pth"
-        elif metrics is None:
+        elif metrics is None or named_metrics is None:
             status = "PARSE_FAILED"
             evidence = parse_error or "official summary contained no numeric metric leaves"
         else:
@@ -257,6 +264,7 @@ class OfficialEvaluator:
             "mapping_check": mapping_check,
             "command_hash": object_hash(command),
             "metric_units": {"TETA": "official_evaluator_native"} if metrics is not None else {},
+            "named_metrics": named_metrics,
             "source_payload_hash": file_hash(spec.source_manifest),
             "gt_split_hash": file_hash(gt_path),
             "evaluator": {"script": str(script_path), "script_hash": file_hash(script_path) if script_path.exists() else None, "python": str(evaluator)},

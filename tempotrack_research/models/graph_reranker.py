@@ -77,13 +77,23 @@ class GraphReranker(nn.Module):
         if times.shape != (batch_size, nodes):
             raise ValueError("node_times must have shape [B,N]")
         node_encoded = self.node(node_features) * node_mask.unsqueeze(-1).to(node_features.dtype)
+        # Path extraction is discrete.  Materialize the small integer/mask
+        # control plane once per forward so a large graph does not trigger a
+        # CUDA-to-host synchronization for every edge in the Python loops.
+        edge_index_cpu = edge_index.detach().cpu()
+        selected_cpu = selected_edges.detach().cpu()
+        edge_mask_cpu = edge_mask.detach().cpu()
+        node_mask_cpu = node_mask.detach().cpu()
         scores: list[Tensor] = []
         for batch in range(batch_size):
             chosen = []
+            selected_lookup: dict[tuple[int, int], int] = {}
             for edge in range(edges):
-                source, target = (int(edge_index[batch, 0, edge]), int(edge_index[batch, 1, edge]))
-                if bool(selected_edges[batch, edge]) and bool(edge_mask[batch, edge]) and 0 <= source < nodes and 0 <= target < nodes and bool(node_mask[batch, source]) and bool(node_mask[batch, target]):
-                    chosen.append((source, target))
+                source, target = (int(edge_index_cpu[batch, 0, edge]), int(edge_index_cpu[batch, 1, edge]))
+                if bool(selected_cpu[batch, edge]) and bool(edge_mask_cpu[batch, edge]) and 0 <= source < nodes and 0 <= target < nodes and bool(node_mask_cpu[batch, source]) and bool(node_mask_cpu[batch, target]):
+                    pair = (source, target)
+                    chosen.append(pair)
+                    selected_lookup.setdefault(pair, edge)
             paths = self._paths(nodes, chosen)
             path_values: list[Tensor] = []
             for path in paths:
@@ -92,12 +102,9 @@ class GraphReranker(nn.Module):
                 edge_values: list[Tensor] = []
                 gaps: list[Tensor] = []
                 for left, right in zip(path, path[1:]):
-                    match = next((edge for edge, pair in enumerate(chosen) if pair == (left, right)), None)
-                    if match is None:
+                    original = selected_lookup.get((left, right))
+                    if original is None:
                         continue
-                    # Recover the corresponding original edge row; duplicates
-                    # are rejected by candidate validation before this point.
-                    original = next(edge for edge in range(edges) if int(edge_index[batch, 0, edge]) == left and int(edge_index[batch, 1, edge]) == right and bool(selected_edges[batch, edge]))
                     edge_values.append(edge_features[batch, original])
                     gaps.append((times[batch, right] - times[batch, left]).reshape(1))
                 if edge_values:

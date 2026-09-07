@@ -1,0 +1,14 @@
+schema_version: 3
+method: s2_state_fm
+model:
+  hidden_dim: 256
+  layers: 4
+  heads: 8
+  ff_dim: 1024
+  latent_dim: 64
+loss:
+  flow: 1.0
+  existence: 1.0
+sampling:
+  samples: 16
+  steps: 32

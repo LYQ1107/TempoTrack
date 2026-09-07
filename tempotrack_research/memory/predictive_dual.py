@@ -145,7 +145,12 @@ def build_causal_evidence(
     if geo.shape[-1] != 4:
         raise ValueError("geometry_delta must have four normalized fields")
     geo = geo.expand(*batch_shape, 4) if geo.ndim == 1 and len(batch_shape) else geo
-    margin = torch.zeros_like(consistency) if missing_margin else scalar(accepted_match_margin)
+    if torch.is_tensor(missing_margin):
+        missing = missing_margin.to(device=device, dtype=torch.bool).reshape(batch_shape)
+        margin_value = scalar(accepted_match_margin)
+        margin = torch.where(missing, torch.zeros_like(consistency), margin_value)
+    else:
+        margin = torch.zeros_like(consistency) if bool(missing_margin) else scalar(accepted_match_margin)
     gap = torch.log1p(scalar(time_since_last_seen).clamp_min(0.0) / max(float(time_scale), 1e-6))
     age = torch.log1p(scalar(time_since_birth).clamp_min(0.0) / max(float(time_scale), 1e-6))
     return torch.cat((consistency.unsqueeze(-1), gap.unsqueeze(-1), margin.unsqueeze(-1), geo.reshape(*batch_shape, 4), age.unsqueeze(-1)), dim=-1)

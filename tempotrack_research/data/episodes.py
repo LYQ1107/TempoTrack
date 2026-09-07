@@ -265,39 +265,93 @@ def _graph_records(ledger_path: Path, ledger: ObservationLedger, label: Any, *, 
     return [record]
 
 
-def _edit_records(graph_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _edit_records(
+    graph_records: list[dict[str, Any]],
+    *,
+    action_table_limit: int | None = 256,
+    max_trajectory_steps: int = 8,
+) -> list[dict[str, Any]]:
+    """Materialize finite legal BC trajectories from each deployment graph.
+
+    A single oracle action at ``stage=0`` is not a behavior-cloning dataset
+    for an edit policy: after that action the policy observes a different
+    selected graph and remaining budget.  We therefore emit one real record
+    per visited state, choose the best legal concrete action using the
+    training-only reward oracle, and advance the same :class:`GraphEditEnv`.
+    STOP is emitted when no positive legal edit remains or the declared
+    trajectory cap is reached.  The candidate table remains the bounded real
+    ADD/REMOVE/REWIRE/STOP vocabulary produced by the environment.
+    """
+    if int(max_trajectory_steps) < 1:
+        raise ValueError("max_trajectory_steps must be positive")
     result: list[dict[str, Any]] = []
     for record in graph_records:
-        value = dict(record)
-        value["kind"] = "edit"
-        value["stage"] = 0
         node_ids = np.asarray(record.get("metadata", {}).get("node_identities_loss_only", []), dtype=np.int64)
         edge_index = np.asarray(record.get("edge_index", []), dtype=np.int64).reshape(2, -1)
         initial = np.asarray(record.get("initial_graph", [0] * edge_index.shape[1]), dtype=bool)
-        env = GraphEditEnv(len(node_ids), edge_index, np.asarray(record.get("edge_valid", [True] * edge_index.shape[1]), dtype=bool), max_edits=max(1, len(node_ids) * 2))
+        env = GraphEditEnv(
+            len(node_ids), edge_index,
+            np.asarray(record.get("edge_valid", [True] * edge_index.shape[1]), dtype=bool),
+            max_edits=max(1, len(node_ids) * 2),
+            action_table_limit=action_table_limit,
+        )
         env.reset(selected=initial)
-        actions = env.action_table()
-        oracle = TrainingRewardOracle(node_ids, node_ids >= 0, edit_cost=0.01)
-        best_index = len(actions["kind"]) - 1  # STOP is always last
-        best_reward = 0.0
-        for index, action in enumerate(actions["actions"]):
-            if action.kind_name == "STOP":
-                continue
+        observation_counts = np.asarray([max(1, len(node.get("rows", []))) for node in record.get("nodes", [])], dtype=np.int64)
+        oracle = TrainingRewardOracle(node_ids, node_ids >= 0, edit_cost=0.01, observation_counts=observation_counts)
+        trajectory: list[dict[str, Any]] = []
+        for stage in range(int(max_trajectory_steps)):
+            actions = env.action_table()
+            best_index = len(actions["kind"]) - 1  # STOP is always last
+            best_reward = 0.0
             before = env.selected.copy()
-            try:
-                env._apply(action)
-            except Exception:
-                continue
-            reward = oracle.reward(edge_index, before, env.selected, action_kind=action.kind_name)
-            env.selected = before
-            if reward > best_reward:
-                best_reward, best_index = reward, index
-        value["action_target"] = [best_index]
-        value["action_mask"] = actions["valid"].tolist()
-        value["action_table"] = {name: actions[name].tolist() for name in ("kind", "edge_index", "replacement_edge_index", "valid")}
-        value["remaining_budget"] = float(env.max_edits)
-        value["metadata"] = {**dict(value.get("metadata", {})), "bc_oracle_reward": best_reward, "reward_is_training_only": True}
-        result.append(value)
+            # The serialized action table was generated from this legal state.
+            # Evaluate each concrete action by applying its edge delta directly;
+            # the chosen action is then applied through env.step below.
+            for index, action in enumerate(actions["actions"]):
+                if action.kind_name == "STOP":
+                    continue
+                after = before.copy()
+                if action.kind_name == "ADD" and 0 <= action.edge_index < len(after):
+                    after[action.edge_index] = True
+                elif action.kind_name == "REMOVE" and 0 <= action.edge_index < len(after):
+                    after[action.edge_index] = False
+                elif action.kind_name == "REWIRE" and 0 <= action.edge_index < len(after) and 0 <= action.replacement_edge_index < len(after):
+                    after[action.edge_index] = False
+                    after[action.replacement_edge_index] = True
+                else:
+                    continue
+                reward = oracle.reward(edge_index, before, after, action_kind=action.kind_name)
+                if reward > best_reward:
+                    best_reward, best_index = reward, index
+
+            value = dict(record)
+            value["kind"] = "edit"
+            value["stage"] = int(stage)
+            value["episode_uid"] = f"{record.get('episode_uid', 'edit')}::stage{stage}"
+            value["selected_edges"] = before.astype(int).tolist()
+            value["action_target"] = [best_index]
+            value["action_mask"] = actions["valid"].tolist()
+            value["action_table"] = {name: actions[name].tolist() for name in ("kind", "edge_index", "replacement_edge_index", "valid")}
+            value["remaining_budget"] = float(env.max_edits - env.steps)
+            value["metadata"] = {
+                **dict(value.get("metadata", {})),
+                "bc_oracle_reward": float(best_reward),
+                "reward_is_training_only": True,
+                "node_observation_counts": observation_counts.tolist(),
+                "action_table_limit": action_table_limit,
+                "action_table_types": sorted(set(str(action.kind_name) for action in actions["actions"])),
+                "trajectory_stage": int(stage),
+                "trajectory_cap": int(max_trajectory_steps),
+            }
+            trajectory.append(value)
+            chosen = actions["actions"][best_index]
+            if chosen.kind_name == "STOP" or best_reward <= 0.0:
+                break
+            env.step(chosen)
+
+        for value in trajectory:
+            value["metadata"] = {**dict(value.get("metadata", {})), "trajectory_length": len(trajectory)}
+        result.extend(trajectory)
     return result
 
 

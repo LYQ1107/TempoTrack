@@ -19,4 +19,5 @@ def ppo_loss(new_logprob: Tensor, old_logprob: Tensor, advantage: Tensor, value:
     policy = -torch.minimum(unclipped, clipped).mean()
     value_loss = 0.5 * (value - returns).square().mean()
     total = policy + value_weight * value_loss - entropy_weight * entropy.mean()
-    return {"total": total, "policy": policy.detach(), "value": value_loss.detach(), "entropy": entropy.mean().detach(), "ratio_mean": ratio.mean().detach()}
+    clipped_mask = ((ratio < 1.0 - clip_ratio) | (ratio > 1.0 + clip_ratio))
+    return {"total": total, "policy": policy.detach(), "value": value_loss.detach(), "entropy": entropy.mean().detach(), "ratio_mean": ratio.mean().detach(), "clip_fraction": clipped_mask.float().mean().detach()}

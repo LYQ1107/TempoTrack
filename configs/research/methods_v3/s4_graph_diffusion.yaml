@@ -1,0 +1,12 @@
+schema_version: 3
+method: s4_graph_diffusion
+model:
+  graph_hidden_dim: 128
+  graph_layers: 4
+  diffusion_steps: 1000
+loss:
+  diffusion: 1.0
+  edge: 1.0
+sampling:
+  samples: 4
+  steps: 50

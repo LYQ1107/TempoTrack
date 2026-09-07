@@ -57,7 +57,7 @@ class StateTransformSnapshot:
 class SuccessorStateTransform:
     """Encode ``[geometry_delta(4), appearance_residual(60)]`` states."""
 
-    schema_version = 1
+    schema_version = 2
 
     def __init__(self, appearance_dim: int, *, appearance_latent_dim: int = 60, mode: str = "pca", snapshot: StateTransformSnapshot | Mapping[str, Any] | None = None):
         if appearance_latent_dim != 60:
@@ -170,12 +170,26 @@ class SuccessorStateTransform:
         valid = valid.bool()
         if valid.shape != values.shape[:2] or not bool(valid.any(dim=-1).all()):
             raise ValueError("every S2 segment needs at least one valid token")
-        indices = valid.long().sum(-1) - 1
-        return values[torch.arange(values.shape[0], device=values.device), indices]
+        rows: list[Tensor] = []
+        for row, mask in zip(values, valid):
+            indices = torch.nonzero(mask, as_tuple=False).flatten()
+            if indices.numel() == 0:
+                raise ValueError("every S2 segment needs at least one valid token")
+            rows.append(row[indices[-1]])
+        return torch.stack(rows)
 
-    def _appearance_residual(self, source_app: Tensor, target_app: Tensor) -> Tensor:
-        source = source_app.mean(dim=-2) if source_app.ndim == 3 else source_app
-        target = target_app.mean(dim=-2) if target_app.ndim == 3 else target_app
+    @staticmethod
+    def _masked_mean(values: Tensor, valid: Tensor | None) -> Tensor:
+        if values.ndim != 3:
+            return values
+        if valid is None:
+            return values.mean(dim=-2)
+        weights = valid.bool().to(values.dtype).unsqueeze(-1)
+        return (values * weights).sum(dim=-2) / weights.sum(dim=-2).clamp_min(1.0)
+
+    def _appearance_residual(self, source_app: Tensor, target_app: Tensor, source_valid: Tensor | None = None, target_valid: Tensor | None = None) -> Tensor:
+        source = self._masked_mean(source_app, source_valid)
+        target = self._masked_mean(target_app, target_valid)
         residual = (target - source).float()
         mean = self.mean.to(residual.device)
         components = self.components.to(residual.device)
@@ -190,11 +204,19 @@ class SuccessorStateTransform:
         source_geo = source_geo if source_geo.ndim == 3 else source_geo.unsqueeze(0)
         target_geo = target_geo if target_geo.ndim == 3 else target_geo.unsqueeze(0)
         source_box = self._last(source_geo, source_valid)
-        target_box = self._last(target_geo, target_valid)
+        if target_valid is None:
+            target_valid = torch.ones(target_geo.shape[:2], dtype=torch.bool, device=target_geo.device)
+        target_indices: list[Tensor] = []
+        for row, mask in zip(target_geo, target_valid.bool()):
+            indices = torch.nonzero(mask, as_tuple=False).flatten()
+            if indices.numel() == 0:
+                raise ValueError("S2 target segment has no valid first observation")
+            target_indices.append(indices[0])
+        target_box = torch.stack([row[index] for row, index in zip(target_geo, target_indices)])
         # Geometry is already normalised by SegmentTensorizer.  The first two
         # entries are centre displacement; the latter two are log size change.
         delta = target_box - source_box
-        return torch.cat((delta, self._appearance_residual(source_app, target_app)), dim=-1)
+        return torch.cat((delta, self._appearance_residual(source_app, target_app, source_valid, target_valid)), dim=-1)
 
     def encode_candidate(self, source: Any, candidate: Any) -> Tensor:
         return self.encode_target(source, candidate)
@@ -245,25 +267,28 @@ class _ResidualField(nn.Module):
         self.net = nn.Sequential(*blocks)
 
     def forward(self, state: Tensor, time: Tensor, condition: Tensor) -> Tensor:
+        if state.ndim not in {2, 3} or condition.ndim not in {2, 3}:
+            raise ValueError("S2 field expects state [B,D]/[K,B,D]/[B,K,D] and explicit condition axes")
+        target_shape = state.shape[:-1]
+        if state.ndim == 2:
+            if condition.ndim != 2 or condition.shape[0] != state.shape[0]:
+                raise ValueError("S2 [B,D] state requires condition [B,C]")
+            condition = condition
+        elif condition.ndim == 3:
+            if condition.shape[:2] != target_shape:
+                raise ValueError("S2 [B,K,D] state requires condition [B,K,C]")
+        elif state.shape[0] == condition.shape[0]:
+            # [B,K,D] state with a condition shared by K candidates.
+            condition = condition.unsqueeze(1).expand(state.shape[0], state.shape[1], condition.shape[-1])
+        elif state.shape[1] == condition.shape[0]:
+            # [K,B,D] integration state with a condition shared by K samples.
+            condition = condition.unsqueeze(0).expand(state.shape[0], state.shape[1], condition.shape[-1])
+        else:
+            raise ValueError("S2 sample and condition batch axes do not agree")
         if time.ndim == state.ndim - 1:
             time = time.unsqueeze(-1)
-        while condition.ndim < state.ndim:
-            # ``sample_states`` integrates [K,B,D] states against [B,C]
-            # conditions, whereas ordinary flow training uses [B,D] or
-            # [B,K,D].  Insert the sample axis on the left in the former
-            # case and the candidate axis before the feature axis in the
-            # latter; an unconditional unsqueeze(-2) swaps K and B.
-            if (
-                state.ndim == condition.ndim + 1
-                and condition.ndim >= 2
-                and state.shape[1:-1] == condition.shape[:-1]
-                and state.shape[0] != condition.shape[0]
-            ):
-                condition = condition.unsqueeze(0)
-            else:
-                condition = condition.unsqueeze(-2)
-        condition = condition.expand(*state.shape[:-1], condition.shape[-1])
-        time = time.expand(*state.shape[:-1], 1)
+        if time.ndim != state.ndim or time.shape[:-1] != target_shape:
+            raise ValueError("S2 flow time axes do not match state axes")
         return self.net(torch.cat((state, time, condition), dim=-1))
 
 
@@ -311,10 +336,9 @@ class ContinuationFlowModel(nn.Module):
         valid = valid.bool()
         if not bool(valid.any(dim=-1).all()):
             raise ValueError("source condition contains an all-padding segment")
-        idx = valid.long().sum(-1) - 1
-        batch = torch.arange(appearance.shape[0], device=appearance.device)
-        last = torch.cat((appearance[batch, idx], geometry[batch, idx], time[batch, idx].unsqueeze(-1)), dim=-1)
-        history = self.history_encoder(last)
+        encoded_tokens = self.history_encoder(torch.cat((appearance, geometry, time.unsqueeze(-1)), dim=-1))
+        weights = valid.to(encoded_tokens.dtype).unsqueeze(-1)
+        history = (encoded_tokens * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
         gap_value = torch.zeros((appearance.shape[0], 1), dtype=history.dtype, device=history.device) if gap is None else torch.as_tensor(gap, device=history.device, dtype=history.dtype).reshape(-1, 1)
         if gap_value.shape[0] == 1 and history.shape[0] != 1:
             gap_value = gap_value.expand(history.shape[0], -1)

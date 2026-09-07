@@ -9,17 +9,21 @@ import torch
 from torch import Tensor, nn
 
 from ..losses.predictive import counterfactual_utility_loss, predictive_memory_loss
-from ..memory.predictive_dual import PredictiveDualMemory, UtilityExample, UtilityLabelBuilder
+from ..memory.predictive_dual import PredictiveDualMemory, UtilityExample, UtilityLabelBuilder, build_causal_evidence
 
 
 @dataclass
 class MemoryInputs:
-    prototype: Tensor
+    initial_feature: Tensor
+    initial_time: Tensor
+    initial_geometry: Tensor
     observations: Tensor
-    history_states: Tensor
-    causal_evidence: Tensor
-    frames: Tensor | None = None
-    bboxes: Tensor | None = None
+    times: Tensor
+    geometry: Tensor
+    competition_margin: Tensor
+    margin_known: Tensor
+    observation_scores: Tensor
+    valid: Tensor
 
 
 @dataclass
@@ -46,9 +50,10 @@ class MemoryTrainingTask(nn.Module):
     def forward(self, inputs: MemoryInputs | Mapping[str, Tensor], targets: MemoryTargets | Mapping[str, Tensor]) -> dict[str, Tensor]:
         if isinstance(inputs, Mapping):
             inputs = MemoryInputs(
-                prototype=inputs["prototype"], observations=inputs["observations"],
-                history_states=inputs["history_states"], causal_evidence=inputs["causal_evidence"],
-                frames=inputs.get("frames"), bboxes=inputs.get("bboxes"),
+                initial_feature=inputs["initial_feature"], initial_time=inputs["initial_time"], initial_geometry=inputs["initial_geometry"],
+                observations=inputs["observations"], times=inputs["times"], geometry=inputs["geometry"],
+                competition_margin=inputs["competition_margin"], margin_known=inputs["margin_known"],
+                observation_scores=inputs["observation_scores"], valid=inputs["valid"],
             )
         if isinstance(targets, Mapping):
             targets = MemoryTargets(
@@ -56,26 +61,55 @@ class MemoryTrainingTask(nn.Module):
                 candidate_known=targets["candidate_known"], reliability=targets.get("reliability"),
                 reliability_known=targets.get("reliability_known"), valid=targets.get("valid"),
             )
-        if inputs.observations.ndim != 3 or inputs.history_states.shape[:2] != inputs.observations.shape[:2] or inputs.causal_evidence.shape[:2] != inputs.observations.shape[:2]:
-            raise ValueError("M1 inputs must be [B,T,D], [B,T,2D], [B,T,8]")
-        if inputs.causal_evidence.shape[-1] != 8:
-            raise ValueError("M1 causal evidence must be eight-dimensional")
+        if inputs.observations.ndim != 3 or inputs.times.shape != inputs.observations.shape[:2] or inputs.geometry.shape[:2] != inputs.observations.shape[:2]:
+            raise ValueError("M1 inputs must contain observations [B,T,D], times [B,T], geometry [B,T,4]")
+        if inputs.geometry.shape[-1] != 4 or inputs.competition_margin.shape != inputs.times.shape or inputs.margin_known.shape != inputs.times.shape or inputs.observation_scores.shape != inputs.times.shape or inputs.valid.shape != inputs.times.shape:
+            raise ValueError("M1 event fields must all have shape [B,T]")
+        if inputs.initial_feature.ndim != 2 or inputs.initial_geometry.shape != (inputs.initial_feature.shape[0], 4) or inputs.initial_time.shape != (inputs.initial_feature.shape[0],):
+            raise ValueError("M1 initial state fields have incompatible shapes")
         batch, steps, _ = inputs.observations.shape
-        state = self.memory.initialize(inputs.prototype)
+        state = self.memory.initialize(inputs.initial_feature, inputs.initial_time)
+        previous_geometry = inputs.initial_geometry
+        previous_time = inputs.initial_time
         fast_values: list[Tensor] = []
         slow_values: list[Tensor] = []
         rate_values: dict[str, list[Tensor]] = {"q": [], "alpha_fast": [], "alpha_slow": [], "reliability_logit": []}
-        for index in range(min(steps, self.unroll)):
-            frame = None if inputs.frames is None else inputs.frames[:, index]
-            bbox = None if inputs.bboxes is None else inputs.bboxes[:, index]
-            state, rates = self.memory.update(
-                state,
-                inputs.observations[:, index],
-                inputs.history_states[:, index],
-                inputs.causal_evidence[:, index],
+        limit = min(steps, self.unroll)
+        for index in range(limit):
+            valid_step = inputs.valid[:, index].bool()
+            frame = inputs.times[:, index]
+            bbox = inputs.geometry[:, index]
+            # History/evidence are derived from the state produced by the
+            # preceding event.  No prefix or cached history tensor is read.
+            history = torch.cat((state.fast, state.slow), dim=-1)
+            gap = (inputs.times[:, index] - previous_time).clamp_min(0)
+            geometry_delta = inputs.geometry[:, index] - previous_geometry
+            age = (inputs.times[:, index] - inputs.initial_time).clamp_min(0)
+            evidence = build_causal_evidence(state, inputs.observations[:, index], gap, inputs.competition_margin[:, index], geometry_delta, age, missing_margin=~inputs.margin_known[:, index].bool())
+            observation = torch.where(valid_step.unsqueeze(-1), inputs.observations[:, index], state.fast)
+            old_state = state
+            updated_state, rates = self.memory.update(
+                old_state,
+                observation,
+                history,
+                evidence,
                 frame,
                 bbox=bbox,
             )
+            # Invalid right-padding does not advance time, bbox or write
+            # count.  The computation above remains finite but its state is
+            # explicitly discarded.
+            state = type(updated_state)(
+                fast=torch.where(valid_step.unsqueeze(-1), updated_state.fast, old_state.fast),
+                slow=torch.where(valid_step.unsqueeze(-1), updated_state.slow, old_state.slow),
+                last_seen=torch.where(valid_step, updated_state.last_seen, old_state.last_seen),
+                write_count=torch.where(valid_step, updated_state.write_count, old_state.write_count),
+                birth_time=updated_state.birth_time,
+                last_bbox=torch.where(valid_step.unsqueeze(-1), updated_state.last_bbox if updated_state.last_bbox is not None else bbox, old_state.last_bbox if old_state.last_bbox is not None else previous_geometry),
+                diagnostics=dict(updated_state.diagnostics),
+            )
+            previous_geometry = torch.where(valid_step.unsqueeze(-1), inputs.geometry[:, index], previous_geometry)
+            previous_time = torch.where(valid_step, inputs.times[:, index], previous_time)
             fast_values.append(state.fast)
             slow_values.append(state.slow)
             for name in rate_values:
@@ -96,23 +130,49 @@ class MemoryTrainingTask(nn.Module):
             positive = positive.unsqueeze(1)
         if known.ndim == 2:
             known = known.unsqueeze(1)
-        if positive.shape[:2] != fast.shape[:2] or known.shape != positive.shape or future.shape[:3] != positive.shape:
+        # A memory episode stores one candidate set for the complete causal
+        # event chunk.  The collator therefore legitimately returns labels as
+        # [B,K], while the candidate embeddings are padded per event as
+        # [B,T,K,D].  Expand the shared candidate labels over the real event
+        # axis before masking; merely unsqueezing them leaves [B,1,K] and
+        # rejects every multi-event M1 batch.  Keep the unroll contract
+        # explicit by slicing padded/longer target chunks to the states that
+        # were actually produced above.
+        target_steps = int(fast.shape[1])
+        if future.shape[0] != batch or future.shape[1] < target_steps:
+            raise ValueError("future_embedding does not cover the M1 unroll")
+        if future.shape[1] == 1 and target_steps > 1:
+            future = future.expand(-1, target_steps, -1, -1)
+        else:
+            future = future[:, :target_steps]
+        for name, value in (("positive_mask", positive), ("candidate_known", known)):
+            if value.shape[0] != batch or value.shape[1] < target_steps:
+                raise ValueError(f"{name} does not cover the M1 unroll")
+            if value.shape[1] == 1 and target_steps > 1:
+                value = value.expand(-1, target_steps, -1)
+            else:
+                value = value[:, :target_steps]
+            if name == "positive_mask":
+                positive = value
+            else:
+                known = value
+        if positive.shape != known.shape or future.shape[:3] != positive.shape:
             raise ValueError("M1 future candidate tensors have inconsistent shapes")
-        valid_steps = torch.ones((batch, fast.shape[1]), dtype=torch.bool, device=fast.device) if targets.valid is None else targets.valid.bool()
+        valid_steps = torch.ones((batch, fast.shape[1]), dtype=torch.bool, device=fast.device) if targets.valid is None else targets.valid[:, :fast.shape[1]].bool()
         if valid_steps.shape != fast.shape[:2]:
             raise ValueError("M1 valid event mask must be [B,T]")
         # Flatten time into independent retrieval queries, while the state is
         # still produced by a single differentiable unroll.
+        event_mask = valid_steps.reshape(-1)
+        future_flat = future.reshape(-1, future.shape[-2], future.shape[-1])[event_mask]
+        positive_flat = positive.reshape(-1, positive.shape[-1])[event_mask]
+        known_flat = known.reshape(-1, known.shape[-1])[event_mask]
+        rate_flat = {name: value.reshape(-1)[event_mask] for name, value in rates.items()}
+        reliability_flat = None if targets.reliability is None else targets.reliability[:, :fast.shape[1]].reshape(-1)[event_mask]
+        reliability_known_flat = None if targets.reliability_known is None else targets.reliability_known[:, :fast.shape[1]].reshape(-1)[event_mask]
         retrieval = predictive_memory_loss(
-            fast.reshape(-1, fast.shape[-1]),
-            slow.reshape(-1, slow.shape[-1]),
-            future.reshape(-1, future.shape[-2], future.shape[-1]),
-            positive.reshape(-1, positive.shape[-1]),
-            {name: value.reshape(-1) for name, value in rates.items()},
-            targets.reliability.reshape(-1) if targets.reliability is not None else None,
-            targets.reliability_known.reshape(-1) if targets.reliability_known is not None else None,
-            known.reshape(-1, known.shape[-1]),
-            self.loss_weights,
+            fast.reshape(-1, fast.shape[-1])[event_mask], slow.reshape(-1, slow.shape[-1])[event_mask],
+            future_flat, positive_flat, rate_flat, reliability_flat, reliability_known_flat, known_flat, self.loss_weights,
         )
         # Masking inactive events is done at query construction time in the
         # data task; keeping this count explicit prevents an empty mask being

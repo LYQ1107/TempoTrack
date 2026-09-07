@@ -65,6 +65,11 @@ class ObservationBatch:
     # copying or re-numbering observations.
     rows: Any = None
     frame_index: Any = None
+    # A frame with zero detections still advances the causal clock.  These
+    # optional scalars are populated by FrameIndex-backed replay and are not
+    # part of the detector payload.
+    current_time: Any = None
+    time_unit: str = "frame"
 
     @property
     def frame_times(self) -> Any:
@@ -75,12 +80,17 @@ class ObservationBatch:
 class SegmentInputs:
     appearance: Any
     geometry: Any
-    relative_time: Any
+    local_time: Any
     valid: Any
 
     @property
+    def relative_time(self) -> Any:
+        """Compatibility alias; the V3 contract calls this local_time."""
+        return self.local_time
+
+    @property
     def time_offsets(self) -> Any:
-        return self.relative_time
+        return self.local_time
 
 
 @dataclass
@@ -92,6 +102,109 @@ class GraphInputs:
     edge_valid: Any
     initial_graph: Any
     node_times: Any = None
+
+
+@dataclass
+class TrainingBatch:
+    inputs: Any
+    targets: Any
+    provenance: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SegmentClock:
+    observation_times: Any
+    first_time: Any
+    last_time: Any
+    time_unit: str
+    scale: float
+
+
+@dataclass
+class PairInputs:
+    source: SegmentInputs
+    candidates: SegmentInputs
+    query: PredictionQuery | None = None
+    candidate_valid: Any = None
+
+
+@dataclass
+class PairTargets:
+    positive: Any
+    known: Any
+    target_prediction_valid: Any
+
+
+@dataclass
+class ContinuationInputs:
+    source: SegmentInputs
+    gap: Any
+
+
+@dataclass
+class ContinuationTargets:
+    target_state: Any
+    state_valid: Any
+    state_dim_valid: Any
+    existence: Any = None
+    existence_known: Any = None
+
+
+@dataclass
+class GraphTargets:
+    selected_edges: Any
+    known_edges: Any
+    node_gt_contingency: Any = None
+    supervision_hash: str = ""
+
+
+@dataclass(frozen=True)
+class EpisodeSourceSpec:
+    role: str
+    split_role: str
+    observation_manifest: Path
+    labels_manifest: Path | None
+    frontend_manifest: Path | None
+    memory_checkpoint_hash: str | None
+    category_protocol_hash: str
+    tensor_contract_hash: str
+    candidate_recipe_hash: str
+
+
+@dataclass
+class MatchEvidence:
+    accepted_score: Any
+    competition_margin: Any
+    margin_known: Any
+    detection_score: Any
+    current_time: Any
+    current_geometry: Any
+
+
+@dataclass
+class PairEvidence:
+    dynamic_error: Any
+    predicted_id_cosine: Any
+    anchor_cosine: Any
+    gap: Any
+    valid: Any
+
+
+@dataclass
+class PredictedSegment:
+    dynamic: Any
+    identity_raw: Any
+    identity: Any
+    valid: Any
+
+
+@dataclass
+class ChainDecision:
+    heldout_node: int
+    candidate_edges_to_remove: tuple[tuple[int, int], ...]
+    compatibility: float
+    calibration_hash: str
+    evidence: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -245,6 +358,7 @@ class RunSpec:
     evaluation: Mapping[str, Any]
     seed: int
     run_root: Path
+    loss: Mapping[str, Any] = field(default_factory=dict)
     provenance: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -262,7 +376,7 @@ class TrainResult:
 @dataclass
 class SchemeStatus:
     scheme: str
-    implementation: str = "TODO"
+    implementation: str = "UNVERIFIED"
     training: str = "NOT_RUN"
     evaluation: str = "NOT_RUN"
     run_signature: str = ""

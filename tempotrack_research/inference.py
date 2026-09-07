@@ -10,15 +10,16 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import torch
 
-from .association.candidates import build_candidate_graph
+from .association.candidates import build_candidate_graph, slice_candidate_graph, temporal_graph_windows
 from .association.edit_env import GraphEditEnv
-from .association.emd import stable_emd
+from .association.emd import stable_emd, stable_emd_batch
 from .association.graph import project_graph_scores
 from .association.path_cover import validate_path_cover
 from .association.serialization import write_id_mapping, materialize_predictions
 from .config import file_hash, object_hash
 from .data.feature_export import load_dataset_manifest, iter_manifest_ledgers
 from .data.tracklet_store import TrackletRecord, TrackletStore
+from .data.graph_features import GraphFeaturizer
 from .errors import DataUnavailable, ImplementationIncomplete, WeightUnavailable
 from .memory.fixed_dual import FixedDualMemory
 from .memory.predictive_dual import PredictiveDualMemory
@@ -29,7 +30,7 @@ from .models.graph_diffusion import GraphDiffusionMatcher
 from .models.graph_flow import GraphFlowMatcher
 from .models.graph_reranker import GraphReranker
 from .models.identity_predictor import JEPAIdentityLinker, PairMetricLinker
-from .schemas import ActionTable, AssociationResult, CandidateGraph, GraphInputs, ObservationBatch, RunSpec
+from .schemas import ActionTable, AssociationResult, CandidateGraph, GraphInputs, ObservationBatch, RunSpec, SegmentClock, SegmentInputs
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class InferenceSpec:
     protocol: Mapping[str, Any] | None = None
     seed: int = 0
     run_spec: RunSpec | None = None
+    tracklet_manifest: Path | None = None
 
 
 class Backend:
@@ -87,6 +89,7 @@ def _tracklet_views(ledger: Any, store: TrackletStore) -> list[dict[str, Any]]:
         rows = np.asarray(record.observation_rows, dtype=np.int64)
         if rows.size == 0:
             continue
+        absolute_times = np.asarray(ledger.arrays["frame_times"][rows], dtype=np.float32)
         values.append({
             "local_id": int(record.local_id),
             "video_id": int(record.video_id),
@@ -94,7 +97,10 @@ def _tracklet_views(ledger: Any, store: TrackletStore) -> list[dict[str, Any]]:
             "appearance": np.asarray(ledger.arrays["appearance"][rows], dtype=np.float32),
             "bboxes": np.asarray(ledger.arrays["bboxes_xyxy"][rows], dtype=np.float32),
             "frames": np.asarray(ledger.arrays["frame_indices"][rows], dtype=np.float32),
-            "time_offsets": np.asarray(ledger.arrays["frame_times"][rows], dtype=np.float32),
+            # Model inputs use a segment-local clock.  Absolute times remain
+            # separate routing metadata for cross-tracklet gaps.
+            "time_offsets": absolute_times - absolute_times[-1],
+            "absolute_times": absolute_times,
             "image_widths": np.asarray(ledger.arrays["image_widths"][rows], dtype=np.float32),
             "image_heights": np.asarray(ledger.arrays["image_heights"][rows], dtype=np.float32),
             "first_frame": int(record.first_frame),
@@ -181,7 +187,21 @@ class NoOfflineBackend(_PathBackend):
 
 class StableEMDBackend(_PathBackend):
     def __init__(self, frontend: str, *, threshold: float = 0.0):
-        super().__init__(lambda left, right: 1.0 - float(stable_emd(left, right, time_gap=float(right["time_offsets"][0] - left["time_offsets"][-1]))["edge_score"]), threshold=threshold, provenance={"backend": "stable_emd", "frontend": frontend})
+        def score_all(views: Sequence[Mapping[str, Any]], candidates: CandidateGraph, *, generator: torch.Generator | None = None) -> np.ndarray:
+            del generator
+            pairs = candidates.edge_index.detach().cpu().numpy().T.tolist()
+            lefts = [views[int(source)] for source, _ in pairs]
+            rights = [views[int(target)] for _, target in pairs]
+            gaps = [float(right["time_offsets"][0] - left["time_offsets"][-1]) for left, right in zip(lefts, rights)]
+            values = stable_emd_batch(lefts, rights, gaps, batch_size=512)
+            return np.asarray([0.0 if not item.get("valid", False) else 1.0 - float(item["edge_score"]) for item in values], dtype=np.float64)
+
+        super().__init__(
+            lambda left, right: 1.0 - float(stable_emd(left, right, time_gap=float(right["time_offsets"][0] - left["time_offsets"][-1]))["edge_score"]),
+            score_all_fn=score_all,
+            threshold=threshold,
+            provenance={"backend": "stable_emd", "frontend": frontend, "solver": "stable_sinkhorn_batched"},
+        )
 
 
 class LearnedPathBackend(_PathBackend):
@@ -218,73 +238,108 @@ def _deployment_graph(ledger: Any, views: Sequence[Mapping[str, Any]], candidate
     if not views:
         dim = int(ledger.appearance_dim) + 5
         return {"node_features": torch.empty((1, 0, dim)), "edge_features": torch.empty((1, 0, 11)), "edge_index": torch.empty((1, 2, 0), dtype=torch.long), "node_valid": torch.empty((1, 0), dtype=torch.bool), "edge_valid": torch.empty((1, 0), dtype=torch.bool), "initial_graph": torch.empty((1, 0))}
-    origin = min(float(view["frames"][0]) for view in views)
-    node_values = []
-    node_times = []
+    segments: list[SegmentInputs] = []
+    clocks: list[SegmentClock] = []
     for view in views:
-        app = np.asarray(view["appearance"], dtype=np.float32).mean(axis=0)
-        geom = _view_geometry(view)
-        node_values.append(np.concatenate((app, geom, np.asarray([float(view["last_frame"]) - origin], dtype=np.float32))))
-        node_times.append(float(view["last_frame"]) - origin)
-    node_features = torch.as_tensor(np.asarray(node_values, dtype=np.float32)).unsqueeze(0)
-    edge_index = candidates.edge_index.long().reshape(1, 2, -1)
-    base_edges = candidates.edge_features.float().reshape(-1, candidates.edge_features.shape[-1])
-    full_edges: list[np.ndarray] = []
-    for number, (source, target) in enumerate(edge_index[0].t().tolist()):
-        gap = float(base_edges[number, 0]) if len(base_edges) else float(views[target]["first_frame"] - views[source]["last_frame"])
-        full_edges.append(np.concatenate((node_values[source][-5:], node_values[target][-5:], np.asarray([gap], dtype=np.float32))))
-    edge_features = torch.as_tensor(np.asarray(full_edges, dtype=np.float32) if full_edges else np.empty((0, 11), dtype=np.float32)).unsqueeze(0)
+        absolute = torch.as_tensor(np.asarray(view.get("absolute_times", view["time_offsets"]), dtype=np.float32))
+        appearance = torch.as_tensor(np.asarray(view["appearance"], dtype=np.float32))
+        geometry = torch.as_tensor(_view_geometry_sequence(view), dtype=torch.float32)
+        local = absolute - absolute[-1]
+        segments.append(SegmentInputs(appearance, geometry, local, torch.ones((len(absolute),), dtype=torch.bool)))
+        clocks.append(SegmentClock(absolute, float(absolute[0]), float(absolute[-1]), "frame", 1.0))
+    edge_index = candidates.edge_index.long()
+    # The initial graph is a deployment-visible stable-EMD/path-cover
+    # solution.  It is shared with the V3 episode builder; no GT identity is
+    # available here.  Invalid numerical transport results are rejected and
+    # cannot become an optimistic edge.
+    pairs = edge_index.t().tolist()
+    lefts = [views[int(source)] for source, _ in pairs]
+    rights = [views[int(target)] for _, target in pairs]
+    gaps = [float(np.asarray(right.get("absolute_times", right["time_offsets"]))[0] - np.asarray(left.get("absolute_times", left["time_offsets"]))[-1]) for left, right in zip(lefts, rights)]
+    transport = stable_emd_batch(lefts, rights, gaps, batch_size=512)
+    benefits = [0.0 if not result.get("valid", False) else 1.0 - float(result["edge_score"]) for result in transport]
+    initial_np, initial_check = project_graph_scores(
+        len(views), edge_index.detach().cpu().numpy(), np.asarray(benefits, dtype=np.float64),
+        candidates.valid.detach().cpu().numpy(), 0.0,
+        graph_metadata={"video_ids": [int(view["video_id"]) for view in views], "first_frames": [int(view["first_frame"]) for view in views], "last_frames": [int(view["last_frame"]) for view in views]},
+    )
+    if not initial_check.get("valid", False):
+        raise RuntimeError(f"deployment initial graph failed path-cover validation: {initial_check}")
+    built = GraphFeaturizer().build(segments, clocks, edge_index, torch.as_tensor(initial_np, dtype=torch.bool))
+    node_features = built.node_features.unsqueeze(0)
+    edge_features = built.edge_features.unsqueeze(0)
     edge_valid = candidates.valid.bool().reshape(1, -1)
-    initial = torch.zeros((1, edge_features.shape[1]), dtype=torch.float32)
-    occupied_sources: set[int] = set()
-    occupied_targets: set[int] = set()
-    for number, (source, target) in enumerate(edge_index[0].t().tolist()):
-        gap = float(edge_features[0, number, -1])
-        if gap <= 5.0 and source not in occupied_sources and target not in occupied_targets:
-            initial[0, number] = 1.0
-            occupied_sources.add(source); occupied_targets.add(target)
-    return {"node_features": node_features, "edge_features": edge_features, "edge_index": edge_index, "node_valid": torch.ones((1, len(views)), dtype=torch.bool), "edge_valid": edge_valid, "initial_graph": initial, "node_times": torch.as_tensor(node_times, dtype=torch.float32).reshape(1, -1)}
+    initial = torch.as_tensor(initial_np, dtype=torch.float32).reshape(1, -1)
+    return {"node_features": node_features, "edge_features": edge_features, "edge_index": edge_index.reshape(1, 2, -1), "node_valid": built.node_valid.reshape(1, -1), "edge_valid": edge_valid, "initial_graph": initial, "node_times": built.node_times.reshape(1, -1) if built.node_times is not None else None}
 
 
 class LearnedGraphBackend(Backend):
-    def __init__(self, model: Any, *, method: str, frontend: str, samples: int = 4, steps: int = 32, threshold: float = 0.0, provenance: Mapping[str, Any] | None = None):
+    def __init__(self, model: Any, *, method: str, frontend: str, samples: int = 4, steps: int = 32, threshold: float = 0.0, window_max_nodes: int = 96, window_overlap: int = 16, provenance: Mapping[str, Any] | None = None):
         self.model, self.method, self.frontend = model, method, frontend
         self.samples, self.steps, self.threshold = int(samples), int(steps), float(threshold)
+        self.window_max_nodes, self.window_overlap = int(window_max_nodes), int(window_overlap)
         self._provenance = dict(provenance or {})
 
     def consolidate(self, ledger: Any, tracklets: TrackletStore, candidates: CandidateGraph, *, generator: torch.Generator | None = None) -> AssociationResult:
         views = _tracklet_views(ledger, tracklets)
         if not views:
             return AssociationResult([], np.empty((0,), dtype=np.int64), np.zeros(0, dtype=bool), (), {**self._provenance, "empty": True})
-        graph = _deployment_graph(ledger, views, candidates)
         device = next(self.model.parameters()).device
-        graph = {key: value.to(device) for key, value in graph.items()}
-        if self.method == "s3_graph_fm":
-            samples = self.model.propose_graphs(graph["node_features"], graph, generator=generator, num_samples=self.samples, steps=self.steps)
-        else:
-            samples = self.model.propose_graphs(graph["node_features"], graph, generator=generator, num_samples=self.samples, steps=self.steps)
-        best: tuple[float, np.ndarray, dict[str, Any]] | None = None
-        edge_index = graph["edge_index"][0].detach().cpu().numpy()
-        edge_valid = graph["edge_valid"][0].detach().cpu().numpy()
-        for sample_number in range(samples.shape[1]):
-            benefits = samples[0, sample_number].detach().cpu().numpy()
-            selected, check = project_graph_scores(
-                len(views), edge_index, benefits, edge_valid, self.threshold,
-                graph_metadata={
-                    "video_ids": [int(view["video_id"]) for view in views],
-                    "first_frames": [int(view["first_frame"]) for view in views],
-                    "last_frames": [int(view["last_frame"]) for view in views],
-                },
-            )
-            if not check.get("valid", False):
+        global_edges = candidates.edge_index.detach().cpu().numpy().reshape(2, -1)
+        global_valid = candidates.valid.detach().cpu().numpy().astype(bool)
+        benefit_sum = np.zeros(global_edges.shape[1], dtype=np.float64)
+        benefit_count = np.zeros(global_edges.shape[1], dtype=np.int64)
+        window_records: list[dict[str, Any]] = []
+        for window_number, window_indices in enumerate(temporal_graph_windows(views, max_nodes=self.window_max_nodes, overlap=self.window_overlap)):
+            window_views = [views[int(index)] for index in window_indices.tolist()]
+            window_candidates, global_edge_positions = slice_candidate_graph(candidates, window_indices.tolist())
+            if global_edge_positions.size == 0:
+                window_records.append({"window": int(window_number), "nodes": int(window_indices.size), "edges": 0, "status": "NO_EDGES"})
                 continue
-            with torch.no_grad():
-                graph_score = float(self.model.reranker(graph["node_features"], graph["edge_features"], graph["edge_index"], torch.as_tensor(selected, dtype=torch.bool, device=device).reshape(1, -1), graph["node_valid"], graph["edge_valid"], graph.get("node_times"))[0].item())
-            if best is None or graph_score > best[0]:
-                best = (graph_score, selected, {"sample": sample_number, "reranker_score": graph_score, "path_check": check})
-        if best is None:
+            graph = _deployment_graph(ledger, window_views, window_candidates)
+            graph = {key: value.to(device) if value is not None else None for key, value in graph.items()}
+            samples = self.model.propose_graphs(graph["node_features"], graph, generator=generator, num_samples=self.samples, steps=self.steps)
+            local_edge_index = graph["edge_index"][0].detach().cpu().numpy()
+            local_edge_valid = graph["edge_valid"][0].detach().cpu().numpy()
+            best: tuple[float, np.ndarray, np.ndarray, dict[str, Any]] | None = None
+            for sample_number in range(samples.shape[1]):
+                benefits = samples[0, sample_number].detach().cpu().numpy()
+                selected, check = project_graph_scores(
+                    len(window_views), local_edge_index, benefits, local_edge_valid, self.threshold,
+                    graph_metadata={
+                        "video_ids": [int(view["video_id"]) for view in window_views],
+                        "first_frames": [int(view["first_frame"]) for view in window_views],
+                        "last_frames": [int(view["last_frame"]) for view in window_views],
+                    },
+                )
+                if not check.get("valid", False):
+                    continue
+                with torch.no_grad():
+                    graph_score = float(self.model.reranker(graph["node_features"], graph["edge_features"], graph["edge_index"], torch.as_tensor(selected, dtype=torch.bool, device=device).reshape(1, -1), graph["node_valid"], graph["edge_valid"], graph.get("node_times"))[0].item())
+                if best is None or graph_score > best[0]:
+                    best = (graph_score, selected, benefits, {"sample": sample_number, "reranker_score": graph_score, "path_check": check})
+            if best is None:
+                window_records.append({"window": int(window_number), "nodes": int(window_indices.size), "edges": int(global_edge_positions.size), "status": "NO_LEGAL_SAMPLE"})
+                continue
+            benefit_sum[global_edge_positions] += best[2].astype(np.float64)
+            benefit_count[global_edge_positions] += 1
+            window_records.append({"window": int(window_number), "nodes": int(window_indices.size), "edges": int(global_edge_positions.size), "selected_edges": int(best[1].sum()), "status": "COMPLETED", **best[3]})
+        if not benefit_count.any():
             raise RuntimeError("all learned graph samples failed legal path projection")
-        return _result_from_projection(ledger, views, candidates, best[1], provenance={**self._provenance, "selection": best[2], "sample_count": samples.shape[1]})
+        benefits = np.zeros_like(benefit_sum)
+        covered = benefit_count > 0
+        benefits[covered] = benefit_sum[covered] / benefit_count[covered]
+        selected, check = project_graph_scores(
+            len(views), global_edges, benefits, global_valid, self.threshold,
+            graph_metadata={
+                "video_ids": [int(view["video_id"]) for view in views],
+                "first_frames": [int(view["first_frame"]) for view in views],
+                "last_frames": [int(view["last_frame"]) for view in views],
+            },
+        )
+        if not check.get("valid", False):
+            raise RuntimeError(f"windowed learned graph projection failed: {check}")
+        return _result_from_projection(ledger, views, candidates, selected, provenance={**self._provenance, "selection": {"window_count": len(window_records), "windows": window_records, "covered_edge_count": int(covered.sum()), "uncovered_edge_count": int((~covered).sum()), "global_path_check": check}, "sample_count": self.samples, "window_max_nodes": self.window_max_nodes, "window_overlap": self.window_overlap})
 
 
 class LearnedContinuationBackend(_PathBackend):
@@ -305,41 +360,58 @@ class LearnedEditBackend(Backend):
         views = _tracklet_views(ledger, tracklets)
         if not views:
             return AssociationResult([], np.empty((0,), dtype=np.int64), np.zeros(0, dtype=bool), (), {**self._provenance, "empty": True})
-        graph_values = _deployment_graph(ledger, views, candidates)
         device = next(self.policy.parameters()).device
-        graph_values = {key: value.to(device) for key, value in graph_values.items()}
         configured_max_edits = self.config.get("max_edits")
         max_edits = None if configured_max_edits is None else int(configured_max_edits)
-        env = GraphEditEnv(
-            len(views), graph_values["edge_index"][0].detach().cpu().numpy(), graph_values["edge_valid"][0].detach().cpu().numpy(),
-            max_edits=max_edits if max_edits is not None else max(1, 2 * len(views)),
-        )
-        initial = graph_values["initial_graph"][0].detach().cpu().numpy().astype(bool)
-        env.reset(selected=initial)
-        env.policy_inputs = {key: value[0].detach().cpu().numpy() for key, value in graph_values.items() if key in {"node_features", "edge_features", "edge_index", "node_valid", "edge_valid", "initial_graph"}}
-        decisions: list[dict[str, Any]] = []
-        while True:
-            table = env.action_table()
-            action_table = ActionTable(
-                torch.as_tensor(table["kind"], dtype=torch.long, device=device).unsqueeze(0),
-                torch.as_tensor(table["edge_index"], dtype=torch.long, device=device).unsqueeze(0),
-                torch.as_tensor(table["replacement_edge_index"], dtype=torch.long, device=device).unsqueeze(0),
-                torch.as_tensor(table["valid"], dtype=torch.bool, device=device).unsqueeze(0),
+        global_selected = np.zeros(candidates.edge_index.shape[1], dtype=bool)
+        window_records: list[dict[str, Any]] = []
+        for window_number, window_indices in enumerate(temporal_graph_windows(views, max_nodes=int(self.config.get("graph_window_max_nodes", 96)), overlap=int(self.config.get("graph_window_overlap", 16)))):
+            window_views = [views[int(index)] for index in window_indices.tolist()]
+            window_candidates, global_edge_positions = slice_candidate_graph(candidates, window_indices.tolist())
+            if global_edge_positions.size == 0:
+                window_records.append({"window": int(window_number), "nodes": int(window_indices.size), "edges": 0, "status": "NO_EDGES"})
+                continue
+            graph_values = _deployment_graph(ledger, window_views, window_candidates)
+            graph_values = {key: value.to(device) if value is not None else None for key, value in graph_values.items()}
+            env = GraphEditEnv(
+                len(window_views), graph_values["edge_index"][0].detach().cpu().numpy(), graph_values["edge_valid"][0].detach().cpu().numpy(),
+                max_edits=max_edits if max_edits is not None else max(1, 2 * len(window_views)),
+                action_table_limit=(None if self.config.get("action_table_limit") is None else int(self.config.get("action_table_limit"))),
             )
-            selected = torch.as_tensor(env.selected, dtype=torch.float32, device=device).unsqueeze(0)
-            remaining = torch.as_tensor([float(env.max_edits - env.steps)], dtype=torch.float32, device=device)
-            graph = GraphInputs(graph_values["node_features"], graph_values["edge_features"], graph_values["edge_index"], graph_values["node_valid"], graph_values["edge_valid"], graph_values["initial_graph"], graph_values.get("node_times"))
-            with torch.no_grad():
-                output = self.policy(graph, selected, action_table, remaining)
-                action = self.policy.act(output, deterministic=bool(self.config.get("deterministic", True)))
-            action_index = int(action["action_index"][0].item())
-            concrete = table["actions"][action_index]
-            _, _, done, info = env.step(concrete)
-            decisions.append({"action_index": action_index, "kind": concrete.kind_name, "edge_index": int(concrete.edge_index), "replacement_edge_index": int(concrete.replacement_edge_index), "steps": env.steps, "info": {key: value for key, value in info.items() if key != "action"}})
-            if done:
-                break
-        selected = env.selected.copy()
-        return _result_from_projection(ledger, views, candidates, selected, provenance={**self._provenance, "rollout": decisions, "rollout_policy_version": 1, "action_types": list(EditPolicy.ACTION_TYPES)})
+            initial = graph_values["initial_graph"][0].detach().cpu().numpy().astype(bool)
+            env.reset(selected=initial)
+            env.policy_inputs = {key: value[0].detach().cpu().numpy() for key, value in graph_values.items() if key in {"node_features", "edge_features", "edge_index", "node_valid", "edge_valid", "initial_graph"}}
+            decisions: list[dict[str, Any]] = []
+            while True:
+                table = env.action_table()
+                action_table = ActionTable(
+                    torch.as_tensor(table["kind"], dtype=torch.long, device=device).unsqueeze(0),
+                    torch.as_tensor(table["edge_index"], dtype=torch.long, device=device).unsqueeze(0),
+                    torch.as_tensor(table["replacement_edge_index"], dtype=torch.long, device=device).unsqueeze(0),
+                    torch.as_tensor(table["valid"], dtype=torch.bool, device=device).unsqueeze(0),
+                )
+                selected_tensor = torch.as_tensor(env.selected, dtype=torch.float32, device=device).unsqueeze(0)
+                remaining = torch.as_tensor([float(env.max_edits - env.steps)], dtype=torch.float32, device=device)
+                graph = GraphInputs(graph_values["node_features"], graph_values["edge_features"], graph_values["edge_index"], graph_values["node_valid"], graph_values["edge_valid"], graph_values["initial_graph"], graph_values.get("node_times"))
+                with torch.no_grad():
+                    output = self.policy(graph, selected_tensor, action_table, remaining)
+                    action = self.policy.act(output, deterministic=bool(self.config.get("deterministic", True)))
+                action_index = int(action["action_index"][0].item())
+                concrete = table["actions"][action_index]
+                _, _, done, info = env.step(concrete)
+                decisions.append({"action_index": action_index, "kind": concrete.kind_name, "edge_index": int(concrete.edge_index), "replacement_edge_index": int(concrete.replacement_edge_index), "steps": env.steps, "info": {key: value for key, value in info.items() if key != "action"}})
+                if done:
+                    break
+            local_selected = env.selected.copy()
+            global_selected[global_edge_positions[local_selected]] = True
+            window_records.append({"window": int(window_number), "nodes": int(window_indices.size), "edges": int(global_edge_positions.size), "selected_edges": int(local_selected.sum()), "rollout": decisions, "status": "COMPLETED"})
+        selected, check = project_graph_scores(
+            len(views), candidates.edge_index.detach().cpu().numpy(), global_selected.astype(np.float64), candidates.valid.detach().cpu().numpy(), 0.0,
+            graph_metadata={"video_ids": [int(view["video_id"]) for view in views], "first_frames": [int(view["first_frame"]) for view in views], "last_frames": [int(view["last_frame"]) for view in views]},
+        )
+        if not check.get("valid", False):
+            raise RuntimeError(f"windowed S5 projection failed: {check}")
+        return _result_from_projection(ledger, views, candidates, selected, provenance={**self._provenance, "rollout": window_records, "rollout_policy_version": 1, "action_types": list(EditPolicy.ACTION_TYPES), "window_max_nodes": int(self.config.get("graph_window_max_nodes", 96)), "window_overlap": int(self.config.get("graph_window_overlap", 16)), "global_path_check": check})
 
 
 def _model_config(artifact: CheckpointArtifact, default: Mapping[str, Any]) -> dict[str, Any]:
@@ -351,12 +423,15 @@ def _model_config(artifact: CheckpointArtifact, default: Mapping[str, Any]) -> d
 def _load_learned_backend(method: str, frontend: str, artifact: CheckpointArtifact, ledger: Any, *, run_spec: RunSpec | None = None) -> Backend:
     dim = ledger.appearance_dim
     config = _model_config(artifact, {})
+    candidate_config = dict(run_spec.data.get("candidate", {})) if run_spec is not None else {}
+    config.setdefault("graph_window_max_nodes", int(candidate_config.get("graph_window_max_nodes", 96)))
+    config.setdefault("graph_window_overlap", int(candidate_config.get("graph_window_overlap", 16)))
     # Sampling/NFE and deployment controls belong to the resolved inference
     # spec, not to the neural module checkpoint.  Propagate them explicitly
     # so integration and full runs cannot silently fall back to an internal
     # constant (and so the provenance reflects the actual K/NFE).
     resolved_infer = dict(run_spec.infer) if run_spec is not None else {}
-    for key in ("samples", "steps", "mode", "threshold", "kernel_bandwidth", "max_edits", "deterministic"):
+    for key in ("samples", "steps", "mode", "threshold", "calibration_path", "kernel_bandwidth", "max_edits", "deterministic"):
         if key in resolved_infer:
             config[key] = resolved_infer[key]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -429,7 +504,7 @@ def _load_learned_backend(method: str, frontend: str, artifact: CheckpointArtifa
                 source = _pad_segments(left_items)
                 candidate = _pad_segments(right_items)
                 gaps = torch.as_tensor(
-                    [float(right["first_frame"] - left["last_frame"]) for left, right in zip(left_items, right_items)],
+                    [float(np.asarray(right.get("absolute_times", [right["first_frame"]]))[0] - np.asarray(left.get("absolute_times", [left["last_frame"]]))[-1]) for left, right in zip(left_items, right_items)],
                     dtype=torch.float32,
                     device=device,
                 )
@@ -439,7 +514,12 @@ def _load_learned_backend(method: str, frontend: str, artifact: CheckpointArtifa
                 values.append(support[:, 0].detach().cpu().numpy().astype(np.float64))
             return np.concatenate(values, axis=0)
 
-        return LearnedPathBackend(lambda left, right: 0.0, score_all_fn=score_all, threshold=float(config.get("threshold", -1e9)), provenance={"backend": method, "frontend": frontend, "checkpoint": str(artifact.path), "state_transform": transform.snapshot_hash(), "support": "normalized_log_mean_kernel", "samples": int(config.get("samples", 16)), "steps": int(config.get("steps", 32)), "batch_size": 64})
+        if "threshold" not in config:
+            raise ValueError("S2 deployment requires a calibrated finite support threshold")
+        calibration_path = config.get("calibration_path")
+        if calibration_path is None:
+            raise ValueError("S2 deployment calibration path is missing")
+        return LearnedPathBackend(lambda left, right: 0.0, score_all_fn=score_all, threshold=float(config["threshold"]), provenance={"backend": method, "frontend": frontend, "checkpoint": str(artifact.path), "state_transform": transform.snapshot_hash(), "support": "normalized_log_mean_kernel", "samples": int(config.get("samples", 16)), "steps": int(config.get("steps", 32)), "batch_size": 64, "support_threshold": float(config["threshold"]), "calibration_path": str(calibration_path), "calibration_hash": file_hash(calibration_path) if Path(str(calibration_path)).exists() else None})
     if method in {"s3_graph_fm", "s4_graph_diffusion"}:
         graph_hidden = int(config.get("graph_hidden_dim", config.get("hidden_dim", 128)))
         graph_layers = int(config.get("graph_layers", config.get("layers", 4)))
@@ -452,7 +532,7 @@ def _load_learned_backend(method: str, frontend: str, artifact: CheckpointArtifa
         else:
             model = GraphDiffusionMatcher(node_dim, edge_dim, graph_hidden, graph_layers, int(config.get("diffusion_steps", 1000))).to(device)
         model.load_state_dict(artifact.model_state, strict=True); model.eval()
-        return LearnedGraphBackend(model, method=method, frontend=frontend, samples=int(config.get("samples", 4)), steps=int(config.get("steps", 32 if method == "s3_graph_fm" else 50)), threshold=float(config.get("threshold", 0.0)), provenance={"backend": method, "frontend": frontend, "checkpoint": str(artifact.path), "reranker": "trained_component"})
+        return LearnedGraphBackend(model, method=method, frontend=frontend, samples=int(config.get("samples", 4)), steps=int(config.get("steps", 32 if method == "s3_graph_fm" else 50)), threshold=float(config.get("threshold", 0.0)), window_max_nodes=int(config.get("graph_window_max_nodes", 96)), window_overlap=int(config.get("graph_window_overlap", 16)), provenance={"backend": method, "frontend": frontend, "checkpoint": str(artifact.path), "reranker": "trained_component"})
     if method == "s5_rl_edit":
         graph_hidden = int(config.get("graph_hidden_dim", config.get("hidden_dim", 128)))
         model = EditPolicy(dim + 5, 11, graph_hidden).to(device)
@@ -496,6 +576,8 @@ def _replay_video(ledger: Any, manifest: Mapping[str, Any], frontend: str, memor
         rows = np.flatnonzero(ledger.arrays["frame_indices"] == int(frame["frame_index"]))
         batch = ledger.model_batch(rows)
         batch.frame_index = int(frame["frame_index"])  # type: ignore[attr-defined]
+        batch.current_time = float(frame["frame_time"])
+        batch.time_unit = str(frame.get("time_unit", "frame"))
         tracker.step(batch)
     return tracker.finalize()
 
@@ -511,14 +593,32 @@ def run_inference(spec: InferenceSpec) -> dict[str, Any]:
     generator = torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu").manual_seed(int(spec.seed))
     checkpoint = None if spec.checkpoint in {None, "", "none"} else resolve_checkpoint(spec.run_spec, spec.checkpoint, expected_method=spec.method, expected_frontend=spec.frontend)
     memory_checkpoint = spec.memory_checkpoint
+    cached_files: dict[int, Path] = {}
+    if spec.tracklet_manifest is not None:
+        replay_payload = json.loads(Path(spec.tracklet_manifest).read_text(encoding="utf-8"))
+        if replay_payload.get("source_manifest_hash") not in {None, file_hash(spec.source_manifest)}:
+            raise ValueError("tracklet manifest is bound to a different source manifest")
+        if replay_payload.get("frontend") not in {None, spec.frontend}:
+            raise ValueError("tracklet manifest frontend does not match inference frontend")
+        cached_files = {int(json.loads(Path(path).read_text(encoding="utf-8")).get("video_id", -1)): Path(path) for path in replay_payload.get("files", [])}
+        if set(cached_files) != {int(value) for value in manifest.get("video_ids", [])}:
+            raise ValueError("cached frontend artifact does not cover the exact inference video set")
     records: list[dict[str, Any]] = []
-    provenance: dict[str, Any] = {"method": spec.method, "frontend": spec.frontend, "split": spec.split, "source_manifest_hash": file_hash(spec.source_manifest), "seed": int(spec.seed)}
+    provenance: dict[str, Any] = {"method": spec.method, "frontend": spec.frontend, "split": spec.split, "source_manifest_hash": file_hash(spec.source_manifest), "seed": int(spec.seed), "tracklet_manifest": str(spec.tracklet_manifest) if spec.tracklet_manifest else None, "tracklet_manifest_hash": file_hash(spec.tracklet_manifest) if spec.tracklet_manifest else None}
+    backend: Backend | None = None
     for video_id, ledger in iter_manifest_ledgers(manifest):
         frontend_config = dict((spec.run_spec.data if spec.run_spec else {}).get("frontend", {}))
-        store = _replay_video(ledger, manifest, spec.frontend, memory_checkpoint, frontend_config)
+        if video_id in cached_files:
+            replay = json.loads(cached_files[video_id].read_text(encoding="utf-8"))
+            store = TrackletStore.from_json(replay.get("tracklets", []))
+            store.validate(np.asarray(ledger.arrays["frame_indices"]))
+        else:
+            store = _replay_video(ledger, manifest, spec.frontend, memory_checkpoint, frontend_config)
         candidates = _candidate_graph(ledger, store, dict((spec.run_spec.data if spec.run_spec else {}).get("candidate", {})))
-        backend = build_backend(spec.method, spec.run_spec, checkpoint, frontend=spec.frontend, ledger=ledger)
-        result = backend.consolidate(ledger, store, candidates, generator=generator)
+        if backend is None:
+            backend = build_backend(spec.method, spec.run_spec, checkpoint, frontend=spec.frontend, ledger=ledger)
+        with torch.inference_mode():
+            result = backend.consolidate(ledger, store, candidates, generator=generator)
         records.extend({"observation_uid": uid, "track_id": int(track)} for uid, track in zip(result.observation_uids, result.local_track_ids.tolist()))
         provenance.setdefault("videos", []).append({"video_id": video_id, "rows": ledger.row_count, "tracklets": len(store.records), "candidate_count": int(candidates.edge_index.shape[1]), "backend": result.provenance})
     from .association.serialization import serialize_id_only

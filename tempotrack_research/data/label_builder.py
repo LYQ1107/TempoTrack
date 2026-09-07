@@ -20,6 +20,7 @@ import numpy as np
 from ..config import file_hash, object_hash
 from ..data.observation_store import FrameIndex, ObservationLedger
 from ..schemas import LabelShard
+from .category_protocol import CategoryProtocol, load_category_protocol
 
 
 def load_coco_like(path: str | Path) -> dict[str, Any]:
@@ -87,7 +88,7 @@ def _atomic_json(payload: Mapping[str, Any], path: Path) -> None:
 
 
 class TrainObservationLabeler:
-    def __init__(self, annotation_path: str | Path, split_spec: Mapping[str, Any] | None = None, match_iou: float = 0.5, ambiguity_margin: float = 0.05):
+    def __init__(self, annotation_path: str | Path, split_spec: Mapping[str, Any] | None = None, match_iou: float = 0.5, ambiguity_margin: float = 0.05, category_protocol: CategoryProtocol | str | Path | None = None):
         if not 0.0 < match_iou <= 1.0:
             raise ValueError("match_iou must be in (0, 1]")
         if ambiguity_margin < 0:
@@ -99,6 +100,22 @@ class TrainObservationLabeler:
         self.ambiguity_margin = float(ambiguity_margin)
         self.images = build_image_index(self.payload)
         self.category_map: dict[int, int] = {}
+        protocol_value = category_protocol or self.split_spec.get("category_protocol") or self.split_spec.get("category_mapping_path")
+        self.category_protocol: CategoryProtocol | None = None
+        if isinstance(protocol_value, CategoryProtocol):
+            self.category_protocol = protocol_value
+        elif protocol_value:
+            protocol_path = Path(protocol_value)
+            if protocol_path.exists() and protocol_path.suffix == ".json":
+                try:
+                    raw = json.loads(protocol_path.read_text(encoding="utf-8"))
+                    if "benchmark_categories" in raw:
+                        self.category_protocol = CategoryProtocol.from_dict(raw)
+                except (OSError, ValueError):
+                    self.category_protocol = None
+        if self.category_protocol is not None:
+            self.category_protocol.validate()
+            self.category_map = dict(self.category_protocol.annotation_to_benchmark)
         protocol_path = self.split_spec.get("category_protocol") or self.split_spec.get("category_mapping_path")
         if protocol_path:
             protocol = load_coco_like(protocol_path)
@@ -136,6 +153,7 @@ class TrainObservationLabeler:
         # Match independently per image.  Hungarian is used when scipy is
         # available; the deterministic greedy fallback is only for this
         # small label construction step, never for the exact path solver.
+        is_training_split = str(self.split_spec.get("split", ledger.metadata.get("split", ""))) in {"train_base", "internal_tune", "internal_calibration", "val_base_internal"}
         for image_id in sorted(set(int(value) for value in ledger.arrays["image_ids"])):
             rows = np.flatnonzero(ledger.arrays["image_ids"] == image_id)
             anns = [a for a in self.annotations_by_image.get(image_id, []) if not a.get("ignore", False) and not a.get("iscrowd", False)]
@@ -149,9 +167,16 @@ class TrainObservationLabeler:
             pairs: list[tuple[int, int]] = []
             try:
                 from scipy.optimize import linear_sum_assignment
-
-                pidx, gidx = linear_sum_assignment(-ious)
-                pairs = [(int(p), int(g)) for p, g in zip(pidx, gidx) if ious[p, g] >= self.match_iou]
+                # Add one independent dummy column per prediction.  Edges
+                # below the IoU contract are infeasible before assignment;
+                # they cannot steal a GT from a legal match and be rejected
+                # only after Hungarian, which was the V2 failure mode.
+                invalid_cost = 1e6
+                cost = np.zeros((len(pred_boxes), len(gt_boxes) + len(pred_boxes)), dtype=np.float64)
+                legal = ious >= self.match_iou
+                cost[:, : len(gt_boxes)] = np.where(legal, -ious, invalid_cost)
+                pidx, gidx = linear_sum_assignment(cost)
+                pairs = [(int(p), int(g)) for p, g in zip(pidx, gidx) if int(g) < len(gt_boxes) and legal[p, g]]
             except ImportError:
                 available = set(range(len(anns)))
                 for p in np.argsort(-ious.max(axis=1)).tolist():
@@ -169,8 +194,8 @@ class TrainObservationLabeler:
                 gt_id = gt.get("track_id", gt.get("instance_id", -1))
                 raw_gt_cat = gt.get("category_id", -1)
                 gt_cat = self.category_map.get(int(raw_gt_cat), int(raw_gt_cat)) if raw_gt_cat is not None else -1
-                # Close second candidates make identity supervision unsafe.
-                ranked = np.sort(ious[p])[::-1]
+                # Close *legal* candidates make identity supervision unsafe.
+                ranked = np.sort(ious[p][ious[p] >= self.match_iou])[::-1]
                 is_ambiguous = len(ranked) > 1 and ranked[0] - ranked[1] <= self.ambiguity_margin
                 # A second prediction assigned to the same GT is retained in
                 # the ledger but cannot get a duplicate positive label.
@@ -184,8 +209,15 @@ class TrainObservationLabeler:
                 # A matched but ambiguous location is retained for diagnostics
                 # but cannot supervise identity or category objectives.
                 known[row] = bool(gt_identity[row] >= 0 and not ambiguous[row])
-                allowed[row] = bool(known[row])
+                mapped_category_is_base = True
+                if self.category_protocol is not None:
+                    mapped_category_is_base = int(gt_cat) in self.category_protocol.base_ids
+                allowed[row] = bool(known[row] and mapped_category_is_base and is_training_split)
                 reasons[row] = "ambiguous" if ambiguous[row] else "matched"
+                if known[row] and not mapped_category_is_base:
+                    reasons[row] = "novel_category_not_allowed"
+                elif known[row] and not is_training_split:
+                    reasons[row] = "split_not_optimizer_allowed"
             for p, row in enumerate(rows.tolist()):
                 if p not in matched_preds:
                     # A high-IoU GT already assigned to another detection is
@@ -213,6 +245,10 @@ class TrainObservationLabeler:
             "supervision_allowed_count": int(allowed.sum()),
             "unknown_count": int((~known).sum()),
             "ambiguous_count": int(ambiguous.sum()),
+            "category_protocol_hash": self.category_protocol.content_hash() if self.category_protocol is not None else None,
+            "base_allowed_count": int(allowed.sum()),
+            "novel_known_count": int(sum(bool(known[index]) and self.category_protocol is not None and int(gt_category[index]) in self.category_protocol.novel_ids for index in range(n))),
+            "optimizer_allowed": bool(is_training_split),
         }
         return LabelShard(
             observation_uid=[key.uid for key in keys],
@@ -283,6 +319,39 @@ def load_label_shard(path: str | Path, *, verify_hash: bool = True) -> LabelShar
     if len(shard.observation_uid) != len(shard.reason_code):
         raise ValueError(f"invalid label shard: {path}")
     return shard
+
+
+def audit_supervision(labels: Iterable[LabelShard], protocol: CategoryProtocol | None = None, episode_manifests: Iterable[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    """Audit every supervision layer without treating unknown as negative."""
+    rows = known = allowed = ambiguous = novel_known = 0
+    reasons: dict[str, int] = defaultdict(int)
+    for shard in labels:
+        n = len(shard.observation_uid)
+        rows += n
+        known += int(np.asarray(shard.known_identity, dtype=bool).sum())
+        allowed += int(np.asarray(shard.supervision_allowed, dtype=bool).sum())
+        ambiguous += int(np.asarray(shard.ambiguous, dtype=bool).sum())
+        for reason in shard.reason_code:
+            reasons[str(reason)] += 1
+        if protocol is not None:
+            cats = np.asarray(shard.gt_category, dtype=np.int64)
+            known_mask = np.asarray(shard.known_identity, dtype=bool)
+            novel_known += int(np.isin(cats, list(protocol.novel_ids)).astype(bool)[known_mask].sum())
+    episode_counts: dict[str, int] = {}
+    for manifest in episode_manifests:
+        for kind, item in dict(manifest.get("kinds", {})).items():
+            episode_counts[kind] = episode_counts.get(kind, 0) + int(item.get("count", 0))
+    return {
+        "rows": rows,
+        "known": known,
+        "supervision_allowed": allowed,
+        "ambiguous": ambiguous,
+        "novel_known": novel_known,
+        "unknown_or_unmatched": rows - known,
+        "reason_counts": dict(sorted(reasons.items())),
+        "episode_counts": episode_counts,
+        "protocol_hash": protocol.content_hash() if protocol is not None else None,
+    }
 
 
 def build_training_arrays(path: str | Path) -> dict[str, np.ndarray]:

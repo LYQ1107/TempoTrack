@@ -1,0 +1,10 @@
+schema_version: 3
+method: s5_rl_edit
+model:
+  graph_hidden_dim: 128
+  graph_layers: 4
+loss:
+  behavior_cloning: 1.0
+  ppo: 1.0
+sampling:
+  max_edits: 256

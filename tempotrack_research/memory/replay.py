@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 from ..schemas import ObservationBatch
 from ..data.tracklet_store import TrackletRecord, TrackletStore
+from ..association.frame_scoring import assign_with_unmatched, fuse_dual, score_prototype
 from .fixed_dual import FixedDualMemory
 from .predictive_dual import PredictiveDualMemory, build_causal_evidence
 from .state import MemoryState
@@ -60,32 +61,34 @@ class FrozenObservationTracker:
         self._assignments.clear()
         self._video_id = int(video.get("video_id", -1) if isinstance(video, Mapping) else video)
 
-    @staticmethod
-    def _cosine(query: torch.Tensor, prototype: torch.Tensor) -> torch.Tensor:
-        return F.normalize(query, dim=-1) @ F.normalize(prototype, dim=-1).t()
-
-    def _score(self, embeddings: torch.Tensor, tracks: list[_ActiveTrack], labels: torch.Tensor) -> torch.Tensor:
+    def _score(self, embeddings: torch.Tensor, tracks: list[_ActiveTrack], labels: torch.Tensor, frame_index: int) -> tuple[torch.Tensor, torch.Tensor]:
         if not tracks:
-            return embeddings.new_empty((len(embeddings), 0))
+            return embeddings.new_empty((len(embeddings), 0)), torch.empty((len(embeddings), 0), dtype=torch.bool)
+        # Zero-detection frames still advance expiry/lifecycle, but there is
+        # no assignment matrix to score.  Keep the track axis explicit so a
+        # non-empty active memory cannot create a [0]-shaped legality tensor.
+        if len(embeddings) == 0:
+            return embeddings.new_empty((0, len(tracks))), torch.empty((0, len(tracks)), dtype=torch.bool, device=embeddings.device)
         fast = torch.stack([track.state.fast for track in tracks])
         slow = torch.stack([track.state.slow for track in tracks])
-        if isinstance(self.memory, FixedDualMemory) and self.memory.mode == "single_ema":
-            score = self._cosine(embeddings, fast)
-        else:
-            fast_cos = self._cosine(embeddings, fast)
-            slow_cos = self._cosine(embeddings, slow)
-            scale = float(getattr(self.memory, "logit_scale", self.config.get("logit_scale", 10.0)))
-            fast_logits = scale * fast_cos
-            slow_logits = scale * slow_cos
-            fast_bi = (fast_logits.softmax(dim=1) + fast_logits.softmax(dim=0)) / 2
-            slow_bi = (slow_logits.softmax(dim=1) + slow_logits.softmax(dim=0)) / 2
-            score = torch.where(fast_bi >= self.match_threshold, fast_bi, torch.maximum(fast_bi, slow_bi))
-            score = (score + torch.maximum(fast_cos, slow_cos)) / 2
-        if self.with_cats:
+        legal = torch.ones((len(embeddings), len(tracks)), dtype=torch.bool, device=embeddings.device)
+        legal &= torch.as_tensor([[frame_index - track.last_frame <= self.max_gap for track in tracks]] * len(embeddings), device=embeddings.device, dtype=torch.bool)
+        if self.with_cats and len(embeddings):
             track_labels = torch.as_tensor([track.label for track in tracks], device=labels.device)
-            score = score.masked_fill(labels[:, None] != track_labels[None, :], -torch.inf)
-        return score
+            legal &= labels[:, None] == track_labels[None, :]
+        if isinstance(self.memory, FixedDualMemory) and self.memory.mode == "single_ema":
+            score = (F.normalize(embeddings, dim=-1) @ F.normalize(fast, dim=-1).t()).masked_fill(~legal, -torch.inf)
+        else:
+            scale = float(getattr(self.memory, "logit_scale", self.config.get("logit_scale", 10.0)))
+            fast_cos = score_prototype(embeddings, fast, logit_scale=scale, legal_mask=legal)
+            slow_cos = score_prototype(embeddings, slow, logit_scale=scale, legal_mask=legal)
+            fast_cos = torch.nan_to_num(fast_cos, nan=-torch.inf)
+            slow_cos = torch.nan_to_num(slow_cos, nan=-torch.inf)
+            score = fuse_dual(fast_cos, slow_cos, fast_accept_threshold=float(self.config.get("fast_accept_threshold", self.match_threshold)))
+            score = score.masked_fill(~legal, -torch.inf)
+        return score, legal
 
+    @torch.inference_mode()
     def step(self, frame: ObservationBatch) -> FrameAssignment:
         if len(frame.keys) and self._video_id not in {-1, int(frame.video_ids[0]) if frame.video_ids is not None else self._video_id}:
             raise ValueError("FrozenObservationTracker received a different video without reset")
@@ -98,23 +101,28 @@ class FrozenObservationTracker:
         labels = torch.as_tensor(np.asarray(frame.category_ids), dtype=torch.long)
         local_ids = np.full(len(frame.keys), -1, dtype=np.int64)
         accepted = np.zeros(len(frame.keys), dtype=bool)
-        score_matrix = self._score(embeddings, list(self._tracks.values()), labels)
+        # Expire before scoring: an expired memory is archived and cannot win
+        # a current-frame assignment.  It remains in the final tracklet store.
+        expired_before = [local_id for local_id, track in self._tracks.items() if frame_index - track.last_frame > self.max_gap]
+        for local_id in expired_before:
+            track = self._tracks.pop(local_id)
+            track.state = track.state.detach()
+            self._finished[local_id] = track
         tracks = list(self._tracks.values())
+        score_matrix, legal_mask = self._score(embeddings, tracks, labels, frame_index)
         track_position = {track.local_id: position for position, track in enumerate(tracks)}
+        match_margin = np.zeros(len(frame.keys), dtype=np.float32)
+        margin_known = np.zeros(len(frame.keys), dtype=bool)
+        accepted_score = np.full(len(frame.keys), np.nan, dtype=np.float32)
         if len(tracks) and len(embeddings):
-            from scipy.optimize import linear_sum_assignment
-
-            score_cpu = score_matrix.detach().cpu().numpy()
-            cost = np.where(np.isfinite(score_cpu), -score_cpu, 1e9)
-            det_indices, track_indices = linear_sum_assignment(cost)
-            for det_index, track_index in zip(det_indices.tolist(), track_indices.tolist()):
-                if not np.isfinite(score_cpu[det_index, track_index]) or score_cpu[det_index, track_index] < self.match_threshold:
-                    continue
-                track = tracks[track_index]
-                if frame_index - track.last_frame > self.max_gap:
-                    continue
-                local_ids[det_index] = track.local_id
-                accepted[det_index] = True
+            assignment = assign_with_unmatched(score_matrix, legal_mask, match_threshold=self.match_threshold)
+            for det_index, track_index, margin, score in zip(assignment.detection_indices.tolist(), assignment.track_indices.tolist(), assignment.accepted_margin.tolist(), assignment.accepted_score.tolist()):
+                track = tracks[int(track_index)]
+                local_ids[int(det_index)] = track.local_id
+                accepted[int(det_index)] = True
+                match_margin[int(det_index)] = float(margin)
+                margin_known[int(det_index)] = True
+                accepted_score[int(det_index)] = float(score)
         # Births are applied only after the whole frame's matching decision.
         for index in np.flatnonzero(local_ids < 0).tolist():
             local_ids[index] = self._next_id
@@ -132,7 +140,7 @@ class FrozenObservationTracker:
                     fast = old_state.fast
                     slow = old_state.slow
                     position = track_position.get(track.local_id, -1)
-                    raw_margin = float(score_matrix[index, position].item()) if position >= 0 and score_matrix.shape[1] else 0.0
+                    raw_margin = float(match_margin[index])
                     image_width = max(float(frame.image_widths[index]) if frame.image_widths is not None else 1.0, 1.0)
                     image_height = max(float(frame.image_heights[index]) if frame.image_heights is not None else 1.0, 1.0)
                     old_width = max(float(old_bbox[2] - old_bbox[0]), 1e-6)
@@ -144,7 +152,14 @@ class FrozenObservationTracker:
                     history = torch.cat((old_state.fast, old_state.slow), dim=-1)
                     track.state, diagnostics = self.memory.update(old_state, z, history, evidence, frame_index, bbox=boxes[index])
                 else:
-                    track.state, diagnostics = self.memory.update(track.state, z, torch.as_tensor(float(accepted[index]), dtype=z.dtype), frame_index)
+                    # Confidence-gated M0 updates use the detector confidence
+                    # carried by the immutable observation, not the boolean
+                    # result of the association threshold.  Passing
+                    # ``accepted`` made every matched detection look equally
+                    # reliable and every birth look unreliable, so the gate
+                    # was not the declared detector-score control.
+                    detection_score = float(frame.scores[index]) if frame.scores is not None else 1.0
+                    track.state, diagnostics = self.memory.update(track.state, z, torch.as_tensor(detection_score, dtype=z.dtype), frame_index)
                 track.rows.append(int(rows[index]) if len(rows) > index else int(index))
                 track.last_frame = frame_index
                 track.last_bbox = boxes[index].detach().clone()
@@ -161,7 +176,7 @@ class FrozenObservationTracker:
             track = self._tracks.pop(local_id)
             track.state = track.state.detach()
             self._finished[local_id] = track
-        assignment = FrameAssignment(frame_index, rows, local_ids, accepted, score_matrix.detach().cpu().numpy() if score_matrix.numel() else np.empty((len(rows), 0), dtype=np.float32), {"active_tracks": len(self._tracks), "births": int((~accepted).sum()), "zero_detection_frame": len(rows) == 0})
+        assignment = FrameAssignment(frame_index, rows, local_ids, accepted, score_matrix.detach().cpu().numpy() if score_matrix.numel() else np.empty((len(rows), 0), dtype=np.float32), {"active_tracks": len(self._tracks), "births": int((~accepted).sum()), "zero_detection_frame": len(rows) == 0, "accepted_margin": match_margin.tolist(), "margin_known": margin_known.tolist(), "accepted_score": accepted_score.tolist(), "legal_match_count": int(legal_mask.sum().item()) if legal_mask.numel() else 0, "expired_before_frame": [int(value) for value in expired_before]})
         self._assignments.append(assignment)
         return assignment
 
