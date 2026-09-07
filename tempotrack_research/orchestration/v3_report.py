@@ -231,6 +231,8 @@ def generate_v3_report(repo: str | Path, run_root: str | Path, output: str | Pat
     run_started_at = max(prepare_starts) if prepare_starts else None
     jobs = _latest_jobs(reports / "jobs.jsonl", since=run_started_at)
     active = _active_processes(repo)
+    active_pids = {int(item["pid"]) for item in active if str(item.get("pid", "")).isdigit()}
+    orphaned_running = [item for item in jobs.values() if str(item.get("status")) == "RUNNING" and (not str(item.get("pid", "")).isdigit() or int(item.get("pid")) not in active_pids)]
     trainings = _training_rows(root); evaluations = _evaluation_rows(root, prepared.get("category_protocol"))
     invalidations = []
     for manifest_path in sorted(root.glob("invalidated/**/invalidation_manifest.json")):
@@ -239,7 +241,10 @@ def generate_v3_report(repo: str | Path, run_root: str | Path, output: str | Pat
     protocol = _json(Path(str(prepared.get("category_protocol"))), {}) or {}
     audit = prepared.get("label_audit", {}) or {}
     terminal = not active and not any(str(item.get("status")) == "RUNNING" for item in jobs.values())
-    title_status = "FINAL" if final and terminal else "IN_PROGRESS"
+    if final and orphaned_running and not active:
+        title_status = "INTERRUPTED_INCOMPLETE"
+    else:
+        title_status = "FINAL" if final and terminal else "IN_PROGRESS"
     lines: list[str] = [
         "# TempoTrack ICLR V3 repair and experiments",
         "",
@@ -260,6 +265,8 @@ def generate_v3_report(repo: str | Path, run_root: str | Path, output: str | Pat
         f"- state artifact: `{reports / 'state.json'}`; finished_at=`{state.get('finished_at', 'not recorded')}`",
         f"- checks: `{reports / 'v3_checks.json'}`; PASS={sum(item.get('status') == 'PASS' for item in checks)}/{len(checks)}",
         f"- jobs: `{reports / 'jobs.jsonl'}`; latest job statuses: `{json.dumps({key: item.get('status') for key, item in jobs.items()}, ensure_ascii=False)}`",
+        f"- orphaned RUNNING records without a live repo process: `{len(orphaned_running)}`",
+        f"- session-stop evidence: `{reports / 'session_stop_20260907.json'}`",
         f"- progress: `{reports / 'ICLR_V3_PROGRESS.md'}`",
         "",
         "### Active processes",
@@ -269,6 +276,9 @@ def generate_v3_report(repo: str | Path, run_root: str | Path, output: str | Pat
         lines.extend(f"- PID `{item['pid']}` elapsed `{item['elapsed']}` cwd `{item['cwd']}` command `{item['command']}`" for item in active)
     else:
         lines.append("- none observed for the current user and repository")
+    if orphaned_running:
+        lines += ["", "### Orphaned RUNNING records", "", "The append-only job log ended with RUNNING records, but no matching live process was found; these are treated as interrupted, not completed.", ""]
+        lines.extend(f"- `{item.get('job_id')}` PID `{item.get('pid')}` last heartbeat `{item.get('heartbeat_at')}` log `{item.get('log_path', '')}`" for item in orphaned_running)
 
     lines += ["", "## Preserved invalidated artifacts", "", "| manifest | preserved artifacts | reason |", "|---|---:|---|"]
     if invalidations:
