@@ -1,10 +1,10 @@
 # TempoTrack ICLR V4 repair and experiments
 
 - status: `RUNNING`
-- generated: `2026-09-07T18:52:34.399960+00:00`
+- generated: `2026-09-07T18:57:03.889905+00:00`
 - repo: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa`
 - run root: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4`
-- HEAD: `83765196881eaf068bd982f18cdd69b270a25bd4`
+- HEAD: `e20519155e6c68942c56c244c71579583b0df4b0`
 - V3 reference (read-only): `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v3`
 - coordinator state: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/reports/v4/run_state.json`
 - coordinator supervisor: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/reports/v4/supervisor.json`
