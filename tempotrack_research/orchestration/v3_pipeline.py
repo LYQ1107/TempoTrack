@@ -280,7 +280,11 @@ class V3Pipeline:
         else:
             protocol = build_category_protocol(train_annotation, benchmark_categories, provenance.get("source_names", []), output=protocol_path)
         transform = dict(self.local.get("data", {}).get("transform_snapshot", {}))
-        transform["schema_version"] = 3
+        # V4/V5 preparation consumes this same semantic transform contract.
+        # Keeping the cache key at schema 4 prevents every resume from
+        # invalidating the V4 manifest immediately after the coordinator adds
+        # its artifact signature.
+        transform["schema_version"] = 4
         transform_path = prepared_root / "tensor_transform.json"; _atomic_json(transform, transform_path)
         prepared_path = prepared_root / "prepared_manifest.json"
         cached_prepared = _load_json(prepared_path, {}) if self.resume == "auto" else {}
@@ -521,18 +525,41 @@ class V3Pipeline:
         local_data = deep_merge(dict(self.local.get("data", {})), {"category_protocol_hash": prepared["category_protocol_hash"], "tensor_contract_hash": prepared["tensor_contract_hash"]})
         infer_override = {"threshold": float(calibration["threshold"]), "calibration_path": str(self.run_root / "calibration" / profile / f"seed{seed}" / scheme / "calibration.json")} if calibration is not None else None
         local_path = self._resolved_local(f"infer_{tag}_{scheme}_{profile}_{seed}_{source_split}", data_override=local_data, infer_override=infer_override)
+        prediction = out / f"{infer_method}_{item.frontend}_{source_split}.prediction.json"
+        name = f"{scheme}_{profile}_seed{seed}_{source_split}"
+        evaluation = self.run_root / "evaluations" / profile / f"seed{seed}" / name / "evaluation.json"
+        provenance_path = out / f"{infer_method}_{item.frontend}_{source_split}.provenance.json"
+        summary_path = evaluation.parent / "teta_summary_results.pth"
+        # Controls are immutable functions of the verified source/replay
+        # manifests.  Reuse their output only when both hashes in the
+        # provenance file match this invocation; never use a newest-file
+        # heuristic and never reuse a learned checkpoint result here.
+        if self.resume != "never" and method in {"no_offline", "stable_emd"} and prediction.exists() and provenance_path.exists() and evaluation.exists() and summary_path.exists():
+            provenance = _load_json(provenance_path, {})
+            evaluation_payload = _load_json(evaluation, {})
+            if (provenance.get("source_manifest_hash") == file_hash(source_manifest)
+                    and provenance.get("tracklet_manifest_hash") == file_hash(replay_manifest)
+                    and provenance.get("method") == infer_method
+                    and provenance.get("frontend") == item.frontend
+                    and provenance.get("split") == source_split
+                    and evaluation_payload.get("status") == "COMPLETED"):
+                infer_job = {"status": "REUSED", "reason": "source_and_replay_signature_match", "prediction": str(prediction), "provenance": str(provenance_path)}
+                eval_job = {"status": "REUSED", "reason": "prediction_and_official_summary_present", "evaluation": str(evaluation), "summary": str(summary_path)}
+                value = dict(evaluation_payload)
+                value.update({"scheme": scheme, "profile": profile, "seed": seed, "split": source_split, "prediction": str(prediction), "calibration": dict(calibration or {}), "inference_job": infer_job, "evaluation_job": eval_job})
+                with self.results_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+                self.state["results"].append(value)
+                return value
         infer_args = ["infer", "--repo", str(self.repo), "--local", str(local_path), "--manifest", str(source_manifest), "--split", source_split, "--method", infer_method, "--frontend", item.frontend, "--output", str(out), "--run-root", str(self.run_root), "--seed", str(seed), "--tracklet-manifest", str(replay_manifest)]
         if checkpoint is None: infer_args.extend(["--checkpoint", "none"])
         else: infer_args.extend(["--checkpoint", str(checkpoint)])
         if memory_checkpoint is not None: infer_args.extend(["--memory-checkpoint", str(memory_checkpoint)])
         infer_job = self._run_command(f"{scheme}.{profile}.seed{seed}.infer.{source_split}", infer_args, stage="infer", log_name=f"{scheme}.{profile}.seed{seed}.{source_split}.infer.log")
-        prediction = out / f"{infer_method}_{item.frontend}_{source_split}.prediction.json"
         if infer_job["status"] != "COMPLETED" or not prediction.exists():
             return {"inference": infer_job, "status": infer_job["status"], "prediction": str(prediction)}
-        name = f"{scheme}_{profile}_seed{seed}_{source_split}"
         eval_args = ["evaluate", "--repo", str(self.repo), "--manifest", str(source_manifest), "--prediction", str(prediction), "--annotation", str(annotation), "--output", str(self.run_root / "evaluations" / profile / f"seed{seed}"), "--run-root", str(self.run_root), "--name", name, "--cores", str(int(self.local.get("evaluation", {}).get("cores", 1))), "--category-protocol", str(prepared["category_protocol"])]
         eval_job = self._run_command(f"{scheme}.{profile}.seed{seed}.evaluate.{source_split}", eval_args, stage="evaluate", log_name=f"{scheme}.{profile}.seed{seed}.{source_split}.evaluate.log")
-        evaluation = self.run_root / "evaluations" / profile / f"seed{seed}" / name / "evaluation.json"
         value = _load_json(evaluation, {"status": eval_job["status"], "path": str(evaluation)})
         value.update({"scheme": scheme, "profile": profile, "seed": seed, "split": source_split, "prediction": str(prediction), "calibration": dict(calibration or {}), "inference_job": infer_job, "evaluation_job": eval_job})
         with self.results_path.open("a", encoding="utf-8") as handle:

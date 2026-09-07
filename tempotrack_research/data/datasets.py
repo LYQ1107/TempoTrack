@@ -20,7 +20,7 @@ from torch.utils.data import Dataset
 from .collate import collate_training_batches
 from .label_builder import load_label_shard
 from .observation_store import ObservationLedger
-from .tensorization import TrajectoryTensorizer, TransformSpec
+from .tensorization import TrajectoryTensorizer, TransformSpec, tracklet_gap
 from .graph_features import GraphFeaturizer
 
 
@@ -321,7 +321,11 @@ class EpisodeDataset(Dataset):
             target = self._segment(record["target"], role="target")
             target_ledger = self._ledger(record["target"]["ledger"])
             target_rows = np.asarray(record["target"]["rows"], dtype=np.int64)
-            gap = (float(target_ledger.arrays["frame_times"][target_rows[0]]) - float(source_ledger.arrays["frame_times"][source_rows[-1]])) / self.time_scale
+            gap = tracklet_gap(
+                {"video_id": source_ledger.metadata.get("video_id"), "absolute_times": source_ledger.arrays["frame_times"][source_rows]},
+                {"video_id": target_ledger.metadata.get("video_id"), "absolute_times": target_ledger.arrays["frame_times"][target_rows]},
+                scale=self.time_scale,
+            )
             return {"source_appearance": source["appearance"], "source_geometry": source["geometry"], "source_time": source["relative_time"], "source_valid": source["valid"], "target_appearance": target["appearance"], "target_geometry": target["geometry"], "target_time": target["relative_time"], "target_valid": target["valid"], "gap": torch.as_tensor(gap, dtype=torch.float32), "source_state": torch.as_tensor(record["source_state"], dtype=torch.float32), "target_state": torch.as_tensor(record["target_state"], dtype=torch.float32), "condition": torch.as_tensor([gap], dtype=torch.float32), "exists": torch.as_tensor(float(record.get("exists", 1)), dtype=torch.float32), "existence_known": torch.as_tensor(bool(record.get("existence_known", True)), dtype=torch.bool), "target_state_valid": torch.as_tensor(bool(record.get("target_state_valid", True)), dtype=torch.bool), "metadata": {**dict(record.get("metadata", {})), "episode_uid": str(record.get("episode_uid", ""))}}
         if kind in {"graph", "edit"}:
             output = self._graph(record)

@@ -56,6 +56,35 @@ def _valid_indices(valid: Tensor) -> Tensor:
     return torch.stack(result).long()
 
 
+def tracklet_gap(left: Mapping[str, Any], right: Mapping[str, Any], *, scale: float = 1.0) -> float:
+    """Return the causal gap from absolute clocks, never local offsets.
+
+    Segment encoders are allowed to zero their local clocks independently;
+    cross-segment time is therefore computed before that projection.  A
+    negative gap is an invalid candidate and is deliberately not clamped.
+    """
+    if scale <= 0:
+        raise ValueError("time scale must be positive")
+    def absolute(item: Mapping[str, Any], name: str) -> np.ndarray:
+        value = item.get("absolute_times")
+        if value is None:
+            value = item.get("frame_times", item.get("frames"))
+        if value is None:
+            raise ValueError(f"{name} lacks an absolute frame/timestamp sequence")
+        result = np.asarray(value, dtype=np.float64).reshape(-1)
+        if result.size == 0 or np.any(np.diff(result) < 0):
+            raise ValueError(f"{name} absolute times are empty or non-monotonic")
+        return result
+    if "video_id" in left and "video_id" in right and int(left["video_id"]) != int(right["video_id"]):
+        raise ValueError("cross-video tracklet gap is not a causal link")
+    left_times = absolute(left, "left")
+    right_times = absolute(right, "right")
+    gap = (float(right_times[0]) - float(left_times[-1])) / float(scale)
+    if gap < 0:
+        raise ValueError(f"negative tracklet gap: {gap}")
+    return float(gap)
+
+
 class TrajectoryTensorizer:
     """Encode segments with relative local time and normalized geometry."""
 
@@ -213,4 +242,4 @@ def padded_segment(segments: Sequence[SegmentInputs]) -> SegmentInputs:
     return SegmentInputs(app, geo, time, valid)
 
 
-__all__ = ["TransformSpec", "TrajectoryTensorizer", "padded_segment"]
+__all__ = ["TransformSpec", "TrajectoryTensorizer", "padded_segment", "tracklet_gap"]

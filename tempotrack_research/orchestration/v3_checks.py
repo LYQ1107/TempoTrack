@@ -181,7 +181,7 @@ def _t3(ctx: Mapping[str, Any]) -> Mapping[str, Any]:
     task = MemoryTrainingTask(PredictiveDualMemory(2 * mdim, mdim, 8, hidden_dim=32), unroll=min(16, int(memory_batch["observations"].shape[1])))
     memory_losses = task(
         MemoryInputs(memory_batch["initial_feature"], memory_batch["initial_time"], memory_batch["initial_geometry"], memory_batch["observations"], memory_batch["times"], memory_batch["geometry"], memory_batch["competition_margin"], memory_batch["margin_known"], memory_batch["observation_scores"], memory_batch["valid"]),
-        MemoryTargets(memory_batch["future_embedding"], memory_batch["positive_mask"], memory_batch["candidate_known"], memory_batch["reliability"], memory_batch["reliability_known"], memory_batch["valid_steps"]),
+        MemoryTargets(memory_batch["future_embedding"], memory_batch["positive_mask"], memory_batch["candidate_known"], memory_batch.get("candidate_valid"), memory_batch["reliability"], memory_batch["reliability_known"], memory_batch["valid_steps"]),
     )
     memory_losses["total"].backward()
     controller_grad = sum(float(parameter.grad.abs().sum()) for parameter in task.memory.controller.parameters() if parameter.grad is not None)

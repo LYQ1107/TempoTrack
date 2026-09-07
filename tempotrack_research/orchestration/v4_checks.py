@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from ..config import file_hash, object_hash
 from ..errors import DataUnavailable
@@ -66,14 +66,47 @@ def run_v4_checks(repo: str | Path, *, reference_root: str | Path, run_root: str
         except Exception as exc:
             results.append(_item("C1_input_time_backend", "FAIL", error=f"{type(exc).__name__}: {exc}"))
 
-    # C2/C3/C7 require newly rebuilt V4 episodes and a real training call.  A
-    # pre-existing V3 checkpoint/JSONL is not a substitute for this contract.
-    for name, marker, reason in (
-        ("C2_s1_real_training", "s1_jepa", "no V4 S1 production training artifact; GPU training was not started"),
-        ("C3_m1_real_events", "m1_memory", "no V4 M1 memory/replay artifact; dependent training is waiting for GPU resources"),
-        ("C7_s2_s5_execution", "s2_s5", "no V4 S2/S5 training and rollout artifacts; GPU resources are externally blocked"),
-    ):
-        results.append(_item(name, "BLOCKED_EXTERNAL", error=reason, evidence={"required_marker": marker, "reference_root_not_used_as_training": True}))
+    # C2/C3/C7 are evidence checks, not static promises.  Before the live
+    # scheduler has produced the corresponding artifacts they are explicitly
+    # NOT_EXERCISED; a shared-memory resource snapshot is never converted into
+    # a fake external blocker.
+    def _train_runs(markers: Sequence[str]) -> list[Path]:
+        values: list[Path] = []
+        for result in sorted(run_root.glob("runs/**/train_result.json")):
+            try:
+                payload = json.loads(result.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if str(payload.get("method")) in markers or any(marker in result.as_posix() for marker in markers):
+                values.append(result)
+        return values
+
+    s1_runs = _train_runs(["s1_jepa"])
+    def _has_updates(path: Path) -> bool:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            metrics = path.parent / "metrics.jsonl"
+            return path.parent.joinpath("last.pt").exists() and metrics.exists() and metrics.stat().st_size > 0 and int(payload.get("optimizer_steps", 0)) > 0
+        except (OSError, ValueError, TypeError):
+            return False
+    if any(_has_updates(item) for item in s1_runs):
+        results.append(_item("C2_s1_real_training", "PASS", assertions=["formal_s1_training_result", "optimizer_steps_positive", "metrics_recorded"], evidence={"train_results": [str(item) for item in s1_runs]}))
+    else:
+        results.append(_item("C2_s1_real_training", "NOT_EXERCISED", evidence={"required_marker": "s1_jepa", "reference_root_not_used_as_training": True, "candidate_train_results": [str(item) for item in s1_runs]}))
+
+    m1_replays = sorted(run_root.glob("frontend/m1_*/predictive_dual/*/replay_manifest.json"))
+    memory_runs = _train_runs(["predictive_dual"])
+    if m1_replays and any(any(part.startswith("m1_") for part in path.parts) for path in m1_replays) and memory_runs:
+        results.append(_item("C3_m1_real_events", "PASS", assertions=["m1_replay_manifest_present", "memory_train_result_present"], evidence={"replays": [str(item) for item in m1_replays[:20]], "train_results": [str(item) for item in memory_runs[:20]]}))
+    else:
+        results.append(_item("C3_m1_real_events", "NOT_EXERCISED", evidence={"required_marker": "m1_memory", "replay_candidates": [str(item) for item in m1_replays[:20]], "train_results": [str(item) for item in memory_runs[:20]]}))
+
+    s2_s5_runs = _train_runs(["s2_state_fm", "s5_rl_edit"])
+    ppo_rollouts = sorted(run_root.glob("runs/**/ppo_progress.json"))
+    if s2_s5_runs and all(Path(item).parent.joinpath("last.pt").exists() for item in s2_s5_runs) and (ppo_rollouts or any("s2_state_fm" in item.as_posix() for item in s2_s5_runs)):
+        results.append(_item("C7_s2_s5_execution", "PASS", assertions=["s2_checkpoint_or_ppo_rollout", "s5_or_s2_artifact_bound"], evidence={"train_results": [str(item) for item in s2_s5_runs], "ppo_rollouts": [str(item) for item in ppo_rollouts]}))
+    else:
+        results.append(_item("C7_s2_s5_execution", "NOT_EXERCISED", evidence={"required_marker": "s2_s5", "train_results": [str(item) for item in s2_s5_runs], "ppo_rollouts": [str(item) for item in ppo_rollouts]}))
 
     # C4 can validate the production DAG/target implementation only after a
     # V4 graph window exists.  Keep the distinction explicit.
@@ -85,11 +118,12 @@ def run_v4_checks(repo: str | Path, *, reference_root: str | Path, run_root: str
 
     # C5 is tied to a real V4 train_result/checkpoint pair, not the old V3
     # resume fixture.  The exact-resume code is still compiled by verify.
-    checkpoints = list(run_root.glob("**/train_result.json")) if run_root.exists() else []
-    if checkpoints:
-        results.append(_item("C5_checkpoint_signature_resume", "PASS", assertions=["v4_train_result_present"], evidence={"train_results": [str(item) for item in checkpoints[:20]]}))
+    checkpoints = list(run_root.glob("runs/**/train_result.json")) if run_root.exists() else []
+    resume_evidence = [item for item in checkpoints if item.parent.joinpath("last.pt").exists() and item.parent.joinpath("resolved_run.json").exists() and item.parent.joinpath("progress.json").exists()]
+    if resume_evidence:
+        results.append(_item("C5_checkpoint_signature_resume", "PASS", assertions=["v4_train_result_present", "resolved_run_bound", "progress_checkpoint_boundary"], evidence={"train_results": [str(item) for item in resume_evidence[:20]]}))
     else:
-        results.append(_item("C5_checkpoint_signature_resume", "BLOCKED_EXTERNAL", error="no V4 checkpoint boundary was produced", evidence={"reference_checkpoints_not_accepted": True}))
+        results.append(_item("C5_checkpoint_signature_resume", "NOT_EXERCISED", evidence={"reference_checkpoints_not_accepted": True, "candidate_train_results": [str(item) for item in checkpoints[:20]]}))
 
     # C6 has a real production DAG proof; two-GPU concurrency is separately
     # recorded as NOT_EXERCISED when the resource snapshot has fewer than two
@@ -101,7 +135,16 @@ def run_v4_checks(repo: str | Path, *, reference_root: str | Path, run_root: str
         missing_deps = sorted({dep for job in jobs for dep in job.dependencies if dep not in known})
         if missing_deps:
             raise AssertionError(f"DAG has missing dependencies: {missing_deps[:10]}")
-        results.append(_item("C6_dag_and_gpu_lease", "NOT_EXERCISED", assertions=["production_typed_dag_acyclic", "independent_dependency_edges_recorded"], evidence={"job_count": len(jobs), "topological_order_hash": object_hash(order), "multi_gpu": "NOT_EXERCISED_UNDER_CURRENT_RESOURCE_SNAPSHOT"}))
+        job_rows: list[dict[str, Any]] = []
+        status_path = repo / "reports" / "v4" / "status.json"
+        if status_path.exists():
+            try:
+                value = json.loads(status_path.read_text(encoding="utf-8")); job_rows = [dict(item) for item in value.get("jobs", {}).values() if isinstance(item, Mapping)]
+            except (OSError, ValueError, TypeError):
+                job_rows = []
+        devices = sorted({str(item.get("device_uuid")) for item in job_rows if item.get("device_uuid") and item.get("status") in {"COMPLETED", "RUNNING"}})
+        c6_status = "PASS" if len(devices) >= 2 else "NOT_EXERCISED"
+        results.append(_item("C6_dag_and_gpu_lease", c6_status, assertions=["production_typed_dag_acyclic", "independent_dependency_edges_recorded"] + (["two_distinct_worker_uuids"] if len(devices) >= 2 else []), evidence={"job_count": len(jobs), "topological_order_hash": object_hash(order), "worker_device_uuids": devices, "multi_gpu": len(devices) >= 2}))
     except Exception as exc:
         results.append(_item("C6_dag_and_gpu_lease", "FAIL", error=f"{type(exc).__name__}: {exc}"))
 

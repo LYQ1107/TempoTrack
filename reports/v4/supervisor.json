@@ -1,10 +1,10 @@
 {
-  "finished_at": "2026-09-07T14:47:43.065463+00:00",
-  "pid": 2215,
-  "pid_start_ticks": 1320103826,
-  "resource_reason": "no_visible_gpu_without_compute_process",
+  "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa",
+  "pid": 10768,
+  "pid_start_ticks": 1322787320,
   "run_root": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4",
+  "scheduler_revision": "shared-gpu-1",
   "schema_version": 4,
-  "started_at": "2026-09-07T09:18:02.908176+00:00",
-  "status": "WAITING_RESOURCES"
+  "started_at": "2026-09-07T16:45:17.867807+00:00",
+  "status": "RUNNING"
 }

@@ -71,9 +71,12 @@ class GraphFlowMatcher(nn.Module):
         loss = ((predicted - target).square() * mask_value).sum() / mask_value.sum().clamp_min(1.0)
         # Train the path-aware graph scorer on the same GT target graph, while
         # keeping the scorer's graph projection discrete and explicit.
-        target_score = self.reranker(node_features, edge_features, edge_index, (target_graph > 0.5) & supervised, node_valid, edge_valid)
-        initial_score = self.reranker(node_features, edge_features, edge_index, initial_graph > 0.5, node_valid, edge_valid)
-        rank = F.softplus(-(target_score - initial_score)).mean()
+        ranking_target = (target_graph > 0.5) & supervised
+        ranking_initial = initial_graph.bool() & supervised
+        target_score = self.reranker(node_features, edge_features, edge_index, ranking_target, node_valid, edge_valid)
+        initial_score = self.reranker(node_features, edge_features, edge_index, ranking_initial, node_valid, edge_valid)
+        rank_rows = supervised.any(dim=-1)
+        rank = F.softplus(-(target_score - initial_score))[rank_rows].mean() if bool(rank_rows.any()) else predicted.sum() * 0.0
         total = loss + 0.1 * rank
         return {"total": total, "flow": loss.detach(), "reranker": rank.detach(), "valid_edges": mask_value.sum().detach()}
 

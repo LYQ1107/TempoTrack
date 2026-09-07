@@ -1,6 +1,6 @@
 {
   "schema_version": 4,
-  "checked_at": 1788799583.7971218,
+  "checked_at": 1788799443.431464,
   "results": [
     {
       "check": "C1_input_time_backend",
@@ -15,7 +15,7 @@
         "formal_pair_dataset_loaded",
         "explicit_query_times_present"
       ],
-      "checked_at": 1788799528.907916
+      "checked_at": 1788799397.738713
     },
     {
       "check": "C2_s1_real_training",
@@ -27,7 +27,7 @@
       },
       "error": null,
       "assertions": [],
-      "checked_at": 1788799528.908025
+      "checked_at": 1788799397.7388148
     },
     {
       "check": "C3_m1_real_events",
@@ -39,7 +39,7 @@
       },
       "error": null,
       "assertions": [],
-      "checked_at": 1788799528.9084096
+      "checked_at": 1788799397.7391577
     },
     {
       "check": "C7_s2_s5_execution",
@@ -51,7 +51,7 @@
       },
       "error": null,
       "assertions": [],
-      "checked_at": 1788799528.9084623
+      "checked_at": 1788799397.73921
     },
     {
       "check": "C4_graph_targets_unknown",
@@ -66,7 +66,7 @@
       "assertions": [
         "v4_graph_windows_present"
       ],
-      "checked_at": 1788799528.9086936
+      "checked_at": 1788799397.739453
     },
     {
       "check": "C5_checkpoint_signature_resume",
@@ -77,7 +77,7 @@
       },
       "error": null,
       "assertions": [],
-      "checked_at": 1788799528.908726
+      "checked_at": 1788799397.739483
     },
     {
       "check": "C6_dag_and_gpu_lease",
@@ -93,7 +93,7 @@
         "production_typed_dag_acyclic",
         "independent_dependency_edges_recorded"
       ],
-      "checked_at": 1788799529.0522873
+      "checked_at": 1788799397.9307656
     },
     {
       "check": "C8_official_evaluation_loop",
@@ -120,7 +120,7 @@
         "official_evaluator_completed",
         "summary_artifact_present"
       ],
-      "checked_at": 1788799583.797099
+      "checked_at": 1788799443.4314387
     }
   ],
   "summary": {

@@ -18,6 +18,7 @@ from ..config import file_hash, object_hash
 from .feature_export import iter_manifest_ledgers, load_dataset_manifest
 from .graph_targets import GraphTargets, build_direct_successor_targets, validate_target_paths
 from .label_builder import load_label_shard
+from .tensorization import tracklet_gap
 
 
 def _atomic_json(payload: Mapping[str, Any], path: Path) -> None:
@@ -86,7 +87,7 @@ def _stable_initial(views: Sequence[Mapping[str, Any]], graph: Any, edge_benefit
         pairs = edge_index.T.tolist()
         lefts = [views[int(source)] for source, _ in pairs]
         rights = [views[int(target)] for _, target in pairs]
-        gaps = [float(right["time_offsets"][0] - left["time_offsets"][-1]) for left, right in zip(lefts, rights)]
+        gaps = [tracklet_gap(left, right) for left, right in zip(lefts, rights)]
         transport = stable_emd_batch(lefts, rights, gaps, batch_size=512)
         benefits = [0.0 if not result.get("valid", False) else 1.0 - float(result["edge_score"]) for result in transport]
     else:

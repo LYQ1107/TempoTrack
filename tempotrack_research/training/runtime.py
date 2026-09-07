@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
-from ..config import file_hash, object_hash
+from ..config import file_hash, object_hash, resolve_training_run_dir
 from ..data.datasets import (
     ContinuationEpisodeDataset,
     EditDemonstrationDataset,
@@ -314,6 +314,7 @@ def _loss_for(method: str, model: nn.Module, batch: Mapping[str, Any], *, device
             future_embedding=batch["future_embedding"],
             positive_mask=batch["positive_mask"],
             candidate_known=batch["candidate_known"],
+            candidate_valid=batch.get("candidate_valid"),
             reliability=batch["reliability"],
             reliability_known=batch["reliability_known"],
             valid=batch.get("valid_steps"),
@@ -442,13 +443,16 @@ def run_available_training(
     # on the same lineage.
     if base_run_root.name != "runs":
         base_run_root = base_run_root / "runs"
-    # Trial artifacts are kept at their historical lineage path for resume
-    # compatibility.  Full and integration artifacts get an explicit profile
-    # suffix: their episode manifests and schedules are different contracts,
-    # so a full run must never discover and try to resume a trial checkpoint
-    # merely because method/frontend/seed happen to match.
-    profile_suffix = "" if profile == "trial" else f"_{profile}"
-    run_dir = base_run_root / f"{frontend}_{method}_{phase}_seed{int(seed)}{profile_suffix}"
+    # All callers use the same resolver.  A full run is deliberately a new
+    # lineage and can never discover a trial checkpoint by globbing.
+    run_dir = resolve_training_run_dir(
+        base_run_root,
+        frontend=frontend,
+        method=method,
+        train_phase=phase,
+        profile=profile,
+        seed=seed,
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
     kind_manifest, manifest_payload = _materialize_kind_manifest(overall_manifest, kind, run_dir)
     dataset = _dataset_class(kind)(kind_manifest, transform_snapshot=data.get("transform_snapshot"), cache_videos=int(data.get("cache_videos", 2)), epoch=0, history_order=str(data.get("history_order", "canonical")))
@@ -479,7 +483,6 @@ def run_available_training(
         "count": len(dataset),
         "tensor_contract": data.get("tensor_contract_hash"),
         "category_protocol": data.get("category_protocol_hash"),
-        "dependency_code_hash": dependency.get("dependency_code_hash"),
     })
     if method == "predictive_dual":
         config.update({"history_dim": 2 * int(sample["initial_feature"].shape[-1]), "observation_dim": int(sample["initial_feature"].shape[-1]), "evidence_dim": 8})
@@ -492,6 +495,7 @@ def run_available_training(
         "method": method,
         "frontend": frontend,
         "phase": phase,
+        "train_phase": phase,
         "profile": profile,
         "seed": int(seed),
         "episode_manifest": str(overall_manifest),
@@ -511,6 +515,16 @@ def run_available_training(
         "loader_config": {"microbatch_size": microbatch_size, "accumulation_steps": accumulation_steps, "effective_batch": effective_batch, "num_workers": int(train_config.get("num_workers", 0))},
         "dependency_signatures": dependency,
         "full_schedule_steps": int(train_config.get("full_steps", _BUDGETS.get(method, (3000, 3000))[1])),
+        "training_semantics": object_hash({
+            "method": method,
+            "frontend": frontend,
+            "phase": phase,
+            "model_config": config,
+            "loss": dict(run_spec.loss if run_spec else {}),
+            "optimizer": dict(run_spec.optimizer if run_spec else {}),
+            "schedule": dict(run_spec.schedule if run_spec else {}),
+            "train": {key: value for key, value in train_config.items() if key not in {"full_steps", "trial_steps"}},
+        }),
     }
     _atomic_json(metadata, run_dir / "resolved_run.json")
 
@@ -570,6 +584,8 @@ def run_available_training(
         optimizer = getattr(trainer, "optimizer", None)
         ppo_checkpoint.save(model, optimizer, metadata={**metadata, "transitions": result.get("transitions", 0), "ppo_updates": result.get("updates", 0), "policy_version": result.get("updates", 0), "ppo_history": result.get("history", []), "checkpoint_boundary": "completed_ppo_run"}, optimizer_step=int(result.get("updates", 0)), attempted_steps=int(result.get("updates", 0)), components={"ppo": {"policy_versions": result.get("updates", 0), "transitions": result.get("transitions", 0)}})
         _atomic_json({**result, "checkpoint": str(ppo_checkpoint.path)}, ppo_progress)
+        _atomic_json({"schema_version": 4, "optimizer_step": int(result.get("updates", 0)), "transitions": int(result.get("transitions", 0)), "status": "COMPLETED", "memory": {}}, run_dir / "progress.json")
+        _atomic_json({"schema_version": 4, "workload_signature": object_hash({"method": method, "frontend": frontend, "profile": profile, "seed": int(seed), "data_hash": data_hash}), "memory": {}, "device": str(selected_device), "optimizer_steps": int(result.get("updates", 0)), "transitions": int(result.get("transitions", 0)), "source": "ppo_runtime"}, run_dir / "memory_profile.json")
         _atomic_json(result, run_dir / "train_result.json")
         return {"status": "COMPLETED", "run_dir": str(run_dir), "checkpoint": str(ppo_checkpoint.path), **result}
 
@@ -601,7 +617,7 @@ def run_available_training(
     )
     checkpoint = AtomicCheckpoint(run_dir / "last.pt")
     if resume == "auto" and checkpoint.path.exists():
-        expected_checkpoint = {"method": method, "frontend": frontend, "data_hash": data_hash}
+        expected_checkpoint = {"method": method, "frontend": frontend, "data_hash": data_hash, "_artifact_signature_purpose": "train_resume"}
         if artifact_signature is not None:
             expected_checkpoint["artifact_signature"] = artifact_signature
         # V4 has one strict semantic contract.  A checkpoint with a changed
@@ -620,6 +636,7 @@ def run_available_training(
         sampler.load_state_dict(dict(saved_sampler))
 
     metrics_path = run_dir / "metrics.jsonl"
+    progress_path = run_dir / "progress.json"
     distinct_uids: set[str] = set()
 
     # Validation is a real fixed internal-tune episode loader.  It is kept
@@ -673,6 +690,30 @@ def run_available_training(
         record = {"step": int(step), "method": method, "frontend": frontend, "phase": phase, "seed": int(seed), **{str(k): float(v) for k, v in values.items()}}
         with metrics_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        memory: dict[str, Any] = {}
+        if selected_device.type == "cuda":
+            try:
+                memory = {
+                    "allocated_mib": round(torch.cuda.memory_allocated(selected_device) / 2**20, 2),
+                    "reserved_mib": round(torch.cuda.memory_reserved(selected_device) / 2**20, 2),
+                    "max_allocated_mib": round(torch.cuda.max_memory_allocated(selected_device) / 2**20, 2),
+                    "max_reserved_mib": round(torch.cuda.max_memory_reserved(selected_device) / 2**20, 2),
+                }
+            except RuntimeError:
+                memory = {}
+        _atomic_json({
+            "schema_version": 4,
+            "optimizer_step": int(engine.optimizer_steps),
+            "attempted_steps": int(engine.attempted_steps),
+            "last_update_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            "method": method,
+            "frontend": frontend,
+            "profile": profile,
+            "seed": int(seed),
+            "metrics": record,
+            "memory": memory,
+            "episode_uids": len(distinct_uids),
+        }, progress_path)
         if step == 1 or step % max(1, engine.config.save_every) == 0 or step == requested_steps:
             checkpoint.save(
                 model, optimizer, scheduler=scheduler, scaler=engine.scaler,
@@ -711,6 +752,24 @@ def run_available_training(
         "best_step": best_step, "best_checkpoint": str(run_dir / "best.pt") if best_step is not None else None,
         "data_hash": data_hash, **result,
     }
+    final_memory = {
+        "max_allocated_mib": round(torch.cuda.max_memory_allocated(selected_device) / 2**20, 2) if selected_device.type == "cuda" else 0.0,
+        "max_reserved_mib": round(torch.cuda.max_memory_reserved(selected_device) / 2**20, 2) if selected_device.type == "cuda" else 0.0,
+    }
+    _atomic_json({"optimizer_step": int(engine.optimizer_steps), "status": "COMPLETED", "memory": final_memory}, progress_path)
+    _atomic_json({
+        "schema_version": 4,
+        "workload_signature": object_hash({"method": method, "frontend": frontend, "profile": profile, "seed": int(seed), "data_hash": data_hash, "model_config": config}),
+        "method": method,
+        "frontend": frontend,
+        "profile": profile,
+        "seed": int(seed),
+        "batch": {"microbatch_size": microbatch_size, "accumulation_steps": accumulation_steps, "effective_batch": effective_batch, "episode_kind": kind},
+        "memory": final_memory,
+        "device": str(selected_device),
+        "optimizer_steps": int(engine.optimizer_steps),
+        "source": "torch.cuda.max_memory_*",
+    }, run_dir / "memory_profile.json")
     _atomic_json(result_payload, run_dir / "train_result.json")
     return result_payload
 

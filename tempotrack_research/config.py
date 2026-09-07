@@ -36,13 +36,27 @@ class ArtifactSignature:
         return object_hash(self.to_dict())
 
     def compatible_with(self, other: "ArtifactSignature") -> tuple[bool, list[str]]:
+        return self.compatible_for(other, purpose="prediction_reuse")
+
+    def compatible_for(self, other: "ArtifactSignature", *, purpose: str) -> tuple[bool, list[str]]:
+        """Compare only the semantic layers relevant to an artifact use.
+
+        Scheduler/report provenance is intentionally retained in metadata but
+        never invalidates a training resume.  The old implementation compared
+        the whole mapping at every call site, which made a harmless executor
+        change look like a data or model change.
+        """
+        if purpose not in {"train_resume", "prediction_reuse", "report_reuse"}:
+            raise ValueError(f"unknown artifact compatibility purpose: {purpose}")
+        fields = ["data_semantics", "training_semantics"]
+        if purpose in {"prediction_reuse", "report_reuse"}:
+            fields.append("deployment_semantics")
+        if purpose == "report_reuse":
+            fields.append("schema_version")
         reasons: list[str] = []
-        if self.data_semantics != other.data_semantics:
-            reasons.append("data_semantics")
-        if self.training_semantics != other.training_semantics:
-            reasons.append("training_semantics")
-        if self.deployment_semantics != other.deployment_semantics:
-            reasons.append("deployment_semantics")
+        for field in fields:
+            if getattr(self, field) != getattr(other, field):
+                reasons.append(field)
         return not reasons, reasons
 
     @classmethod
@@ -151,6 +165,29 @@ def resolve_path(repo: str | Path, value: str | None) -> Path | None:
         return None
     path = Path(value).expanduser()
     return path if path.is_absolute() else Path(repo) / path
+
+
+def resolve_training_run_dir(
+    run_root: str | Path,
+    *,
+    frontend: str,
+    method: str,
+    train_phase: str,
+    profile: str,
+    seed: int,
+    variant: str = "default",
+) -> Path:
+    """Return the one canonical directory used by binders and runtime.
+
+    ``run_root`` may be either the experiment root or its ``runs`` child.
+    Variant names are explicit so an ablation cannot overwrite the default
+    lineage.  No global checkpoint search is involved.
+    """
+    root = Path(run_root).expanduser().resolve()
+    runs = root if root.name == "runs" else root / "runs"
+    suffix = "" if profile == "trial" else f"_{profile}"
+    variant_suffix = "" if variant in {"", "default", None} else f"_{variant}"
+    return runs / f"{frontend}_{method}_{train_phase}_seed{int(seed)}{variant_suffix}{suffix}"
 
 
 def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:

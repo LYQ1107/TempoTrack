@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 from .trajectory_encoder import TrajectoryEncoder
 from ..losses.regularization import vicreg_regularization
-from ..schemas import LinkEvidence, PairInputs
+from ..schemas import LinkEvidence, PairInputs, PredictionQuery, SegmentInputs
 
 
 def _masked_mean(value: Tensor, mask: Tensor | None = None) -> Tensor:
@@ -98,8 +98,9 @@ def compute_link_evidence(
     dynamic_difference = F.smooth_l1_loss(predicted["dynamic"], target["dynamic"].detach(), reduction="none")
     while token_valid.ndim < dynamic_difference.ndim:
         token_valid = token_valid.unsqueeze(-1)
-    denominator = token_valid.to(dynamic_difference.dtype).sum(dim=tuple(range(-2, 0))).clamp_min(1.0)
-    dynamic_error = (dynamic_difference * token_valid.to(dynamic_difference.dtype)).sum(dim=tuple(range(-2, 0))) / denominator
+    token_weights = token_valid.to(dynamic_difference.dtype)
+    denominator = token_weights.sum(dim=tuple(range(-2, 0))).mul(float(dynamic_difference.shape[-1])).clamp_min(1.0)
+    dynamic_error = (dynamic_difference * token_weights).sum(dim=tuple(range(-2, 0))) / denominator
     valid = token_valid.squeeze(-1) if token_valid.ndim == predicted["dynamic"].ndim else token_valid
     valid = valid.any(dim=-1) if valid.ndim == prediction_identity.ndim else valid
     score = prediction_identity_cosine / float(temperature) - float(dynamic_weight) * dynamic_error + float(anchor_weight) * frozen_anchor
@@ -549,14 +550,48 @@ class JEPAIdentityLinker(nn.Module):
             return torch.empty(0, device=next(self.parameters()).device)
         values: list[Tensor] = []
         if ledger is not None and tensorizer is not None:
+            if mode != "forward_only":
+                raise NotImplementedError("UNSUPPORTED_MODE: bidirectional_inpainting requires held-out reverse training evidence")
             # This is the production path: candidate tensorization and query
             # construction both come from the shared absolute-clock factory.
             for start in range(0, edge_index.shape[1], max(1, int(edge_batch_size))):
                 batch_inputs: list[PairInputs] = []
                 for source, target in edge_index[:, start : start + max(1, int(edge_batch_size))].t().tolist():
                     batch_inputs.append(tensorizer.build_pair((ledger, tracklets[int(source)]["rows"]), [(ledger, tracklets[int(target)]["rows"]) ]))
-                for pair in batch_inputs:
-                    values.append(self.score_pair_inputs(pair).score.reshape(-1)[0])
+                if not batch_inputs:
+                    continue
+                source_length = max(int(pair.source.appearance.shape[-2]) for pair in batch_inputs)
+                target_length = max(int(pair.candidates.appearance.shape[-2]) for pair in batch_inputs)
+                dim = int(batch_inputs[0].source.appearance.shape[-1])
+                source_app = batch_inputs[0].source.appearance.new_zeros((len(batch_inputs), source_length, dim))
+                source_geo = batch_inputs[0].source.geometry.new_zeros((len(batch_inputs), source_length, 4))
+                source_time = batch_inputs[0].source.local_time.new_zeros((len(batch_inputs), source_length))
+                source_valid = torch.zeros((len(batch_inputs), source_length), dtype=torch.bool, device=source_app.device)
+                target_app = source_app.new_zeros((len(batch_inputs), 1, target_length, dim))
+                target_geo = source_geo.new_zeros((len(batch_inputs), 1, target_length, 4))
+                target_time = source_time.new_zeros((len(batch_inputs), 1, target_length))
+                target_valid = torch.zeros((len(batch_inputs), 1, target_length), dtype=torch.bool, device=source_app.device)
+                query_time = target_time.clone(); query_valid = target_valid.clone()
+                for row, pair in enumerate(batch_inputs):
+                    source_len = int(pair.source.appearance.shape[-2])
+                    target_len = int(pair.candidates.appearance.shape[-2])
+                    source_app[row, :source_len] = pair.source.appearance
+                    source_geo[row, :source_len] = pair.source.geometry
+                    source_time[row, :source_len] = pair.source.local_time
+                    source_valid[row, :source_len] = pair.source.valid
+                    target_app[row, 0, :target_len] = pair.candidates.appearance[0]
+                    target_geo[row, 0, :target_len] = pair.candidates.geometry[0]
+                    target_time[row, 0, :target_len] = pair.candidates.local_time[0]
+                    target_valid[row, 0, :target_len] = pair.candidates.valid[0]
+                    query_time[row, 0, :target_len] = pair.query.relative_times[0]
+                    query_valid[row, 0, :target_len] = pair.query.valid[0]
+                evidence = self.score_pair_inputs(PairInputs(
+                    SegmentInputs(source_app, source_geo, source_time, source_valid),
+                    SegmentInputs(target_app, target_geo, target_time, target_valid),
+                    PredictionQuery(query_time, query_valid, mode),
+                    torch.ones((len(batch_inputs), 1), dtype=torch.bool, device=source_app.device),
+                ))
+                values.extend(evidence.score.reshape(-1).unbind(0))
             return torch.stack(values).to(next(self.parameters()).device)
         # Compatibility path for callers that only have routed tracklet views.
         # It still calls the real predictor and computes each pair's absolute
@@ -666,15 +701,13 @@ class PairMetricLinker(nn.Module):
                 target = target.unsqueeze(-1)
             if known.ndim == 1:
                 known = known.unsqueeze(-1)
-            loss, count = _multi_positive_ce(logits, target.bool(), known)
-            if int(count.item()) == 0:
-                raise ValueError("ordinary metric candidate batch has no known positive row")
-            return {"total": loss, "metric_multi_positive": loss.detach(), "known_pairs": known.sum().detach()}
+            candidate_valid = episode.get("candidate_valid", torch.ones_like(known)).bool()
+            objectives = masked_link_objectives(logits, target.bool(), known, candidate_valid)
+            return {"total": objectives["total"], "metric_multi_positive": objectives["ce"].detach(), "metric_bce": objectives["bce"].detach(), "known_pairs": objectives["known_count"].detach()}
         right = self.encoder(episode["right_appearance"], episode["right_geometry"], episode["right_time"], episode.get("right_valid"))
         logits = self.score_pair(left, right)
         target = labels.get("same_identity", episode.get("same_identity")).to(logits.dtype)
         known = labels.get("candidate_known", episode.get("candidate_known", torch.ones_like(target, dtype=torch.bool))).bool()
-        if not bool(known.any()):
-            raise ValueError("ordinary metric batch has no known candidate labels")
-        loss = F.binary_cross_entropy_with_logits(logits[known], target[known])
-        return {"total": loss, "metric_bce": loss.detach(), "known_pairs": known.sum().detach()}
+        candidate_valid = episode.get("candidate_valid", torch.ones_like(known)).bool()
+        objectives = masked_link_objectives(logits.reshape(-1, 1), target.bool().reshape(-1, 1), known.reshape(-1, 1), candidate_valid.reshape(-1, 1))
+        return {"total": objectives["total"], "metric_bce": objectives["bce"].detach(), "known_pairs": objectives["known_count"].detach()}

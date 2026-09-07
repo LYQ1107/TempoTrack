@@ -31,6 +31,7 @@ class MemoryTargets:
     future_embedding: Tensor
     positive_mask: Tensor
     candidate_known: Tensor
+    candidate_valid: Tensor | None = None
     reliability: Tensor | None = None
     reliability_known: Tensor | None = None
     valid: Tensor | None = None
@@ -78,6 +79,12 @@ def normalize_memory_targets(
 
     positive = candidate_axis(targets.positive_mask.bool(), "positive_mask")
     known = candidate_axis(targets.candidate_known.bool(), "candidate_known")
+    candidate_valid = targets.candidate_valid
+    if candidate_valid is None:
+        candidate_valid = torch.ones_like(known, dtype=torch.bool)
+    else:
+        candidate_valid = candidate_axis(candidate_valid.bool(), "candidate_valid")
+    known = known & candidate_valid
     if bool((positive & ~known).any()):
         raise ValueError("M1 positive labels cannot be unknown")
     reliability = targets.reliability
@@ -101,7 +108,7 @@ def normalize_memory_targets(
         if valid.shape[0] != batch_size or valid.shape[1] < event_count:
             raise ValueError("M1 valid mask must cover the real event axis")
         valid = valid[:, :event_count].bool()
-    return MemoryTargets(future, positive, known, reliability, reliability_known, valid)
+    return MemoryTargets(future, positive, known, candidate_valid, reliability, reliability_known, valid)
 
 
 class MemoryTrainingTask(nn.Module):
@@ -126,7 +133,7 @@ class MemoryTrainingTask(nn.Module):
         if isinstance(targets, Mapping):
             targets = MemoryTargets(
                 future_embedding=targets["future_embedding"], positive_mask=targets["positive_mask"],
-                candidate_known=targets["candidate_known"], reliability=targets.get("reliability"),
+                candidate_known=targets["candidate_known"], candidate_valid=targets.get("candidate_valid"), reliability=targets.get("reliability"),
                 reliability_known=targets.get("reliability_known"), valid=targets.get("valid"),
             )
         if inputs.observations.ndim != 3 or inputs.times.shape != inputs.observations.shape[:2] or inputs.geometry.shape[:2] != inputs.observations.shape[:2]:

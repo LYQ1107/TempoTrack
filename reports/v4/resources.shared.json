@@ -1,7 +1,6 @@
 {
   "allocation_policy": {
     "allow_downloads": false,
-    "allow_occupied_gpus": true,
     "allow_paid_services": false,
     "allowed_devices": "all_accessible",
     "cpu_threads_per_gpu_job": 4,
@@ -25,7 +24,16 @@
     {
       "eligible": false,
       "external_process_count": 1,
-      "free_mib": 981,
+      "free_mib": 1047,
+      "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
+      "required_mib": 6144,
+      "safety_mib": 1536,
+      "uuid": "GPU-a4095968-9191-50eb-d56c-ed633b31e2c0"
+    },
+    {
+      "eligible": false,
+      "external_process_count": 1,
+      "free_mib": 869,
       "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
       "required_mib": 6144,
       "safety_mib": 1536,
@@ -43,15 +51,6 @@
     {
       "eligible": false,
       "external_process_count": 1,
-      "free_mib": 3,
-      "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
-      "required_mib": 6144,
-      "safety_mib": 1536,
-      "uuid": "GPU-a4095968-9191-50eb-d56c-ed633b31e2c0"
-    },
-    {
-      "eligible": false,
-      "external_process_count": 1,
       "free_mib": 1,
       "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
       "required_mib": 6144,
@@ -59,7 +58,7 @@
       "uuid": "GPU-daa9b388-4540-242c-83d7-3261bb232a7c"
     }
   ],
-  "checked_at": "2026-09-07T16:45:27.366872+00:00",
+  "checked_at": "2026-09-07T16:40:27.157470+00:00",
   "configured_allowed_devices": "all_accessible",
   "eligible_devices": [
     {
@@ -92,99 +91,15 @@
           "start_ticks": 1321484971,
           "uid": 1000,
           "used_memory_mib": "2388"
-        },
-        {
-          "argv": [
-            "python",
-            "01_extract_frozen.py",
-            "--config",
-            "configs/v0470.yaml",
-            "--dataset",
-            "lolv2real"
-          ],
-          "cwd": null,
-          "pid": 10515,
-          "process_name": "python",
-          "start_ticks": 1322783278,
-          "uid": 1003,
-          "used_memory_mib": "2582"
         }
       ],
       "index": 0,
-      "memory_free_mib": 35365,
+      "memory_free_mib": 37947,
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 15,
+      "utilization_gpu": 12,
       "uuid": "GPU-d3a949d3-b3ef-04b0-92c5-594a63857898",
-      "visible": true
-    },
-    {
-      "compute_processes": [
-        {
-          "argv": [
-            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
-            "-u",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/tools/track_damot_domain.py",
-            "--dataset",
-            "motsynth",
-            "--domain",
-            "rain",
-            "--prepared-dir",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/rain",
-            "--output-dir",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/outputs/official_vjepa21_other_datasets_l384_w16_causalbox_predictor_high_fallback_duplicate_geom_jepa_margin000_histlast/motsynth/rain",
-            "--track_thresh",
-            "0.35",
-            "--det_thresh",
-            "0.45",
-            "--track_buffer",
-            "50",
-            "--match_thresh",
-            "0.90",
-            "--matchlost_thresh",
-            "0.90",
-            "--restore_ckpt",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/checkpoints/generaltrack_bdd.pth",
-            "--resize",
-            "720",
-            "1280",
-            "--jepa-cache",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_rain_vjepa21_l384_w16_causalbox_predictor.npz",
-            "--jepa-feature-dim",
-            "1664",
-            "--jepa-mode",
-            "high_fallback_duplicate_geom_jepa",
-            "--jepa-high-min-sim",
-            "0.90",
-            "--jepa-high-iou",
-            "0.05",
-            "--jepa-relative-margin",
-            "0",
-            "--jepa-max-gap",
-            "8",
-            "--jepa-history-aggregation",
-            "last",
-            "--jepa-duplicate-min-sim",
-            "0.90",
-            "--jepa-duplicate-iou",
-            "0.20"
-          ],
-          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main",
-          "pid": 37137,
-          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
-          "start_ticks": 1322666154,
-          "uid": 1000,
-          "used_memory_mib": "5250"
-        }
-      ],
-      "index": 5,
-      "memory_free_mib": 35085,
-      "memory_total_mib": 40960,
-      "name": "NVIDIA A100-SXM4-40GB",
-      "occupied": true,
-      "utilization_gpu": 8,
-      "uuid": "GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81",
       "visible": true
     },
     {
@@ -251,7 +166,7 @@
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 14,
+      "utilization_gpu": 26,
       "uuid": "GPU-c2902ddf-62f4-cc2f-5d9f-d33c74555847",
       "visible": true
     },
@@ -265,11 +180,11 @@
             "--dataset",
             "motsynth",
             "--domain",
-            "fog",
+            "rain",
             "--prepared-dir",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/fog",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/rain",
             "--output-dir",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/outputs/official_vjepa21_other_datasets_l384_w16_causalbox_predictor_high_fallback_duplicate_geom_geometry_null_iou020/motsynth/fog",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/outputs/official_vjepa21_other_datasets_l384_w16_causalbox_predictor_high_fallback_duplicate_geom_jepa_margin000_histlast/motsynth/rain",
             "--track_thresh",
             "0.35",
             "--det_thresh",
@@ -286,7 +201,7 @@
             "720",
             "1280",
             "--jepa-cache",
-            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_fog_vjepa21_l384_w16_causalbox_predictor_geometry_null.npz",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_rain_vjepa21_l384_w16_causalbox_predictor.npz",
             "--jepa-feature-dim",
             "1664",
             "--jepa-mode",
@@ -307,20 +222,20 @@
             "0.20"
           ],
           "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main",
-          "pid": 37126,
+          "pid": 37137,
           "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
-          "start_ticks": 1322666043,
+          "start_ticks": 1322666154,
           "uid": 1000,
-          "used_memory_mib": "5252"
+          "used_memory_mib": "5250"
         }
       ],
-      "index": 8,
-      "memory_free_mib": 35083,
+      "index": 5,
+      "memory_free_mib": 35085,
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 0,
-      "uuid": "GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119",
+      "utilization_gpu": 29,
+      "uuid": "GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81",
       "visible": true
     },
     {
@@ -387,8 +302,76 @@
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 7,
+      "utilization_gpu": 12,
       "uuid": "GPU-995c9557-d84e-1a76-f02f-b1ddea34e56b",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/tools/track_damot_domain.py",
+            "--dataset",
+            "motsynth",
+            "--domain",
+            "fog",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/fog",
+            "--output-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/outputs/official_vjepa21_other_datasets_l384_w16_causalbox_predictor_high_fallback_duplicate_geom_geometry_null_iou020/motsynth/fog",
+            "--track_thresh",
+            "0.35",
+            "--det_thresh",
+            "0.45",
+            "--track_buffer",
+            "50",
+            "--match_thresh",
+            "0.90",
+            "--matchlost_thresh",
+            "0.90",
+            "--restore_ckpt",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/checkpoints/generaltrack_bdd.pth",
+            "--resize",
+            "720",
+            "1280",
+            "--jepa-cache",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_fog_vjepa21_l384_w16_causalbox_predictor_geometry_null.npz",
+            "--jepa-feature-dim",
+            "1664",
+            "--jepa-mode",
+            "high_fallback_duplicate_geom_jepa",
+            "--jepa-high-min-sim",
+            "0.90",
+            "--jepa-high-iou",
+            "0.05",
+            "--jepa-relative-margin",
+            "0",
+            "--jepa-max-gap",
+            "8",
+            "--jepa-history-aggregation",
+            "last",
+            "--jepa-duplicate-min-sim",
+            "0.90",
+            "--jepa-duplicate-iou",
+            "0.20"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main",
+          "pid": 37126,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1322666043,
+          "uid": 1000,
+          "used_memory_mib": "5252"
+        }
+      ],
+      "index": 8,
+      "memory_free_mib": 35083,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 24,
+      "uuid": "GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119",
       "visible": true
     },
     {
@@ -403,15 +386,15 @@
           "process_name": "/home/lwr/anaconda3/envs/ovtr/bin/python",
           "start_ticks": 1322641817,
           "uid": 1000,
-          "used_memory_mib": "9016"
+          "used_memory_mib": "8846"
         }
       ],
       "index": 9,
-      "memory_free_mib": 31319,
+      "memory_free_mib": 31489,
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 24,
+      "utilization_gpu": 0,
       "uuid": "GPU-e947d8da-fc7a-4c0b-7d91-e9e67d34f4a6",
       "visible": true
     }
@@ -420,21 +403,12 @@
   "gpu_decisions": [
     {
       "eligible": true,
-      "external_process_count": 2,
-      "free_mib": 35365,
+      "external_process_count": 1,
+      "free_mib": 37947,
       "reason": null,
       "required_mib": 6144,
       "safety_mib": 1536,
       "uuid": "GPU-d3a949d3-b3ef-04b0-92c5-594a63857898"
-    },
-    {
-      "eligible": true,
-      "external_process_count": 1,
-      "free_mib": 35085,
-      "reason": null,
-      "required_mib": 6144,
-      "safety_mib": 1536,
-      "uuid": "GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81"
     },
     {
       "eligible": true,
@@ -448,11 +422,11 @@
     {
       "eligible": true,
       "external_process_count": 1,
-      "free_mib": 35083,
+      "free_mib": 35085,
       "reason": null,
       "required_mib": 6144,
       "safety_mib": 1536,
-      "uuid": "GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119"
+      "uuid": "GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81"
     },
     {
       "eligible": true,
@@ -466,7 +440,16 @@
     {
       "eligible": true,
       "external_process_count": 1,
-      "free_mib": 31319,
+      "free_mib": 35083,
+      "reason": null,
+      "required_mib": 6144,
+      "safety_mib": 1536,
+      "uuid": "GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119"
+    },
+    {
+      "eligible": true,
+      "external_process_count": 1,
+      "free_mib": 31489,
       "reason": null,
       "required_mib": 6144,
       "safety_mib": 1536,
@@ -475,7 +458,16 @@
     {
       "eligible": false,
       "external_process_count": 1,
-      "free_mib": 981,
+      "free_mib": 1047,
+      "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
+      "required_mib": 6144,
+      "safety_mib": 1536,
+      "uuid": "GPU-a4095968-9191-50eb-d56c-ed633b31e2c0"
+    },
+    {
+      "eligible": false,
+      "external_process_count": 1,
+      "free_mib": 869,
       "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
       "required_mib": 6144,
       "safety_mib": 1536,
@@ -493,15 +485,6 @@
     {
       "eligible": false,
       "external_process_count": 1,
-      "free_mib": 3,
-      "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
-      "required_mib": 6144,
-      "safety_mib": 1536,
-      "uuid": "GPU-a4095968-9191-50eb-d56c-ed633b31e2c0"
-    },
-    {
-      "eligible": false,
-      "external_process_count": 1,
       "free_mib": 1,
       "reason": "INSUFFICIENT_MEMORY_FOR_JOB",
       "required_mib": 6144,
@@ -509,8 +492,8 @@
       "uuid": "GPU-daa9b388-4540-242c-83d7-3261bb232a7c"
     }
   ],
-  "host_pid": 10768,
-  "host_start_ticks": 1322787320,
+  "host_pid": 9183,
+  "host_start_ticks": 1322758207,
   "inventory": [
     {
       "compute_processes": [
@@ -542,30 +525,14 @@
           "start_ticks": 1321484971,
           "uid": 1000,
           "used_memory_mib": "2388"
-        },
-        {
-          "argv": [
-            "python",
-            "01_extract_frozen.py",
-            "--config",
-            "configs/v0470.yaml",
-            "--dataset",
-            "lolv2real"
-          ],
-          "cwd": null,
-          "pid": 10515,
-          "process_name": "python",
-          "start_ticks": 1322783278,
-          "uid": 1003,
-          "used_memory_mib": "2582"
         }
       ],
       "index": 0,
-      "memory_free_mib": 35365,
+      "memory_free_mib": 37947,
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 15,
+      "utilization_gpu": 12,
       "uuid": "GPU-d3a949d3-b3ef-04b0-92c5-594a63857898",
       "visible": true
     },
@@ -595,11 +562,11 @@
           "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
           "start_ticks": 1319503720,
           "uid": 1000,
-          "used_memory_mib": "39354"
+          "used_memory_mib": "39466"
         }
       ],
       "index": 1,
-      "memory_free_mib": 981,
+      "memory_free_mib": 869,
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
@@ -633,11 +600,11 @@
           "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
           "start_ticks": 1319503726,
           "uid": 1000,
-          "used_memory_mib": "40332"
+          "used_memory_mib": "39288"
         }
       ],
       "index": 2,
-      "memory_free_mib": 3,
+      "memory_free_mib": 1047,
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
@@ -785,7 +752,7 @@
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 8,
+      "utilization_gpu": 29,
       "uuid": "GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81",
       "visible": true
     },
@@ -853,7 +820,7 @@
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 14,
+      "utilization_gpu": 26,
       "uuid": "GPU-c2902ddf-62f4-cc2f-5d9f-d33c74555847",
       "visible": true
     },
@@ -921,7 +888,7 @@
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 7,
+      "utilization_gpu": 12,
       "uuid": "GPU-995c9557-d84e-1a76-f02f-b1ddea34e56b",
       "visible": true
     },
@@ -989,7 +956,7 @@
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 0,
+      "utilization_gpu": 24,
       "uuid": "GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119",
       "visible": true
     },
@@ -1005,15 +972,15 @@
           "process_name": "/home/lwr/anaconda3/envs/ovtr/bin/python",
           "start_ticks": 1322641817,
           "uid": 1000,
-          "used_memory_mib": "9016"
+          "used_memory_mib": "8846"
         }
       ],
       "index": 9,
-      "memory_free_mib": 31319,
+      "memory_free_mib": 31489,
       "memory_total_mib": 40960,
       "name": "NVIDIA A100-SXM4-40GB",
       "occupied": true,
-      "utilization_gpu": 24,
+      "utilization_gpu": 0,
       "uuid": "GPU-e947d8da-fc7a-4c0b-7d91-e9e67d34f4a6",
       "visible": true
     }

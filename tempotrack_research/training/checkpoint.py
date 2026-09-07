@@ -84,9 +84,23 @@ class AtomicCheckpoint:
         if int(payload.get("schema_version", 1)) != self.schema_version:
             raise ValueError(f"checkpoint schema mismatch: {payload.get('schema_version')} != {self.schema_version}")
         metadata = payload.get("metadata", {})
-        for key, value in (expected or {}).items():
-            if metadata.get(key) != value:
-                raise ValueError(f"checkpoint incompatible for {key}: {metadata.get(key)!r} != {value!r}")
+        expected_values = dict(expected or {})
+        signature_purpose = str(expected_values.pop("_artifact_signature_purpose", "prediction_reuse"))
+        for key, value in expected_values.items():
+            actual = metadata.get(key)
+            if key == "artifact_signature" and isinstance(actual, Mapping) and isinstance(value, Mapping):
+                from ..config import ArtifactSignature
+                try:
+                    actual_sig = ArtifactSignature.from_mapping(actual)
+                    expected_sig = ArtifactSignature.from_mapping(value)
+                    compatible, reasons = actual_sig.compatible_for(expected_sig, purpose=signature_purpose)
+                except Exception as exc:
+                    raise ValueError(f"checkpoint artifact signature is invalid: {exc}") from exc
+                if not compatible:
+                    raise ValueError(f"checkpoint incompatible for artifact_signature ({signature_purpose}): {reasons}")
+                continue
+            if actual != value:
+                raise ValueError(f"checkpoint incompatible for {key}: {actual!r} != {value!r}")
         state = payload.get("model_state")
         if state is None:
             raise ValueError("checkpoint v2 lacks model_state")

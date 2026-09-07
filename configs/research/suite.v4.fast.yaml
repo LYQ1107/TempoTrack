@@ -1,0 +1,75 @@
+schema_version: 4
+name: tempotrack-shared-gpu-v4
+base_commit: 83765196881eaf068bd982f18cdd69b270a25bd4
+protocol:
+  observation_source: predicted_boxes
+  frozen_detic_masa: true
+  ratio: 2
+  immutable_observations: true
+  gt_boxes_at_inference: false
+  official_validation_in_training: false
+  candidate_k: 8
+execution:
+  run_full: true
+  seed_order: [0, 1, 2]
+  all_core_seed0_before_repeat_seeds: true
+  train_infer_evaluate_chain: true
+  continue_independent_failures: true
+  max_retries_per_unchanged_signature: 0
+  heartbeat_seconds: 20
+  checkpoint_on_stop: true
+training:
+  budgets:
+    predictive_dual: 3000
+    ordinary_metric: 3000
+    s1_jepa: 3000
+    s2_state_fm: 3000
+    s3_graph_fm: 3000
+    s4_graph_diffusion: 3000
+    s5_bc: 3000
+    s5_ppo_transitions: 50000
+  full_budgets:
+    predictive_dual: 60000
+    ordinary_metric: 100000
+    s1_jepa: 100000
+    s2_state_fm: 100000
+    s3_graph_fm: 120000
+    s4_graph_diffusion: 120000
+    s5_bc: 30000
+    s5_ppo_transitions: 2000000
+  microbatch_size: 8
+  effective_batch: 32
+  accumulation_steps: 4
+  ppo_microbatch_size: 64
+  validate_every: 2000
+  save_every: 500
+  grad_clip: 1.0
+  amp: bf16_if_supported
+  matched_fraction: 0.8
+  clean_fraction: 0.2
+methods:
+  - m0_no_offline
+  - m0_stable_emd
+  - m0_ordinary_metric
+  - m0_s1_jepa
+  - m0_s2_state_fm
+  - m0_s3_graph_fm
+  - m0_s4_graph_diffusion
+  - m0_s5_bc
+  - m0_s5_ppo
+  - m1_memory
+  - m1_no_offline
+  - m1_stable_emd
+  - m1_ordinary_metric
+  - m1_s1_jepa
+  - m1_s2_state_fm
+  - m1_s3_graph_fm
+  - m1_s4_graph_diffusion
+  - m1_s5_bc
+  - m1_s5_ppo
+dag:
+  baseline_immediate: [m0_no_offline, m0_stable_emd]
+  m1_memory_required_before: [m1_no_offline, m1_stable_emd, m1_ordinary_metric, m1_s1_jepa, m1_s2_state_fm, m1_s3_graph_fm, m1_s4_graph_diffusion, m1_s5_bc, m1_s5_ppo]
+  ppo_requires_bc: true
+  full_requires_trial_infer_and_evaluate: true
+  repeat_seeds_require_full_seed0_evaluation: true

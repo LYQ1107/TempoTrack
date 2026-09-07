@@ -19,6 +19,7 @@ from .association.serialization import write_id_mapping, materialize_predictions
 from .config import file_hash, object_hash
 from .data.feature_export import load_dataset_manifest, iter_manifest_ledgers
 from .data.tracklet_store import TrackletRecord, TrackletStore
+from .data.tensorization import tracklet_gap
 from .data.graph_features import GraphFeaturizer
 from .errors import DataUnavailable, ImplementationIncomplete, WeightUnavailable
 from .memory.fixed_dual import FixedDualMemory
@@ -192,12 +193,12 @@ class StableEMDBackend(_PathBackend):
             pairs = candidates.edge_index.detach().cpu().numpy().T.tolist()
             lefts = [views[int(source)] for source, _ in pairs]
             rights = [views[int(target)] for _, target in pairs]
-            gaps = [float(right["time_offsets"][0] - left["time_offsets"][-1]) for left, right in zip(lefts, rights)]
+            gaps = [tracklet_gap(left, right) for left, right in zip(lefts, rights)]
             values = stable_emd_batch(lefts, rights, gaps, batch_size=512)
             return np.asarray([0.0 if not item.get("valid", False) else 1.0 - float(item["edge_score"]) for item in values], dtype=np.float64)
 
         super().__init__(
-            lambda left, right: 1.0 - float(stable_emd(left, right, time_gap=float(right["time_offsets"][0] - left["time_offsets"][-1]))["edge_score"]),
+            lambda left, right: 1.0 - float(stable_emd(left, right, time_gap=tracklet_gap(left, right))["edge_score"]),
             score_all_fn=score_all,
             threshold=threshold,
             provenance={"backend": "stable_emd", "frontend": frontend, "solver": "stable_sinkhorn_batched"},
@@ -255,7 +256,7 @@ def _deployment_graph(ledger: Any, views: Sequence[Mapping[str, Any]], candidate
     pairs = edge_index.t().tolist()
     lefts = [views[int(source)] for source, _ in pairs]
     rights = [views[int(target)] for _, target in pairs]
-    gaps = [float(np.asarray(right.get("absolute_times", right["time_offsets"]))[0] - np.asarray(left.get("absolute_times", left["time_offsets"]))[-1]) for left, right in zip(lefts, rights)]
+    gaps = [tracklet_gap(left, right) for left, right in zip(lefts, rights)]
     transport = stable_emd_batch(lefts, rights, gaps, batch_size=512)
     benefits = [0.0 if not result.get("valid", False) else 1.0 - float(result["edge_score"]) for result in transport]
     initial_np, initial_check = project_graph_scores(

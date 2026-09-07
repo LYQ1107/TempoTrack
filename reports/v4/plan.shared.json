@@ -1,4 +1,6 @@
 {
+  "generated_at": "2026-09-07T16:40:18.844323+00:00",
+  "job_count": 304,
   "jobs": [
     {
       "artifacts": [
@@ -12595,7 +12597,16 @@
       "train_phase": "train"
     }
   ],
-  "order": [
+  "local": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/configs/research/local.v4.shared.yaml",
+  "local_schema": 4,
+  "plan_hash": "7e887c1dcc042b594443e856d627dbff5d6062f8a1c6043241677ef0f13ee260",
+  "repo": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa",
+  "run_root": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4",
+  "schema_version": 4,
+  "suite": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/configs/research/suite.v4.fast.yaml",
+  "suite_schema": 4,
+  "through": "complete",
+  "topological_order": [
     "v4.prepare.fixed_observation",
     "v4.replay.m0.internal",
     "v4.episodes.m0.internal",
@@ -12900,7 +12911,5 @@
     "m1_s5_ppo.full.evaluate.val_base_internal.seed2",
     "m1_stable_emd.full.infer_eval.seed0",
     "m1_stable_emd.trial.infer_eval.seed0"
-  ],
-  "scheduler_revision": "shared-gpu-1",
-  "schema_version": 4
+  ]
 }

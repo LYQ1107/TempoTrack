@@ -1,6 +1,6 @@
 # TempoTrack V4 repair ledger
 
-Generated: `2026-09-07T14:59:26.034095+00:00`
+Generated: `2026-09-07T16:46:25.544406+00:00`
 
 Status axes are implementation/check evidence, not training completion.
 
@@ -27,8 +27,8 @@ Status axes are implementation/check evidence, not training completion.
 
 ## Verification artifacts
 
-- compile: `PASS`; files `95`; code hash `6ad930c6b73ad5b1030892a291165af75f25e7a9e886a6884c445981f1b54610`
+- compile: `PASS`; files `95`; code hash `bbfb45d6529b43d11d5b6f765cecd486e543e62c805c8ffb5016e19c25306832`
 - checks: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/reports/v4/v4_checks.json`
-- resource block: `True`; eligible UUIDs `0`
+- resource block: `False`; eligible UUIDs `6`
 
 Implementation rows do not imply that a blocked GPU experiment was trained or evaluated.

@@ -321,6 +321,11 @@ def _promote_method_model_config(config: dict[str, Any], method: str) -> dict[st
 
 
 def _job_record(repo: Path, record: Mapping[str, Any]) -> None:
+    # The V4 coordinator owns its append-only ledger.  A managed worker must
+    # not also write the legacy repair ledger, otherwise one logical attempt
+    # appears as two jobs and stale rows can be mistaken for progress.
+    if os.environ.get("TEMPOTRACK_MANAGED_JOB") == "1":
+        return
     path = repo / "reports" / "repair_jobs.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -329,6 +334,8 @@ def _job_record(repo: Path, record: Mapping[str, Any]) -> None:
 
 def _refresh_repair_progress(repo: Path) -> None:
     """Derive the new progress file from job/artifact evidence only."""
+    if os.environ.get("TEMPOTRACK_MANAGED_JOB") == "1":
+        return
     jobs_path = repo / "reports" / "repair_jobs.jsonl"
     jobs: list[dict[str, Any]] = []
     if jobs_path.exists():
@@ -435,12 +442,17 @@ def _resolve_infer_checkpoint(repo: Path, reference: str | None, run_root: Path 
     if not reference or reference in {"none", "no_checkpoint"}:
         return None
     if reference == "best":
-        root = run_root or repo / "outputs/research_v2"
-        roots = [root] if root.name == "runs" else [root / "runs", root]
-        candidates = sorted({path for item in roots for path in item.glob("**/last.pt")}, key=lambda path: path.stat().st_mtime, reverse=True)
-        if not candidates:
-            raise WeightUnavailable("no trained checkpoint exists for --checkpoint best")
-        return candidates[0]
+        root = (run_root or repo / "outputs/research_v2").resolve()
+        # ``best`` is valid only for one explicit training lineage.  A global
+        # recursive last.pt search silently mixes methods and seeds.
+        if root.is_dir() and (root / "resolved_run.json").exists():
+            best = root / "best.pt"
+            last = root / "last.pt"
+            if best.exists():
+                return best
+            if last.exists():
+                return last
+        raise WeightUnavailable("--checkpoint best requires --run-root/--training-run to name one resolved training run")
     return _path(repo, reference)
 
 
@@ -670,10 +682,10 @@ def build_parser() -> argparse.ArgumentParser:
     v4 = p.add_subparsers(dest="repair_v4_action", required=True)
     q = v4.add_parser("capabilities"); q.add_argument("--json", action="store_true"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("inspect"); q.add_argument("--repo", default="."); q.add_argument("--reference-root"); q.add_argument("--output"); q.set_defaults(func=_repair_v4)
-    q = v4.add_parser("resources"); q.add_argument("--repo", default="."); q.add_argument("--local"); q.add_argument("--device-policy", default="auto-idle"); q.add_argument("--devices"); q.add_argument("--output"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("resources"); q.add_argument("--repo", default="."); q.add_argument("--local"); q.add_argument("--device-policy", choices=["shared-memory", "shared-gpu-1", "auto-idle"], default="shared-memory"); q.add_argument("--devices"); q.add_argument("--output"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("plan"); q.add_argument("--repo", default="."); q.add_argument("--config"); q.add_argument("--local"); q.add_argument("--run-root"); q.add_argument("--through", choices=["baselines", "trial", "full", "complete"], default="complete"); q.add_argument("--output"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("verify"); q.add_argument("--repo", default="."); q.add_argument("--config"); q.add_argument("--local"); q.add_argument("--run-root"); q.add_argument("--skip-unchanged", action="store_true"); q.set_defaults(func=_repair_v4)
-    q = v4.add_parser("run"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--local", required=True); q.add_argument("--reference-root", required=True); q.add_argument("--run-root", required=True); q.add_argument("--through", choices=["baselines", "trial", "full", "complete"], default="complete"); q.add_argument("--resume", choices=["auto", "never", "strict"], default="auto"); q.add_argument("--device-policy", default="auto-idle"); q.add_argument("--devices"); q.add_argument("--continue-independent", action="store_true"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("run"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--local", required=True); q.add_argument("--reference-root", required=True); q.add_argument("--run-root", required=True); q.add_argument("--through", choices=["baselines", "trial", "full", "complete"], default="complete"); q.add_argument("--resume", choices=["auto", "never", "strict"], default="auto"); q.add_argument("--device-policy", choices=["shared-memory", "shared-gpu-1", "auto-idle"], default="shared-memory"); q.add_argument("--devices"); q.add_argument("--continue-independent", action="store_true"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("status"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output"); q.add_argument("--json", action="store_true"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output", required=True); q.add_argument("--final", action="store_true"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("stop"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--job-id", required=True); q.add_argument("--after-checkpoint", action="store_true"); q.set_defaults(func=_repair_v4)
