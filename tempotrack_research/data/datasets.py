@@ -37,12 +37,13 @@ class SegmentTensorizer:
         self.time_scale = self.transform.spec.time_scale
         self.eps = float(snapshot.get("eps", 1e-6))
 
-    def __call__(self, ledger: ObservationLedger, rows: list[int] | np.ndarray, *, time_origin: float | None = None) -> dict[str, Tensor]:
+    def __call__(self, ledger: ObservationLedger, rows: list[int] | np.ndarray, *, time_origin: float | None = None, role: str = "source") -> dict[str, Tensor]:
         rows = np.asarray(rows, dtype=np.int64)
         if rows.ndim != 1 or rows.size == 0:
             raise ValueError("a segment must contain at least one ledger row")
-        segment, clock = self.transform.encode_segment(ledger, rows)
-        raw_times = torch.as_tensor(np.asarray(clock.observation_times, dtype=np.float32).copy())
+        selected = self.transform.select_rows(ledger, rows, role=role)
+        segment, clock = self.transform.encode_segment(ledger, selected, role=role)
+        raw_times = torch.as_tensor(np.asarray(clock.observation_times, dtype=np.float64).copy(), dtype=torch.float64)
         query_time = raw_times if time_origin is None else (raw_times - float(time_origin)) / max(self.time_scale, self.eps)
         return {
             "appearance": segment.appearance,
@@ -50,7 +51,7 @@ class SegmentTensorizer:
             "relative_time": segment.local_time,
             "valid": segment.valid,
             "query_time": query_time,
-            "rows": torch.from_numpy(rows.copy()),
+            "rows": torch.from_numpy(selected.copy()),
             "uids": [key.uid for key in ledger.keys(rows)],
             "clock": clock,
         }
@@ -101,9 +102,9 @@ class EpisodeDataset(Dataset):
                 self._ledger_cache.pop(next(iter(self._ledger_cache)))
         return self._ledger_cache[path]
 
-    def _segment(self, reference: Mapping[str, Any], *, time_origin: float | None = None) -> dict[str, Tensor]:
+    def _segment(self, reference: Mapping[str, Any], *, time_origin: float | None = None, role: str = "source") -> dict[str, Tensor]:
         ledger = self._ledger(reference["ledger"])
-        segment = self.tensorizer(ledger, list(reference["rows"]), time_origin=time_origin)
+        segment = self.tensorizer(ledger, list(reference["rows"]), time_origin=time_origin, role=role)
         output = {key: value for key, value in segment.items() if torch.is_tensor(value)}
         if self.history_order == "shuffled" and output["appearance"].shape[0] > 1:
             # This is a causal-order diagnostic, not a data rewrite: every
@@ -130,7 +131,7 @@ class EpisodeDataset(Dataset):
         first_rows = np.asarray(node_refs[0]["rows"], dtype=np.int64)
         if first_rows.size == 0:
             raise ValueError("graph node has no ledger rows")
-        encoded = [self.tensorizer.transform.encode_segment(self._ledger(ref["ledger"]), list(ref["rows"])) for ref in node_refs]
+        encoded = [self.tensorizer.transform.encode_segment(self._ledger(ref["ledger"]), list(ref["rows"]), role="context") for ref in node_refs]
         segments = [item[0] for item in encoded]
         clocks = [item[1] for item in encoded]
         edges = torch.as_tensor(record.get("edge_index", []), dtype=torch.long)
@@ -154,6 +155,9 @@ class EpisodeDataset(Dataset):
             "initial_graph": graph_inputs.initial_graph,
             "target_graph": torch.as_tensor(record.get("target_graph", [0] * edges.shape[1]), dtype=torch.float32),
             "target_graph_known": torch.as_tensor(record.get("target_graph_known", [True] * edges.shape[1]), dtype=torch.bool),
+            "loss_edge_mask": torch.as_tensor(record.get("target_graph_known", [True] * edges.shape[1]), dtype=torch.bool),
+            "same_identity": torch.as_tensor(record.get("same_identity", [0] * edges.shape[1]), dtype=torch.float32),
+            "identity_graph_known": torch.as_tensor(record.get("identity_graph_known", record.get("target_graph_known", [True] * edges.shape[1])), dtype=torch.bool),
             "selected_edges": torch.as_tensor(record.get("selected_edges", [0] * edges.shape[1]), dtype=torch.bool),
             "remaining_budget": torch.as_tensor(float(record.get("remaining_budget", 1.0)), dtype=torch.float32),
             "metadata": metadata,
@@ -164,7 +168,7 @@ class EpisodeDataset(Dataset):
         record = self.records[int(index)]
         kind = str(record["kind"])
         if kind in {"pair", "metric"}:
-            left = self._segment(record["left"])
+            left = self._segment(record["left"], role="source")
             left_ledger = self._ledger(record["left"]["ledger"])
             left_rows = np.asarray(record["left"]["rows"], dtype=np.int64)
             if left_rows.size == 0:
@@ -172,7 +176,7 @@ class EpisodeDataset(Dataset):
             source_last = float(left_ledger.arrays["frame_times"][left_rows[-1]])
             if record.get("candidates"):
                 refs = list(record["candidates"])
-                candidates = [self._segment(ref) for ref in refs]
+                candidates = [self._segment(ref, role="target") for ref in refs]
                 max_len = max(int(item["appearance"].shape[0]) for item in candidates)
                 dim = int(left["appearance"].shape[-1])
                 target_app = torch.zeros((len(candidates), max_len, dim), dtype=left["appearance"].dtype)
@@ -209,7 +213,7 @@ class EpisodeDataset(Dataset):
                 }
             # Each segment receives its own local clock.  The causal query is
             # a separate tensor measured from the source's last observation.
-            right = self._segment(record["right"])
+            right = self._segment(record["right"], role="target")
             right_ledger = self._ledger(record["right"]["ledger"])
             right_rows = np.asarray(record["right"]["rows"], dtype=np.int64)
             query_times = (right["query_time"] - source_last) / self.time_scale
@@ -225,84 +229,96 @@ class EpisodeDataset(Dataset):
                 "metadata": {**dict(record.get("metadata", {})), "episode_uid": str(record.get("episode_uid", ""))},
             }
         if kind == "memory":
-            first_ref = record["observations"][0]
-            first_ledger = self._ledger(first_ref["ledger"])
-            first_rows = np.asarray(first_ref["rows"], dtype=np.int64)
-            if first_rows.size == 0:
-                raise ValueError("memory source has no ledger rows")
-            observations = [self._segment(ref) for ref in record["observations"]]
-            app = torch.cat([item["appearance"] for item in observations])
-            geo = torch.cat([item["geometry"] for item in observations])
-            # ``relative_time`` is intentionally local to each segment.  For
-            # M1 event evidence use the raw query clock and rebase only once
-            # at the beginning of the complete event chunk.
-            times = torch.cat([item["query_time"] for item in observations])
-            times = times - times[0]
-            valid = torch.cat([item["valid"] for item in observations])
+            # V4 keeps the anchor and update events as separate references.
+            # Read the legacy V3 shape only through this explicit migration;
+            # no row is silently promoted to an anchor.
+            if "initial_ref" in record:
+                initial_ref = record["initial_ref"]
+                event_records = list(record.get("events", []))
+            else:
+                legacy = list(record.get("observations", []))
+                if len(legacy) < 2:
+                    raise ValueError("legacy M1 episode cannot be migrated without an initial and an event")
+                initial_ref = legacy[0]
+                event_records = [
+                    {"observation_ref": ref, "competition_margin": margin, "margin_known": margin_known,
+                     "reliability": reliability, "reliability_known": reliability_known}
+                    for ref, margin, margin_known, reliability, reliability_known in zip(
+                        legacy[1:],
+                        list(record.get("match_margins", []))[1:],
+                        list(record.get("match_margin_known", []))[1:],
+                        list(record.get("reliability", []))[1:],
+                        list(record.get("reliability_known", []))[1:],
+                    )
+                ]
+            initial = self._segment(initial_ref, role="source")
+            if initial["appearance"].shape[0] < 1 or not event_records:
+                raise ValueError("M1 memory episode must contain an initial_ref and at least one event")
+            events = [self._segment(item["observation_ref"], role="event") for item in event_records]
+            app = torch.cat([item["appearance"] for item in events])
+            geo = torch.cat([item["geometry"] for item in events])
+            initial_time = initial["query_time"][-1]
+            event_times = torch.cat([item["query_time"] for item in events]) - initial_time
+            event_valid = torch.cat([item["valid"] for item in events])
+            event_rows = [row for item in event_records for row in item["observation_ref"]["rows"]]
+            event_scores = torch.as_tensor(
+                np.asarray(self._ledger(initial_ref["ledger"]).arrays["scores"][np.asarray(event_rows, dtype=np.int64)], dtype=np.float32),
+                dtype=torch.float32,
+            )
+            if event_scores.numel() != app.shape[0]:
+                event_scores = event_scores[: app.shape[0]]
+                if event_scores.numel() < app.shape[0]:
+                    event_scores = torch.cat([event_scores, torch.zeros(app.shape[0] - event_scores.numel())])
+            margin_values = torch.as_tensor([float(item.get("competition_margin", 0.0)) for item in event_records for _ in range(len(item["observation_ref"]["rows"]))], dtype=torch.float32)
+            margin_known_values = torch.as_tensor([bool(item.get("margin_known", False)) for item in event_records for _ in range(len(item["observation_ref"]["rows"]))], dtype=torch.bool)
+            reliability_values = torch.as_tensor([float(item.get("reliability", 0.0)) for item in event_records for _ in range(len(item["observation_ref"]["rows"]))], dtype=torch.float32)
+            reliability_known_values = torch.as_tensor([bool(item.get("reliability_known", False)) for item in event_records for _ in range(len(item["observation_ref"]["rows"]))], dtype=torch.bool)
             future_refs = list(record.get("future_candidates", []))
-            if not future_refs:
+            if not future_refs and record.get("future"):
                 future_refs = [record["future"]]
-            future_candidates = [self._segment(ref) for ref in future_refs]
-            scores = torch.cat([torch.as_tensor(np.asarray(self._ledger(ref["ledger"]).arrays["scores"][np.asarray(ref["rows"], dtype=np.int64)], dtype=np.float32), dtype=torch.float32) for ref in record["observations"]])
-            margin_values = torch.as_tensor(record.get("match_margins", [0.0] * app.shape[0]), dtype=torch.float32).reshape(-1)
-            margin_known_values = torch.as_tensor(record.get("match_margin_known", [False] * app.shape[0]), dtype=torch.bool).reshape(-1)
-            reliability_values = torch.as_tensor(record.get("reliability", [1.0] * app.shape[0]), dtype=torch.float32).reshape(-1)
-            reliability_known_values = torch.as_tensor(record.get("reliability_known", [False] * app.shape[0]), dtype=torch.bool).reshape(-1)
-            if margin_values.numel() == 1 and app.shape[0] > 1:
-                margin_values = margin_values.expand(app.shape[0])
-            if margin_known_values.numel() == 1 and app.shape[0] > 1:
-                margin_known_values = margin_known_values.expand(app.shape[0])
-            if reliability_values.numel() == 1 and app.shape[0] > 1:
-                reliability_values = reliability_values.expand(app.shape[0])
-            if reliability_known_values.numel() == 1 and app.shape[0] > 1:
-                reliability_known_values = reliability_known_values.expand(app.shape[0])
-            if app.shape[0] < 2:
-                raise ValueError("M1 memory episode must contain an initial observation and at least one event")
-            event_app, event_geo, event_times = app[1:], geo[1:], times[1:]
-            event_valid = valid[1:]
-            event_scores = scores[:app.shape[0]][1:]
-            event_margins = margin_values[:app.shape[0]][1:]
-            event_margin_known = margin_known_values[:app.shape[0]][1:]
-            event_reliability = reliability_values[:app.shape[0]][1:]
-            event_reliability_known = reliability_known_values[:app.shape[0]][1:]
-            candidate_embedding = torch.stack([
-                item["appearance"][item["valid"]].mean(0) if bool(item["valid"].any()) else item["appearance"].mean(0)
-                for item in future_candidates
-            ])
-            candidate_valid = torch.as_tensor(record.get("candidate_valid", [True] * len(future_candidates)), dtype=torch.bool)
-            candidate_known = torch.as_tensor(record.get("known", [True] * len(future_candidates)), dtype=torch.bool)
-            positive_mask = torch.as_tensor(record.get("positive", [bool(record.get("same_identity", 1))] + [False] * (len(future_candidates) - 1)), dtype=torch.bool)
-            if positive_mask.numel() != len(future_candidates) or candidate_known.numel() != len(future_candidates) or candidate_valid.numel() != len(future_candidates):
+            future_candidates = [self._segment(ref, role="target") for ref in future_refs]
+            if future_candidates:
+                candidate_embedding = torch.stack([
+                    item["appearance"][item["valid"]].mean(0) if bool(item["valid"].any()) else item["appearance"].mean(0)
+                    for item in future_candidates
+                ])
+            else:
+                candidate_embedding = initial["appearance"].new_zeros((1, initial["appearance"].shape[-1]))
+            candidate_valid = torch.as_tensor(record.get("candidate_valid", [True] * len(future_candidates) if future_candidates else [False]), dtype=torch.bool)
+            candidate_known = torch.as_tensor(record.get("known", [True] * len(future_candidates) if future_candidates else [False]), dtype=torch.bool)
+            positive_mask = torch.as_tensor(record.get("positive", [bool(record.get("same_identity", 1))] + [False] * (len(future_candidates) - 1) if future_candidates else [False]), dtype=torch.bool)
+            candidate_count = max(1, len(future_candidates))
+            if positive_mask.numel() != candidate_count or candidate_known.numel() != candidate_count or candidate_valid.numel() != candidate_count:
                 raise ValueError("memory candidate masks do not match future_candidates")
             if bool((positive_mask & ~candidate_known).any()) or bool((candidate_known & ~candidate_valid).any()):
                 raise ValueError("memory candidate masks violate positive <= known <= candidate_valid")
             return {
-                "initial_feature": app[0],
-                "initial_time": times[0],
-                "initial_geometry": geo[0],
-                "observations": event_app,
+                "initial_feature": initial["appearance"][0],
+                "initial_time": initial_time,
+                "initial_geometry": initial["geometry"][0],
+                "observations": app,
                 "times": event_times,
-                "geometry": event_geo,
-                "competition_margin": event_margins,
-                "margin_known": event_margin_known,
+                "geometry": geo,
+                "competition_margin": margin_values,
+                "margin_known": margin_known_values,
                 "observation_scores": event_scores,
                 "valid": event_valid,
-                "future_embedding": candidate_embedding.unsqueeze(0).expand(event_app.shape[0], -1, -1),
-                "positive_mask": positive_mask.unsqueeze(0).expand(event_app.shape[0], -1),
-                "candidate_known": candidate_known.unsqueeze(0).expand(event_app.shape[0], -1),
-                "candidate_valid": candidate_valid.unsqueeze(0).expand(event_app.shape[0], -1),
-                "reliability": event_reliability,
-                "reliability_known": event_reliability_known,
+                "future_embedding": candidate_embedding.unsqueeze(0).expand(app.shape[0], -1, -1),
+                "positive_mask": positive_mask.unsqueeze(0).expand(app.shape[0], -1),
+                "candidate_known": candidate_known.unsqueeze(0).expand(app.shape[0], -1),
+                "candidate_valid": candidate_valid.unsqueeze(0).expand(app.shape[0], -1),
+                "reliability": reliability_values,
+                "reliability_known": reliability_known_values,
                 "valid_steps": event_valid,
-                "metadata": {**dict(record.get("metadata", {})), "episode_uid": str(record.get("episode_uid", ""))},
+                "metadata": {**dict(record.get("metadata", {})), "episode_uid": str(record.get("episode_uid", "")), "initial_uid": str(initial["uids"][0]), "migrated_legacy": "initial_ref" not in record},
             }
         if kind == "continuation":
-            source = self._segment(record["source"])
+            source = self._segment(record["source"], role="source")
             source_ledger = self._ledger(record["source"]["ledger"])
             source_rows = np.asarray(record["source"]["rows"], dtype=np.int64)
             if source_rows.size == 0:
                 raise ValueError("continuation source has no ledger rows")
-            target = self._segment(record["target"])
+            target = self._segment(record["target"], role="target")
             target_ledger = self._ledger(record["target"]["ledger"])
             target_rows = np.asarray(record["target"]["rows"], dtype=np.int64)
             gap = (float(target_ledger.arrays["frame_times"][target_rows[0]]) - float(source_ledger.arrays["frame_times"][source_rows[-1]])) / self.time_scale

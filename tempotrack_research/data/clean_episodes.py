@@ -21,6 +21,7 @@ from ..association.candidates import build_candidate_graph, slice_candidate_grap
 from ..association.emd import stable_emd_batch
 from ..config import file_hash, object_hash
 from ..data.feature_export import iter_manifest_ledgers, load_dataset_manifest
+from .graph_targets import GraphTargets, build_direct_successor_targets, validate_target_paths
 from ..data.label_builder import load_label_shard
 from .episodes import _edit_records
 from .frontend_episodes import _geometry, _ref, _stable_initial
@@ -212,8 +213,18 @@ def _graph_records(ledger_path: Path, views: Sequence[Mapping[str, Any]], graph:
     windows = temporal_graph_windows(views, max_nodes=max_nodes, overlap=overlap)
     global_edges = graph.edge_index.detach().cpu().numpy().reshape(2, -1)
     global_pairs = {(int(source), int(target)) for source, target in global_edges.T.tolist()}
-    known_successors = _known_successors(views, max_gap)
-    missed = known_successors.difference(global_pairs)
+    graph_nodes = [
+        {"video_id": int(view["video_id"]), "first_frame": float(view["first_frame"]), "last_frame": float(view["last_frame"]), "identity": int(view["identity"]), "known": True}
+        for view in views
+    ]
+    graph_targets = build_direct_successor_targets(
+        graph_nodes,
+        global_edges,
+        {"identity": [int(view["identity"]) for view in views], "known": [True] * len(views), "video_ids": [int(view["video_id"]) for view in views], "first_frames": [float(view["first_frame"]) for view in views], "last_frames": [float(view["last_frame"]) for view in views]},
+        full_video_context={"max_gap": max_gap},
+    )
+    direct_pairs = {tuple(pair) for pair in graph_targets.diagnostics.get("direct_pairs", [])}
+    missed = {(source, target) for source, target in direct_pairs if (source, target) not in global_pairs}
     window_specs: list[tuple[np.ndarray, Any, np.ndarray]] = []
     covered: set[int] = set()
     for indices in windows:
@@ -233,12 +244,20 @@ def _graph_records(ledger_path: Path, views: Sequence[Mapping[str, Any]], graph:
         window_views = [views[int(index)] for index in indices.tolist()]
         initial, initial_check = _stable_initial(window_views, local_graph, [benefits[int(position)] for position in positions.tolist()])
         local_edges = local_graph.edge_index.detach().cpu().numpy().reshape(2, -1)
-        target_graph: list[float] = []
-        target_known: list[bool] = []
-        for source, target in local_edges.T.tolist():
-            left, right = window_views[int(source)], window_views[int(target)]
-            target_known.append(True)
-            target_graph.append(float(int(left["identity"]) == int(right["identity"])))
+        target_graph = [float(graph_targets.successor[int(position)]) for position in positions.tolist()]
+        target_known = [bool(graph_targets.successor_known[int(position)]) for position in positions.tolist()]
+        same_identity = [bool(graph_targets.same_identity[int(position)]) for position in positions.tolist()]
+        identity_known = [bool(graph_targets.identity_known[int(position)]) for position in positions.tolist()]
+        local_target = GraphTargets(
+            np.asarray(target_graph, dtype=bool), np.asarray(target_known, dtype=bool),
+            np.asarray(same_identity, dtype=bool), np.asarray(identity_known, dtype=bool),
+            np.ones(len(window_views), dtype=bool), np.zeros(len(window_views), dtype=bool),
+            np.asarray([bool(int(index) in set(np.flatnonzero(graph_targets.candidate_missed).tolist())) for index in indices.tolist()], dtype=bool),
+            {"window_number": int(window_number)},
+        )
+        path_check = validate_target_paths(window_views, local_edges, local_target)
+        if not path_check["valid"]:
+            raise ValueError(f"invalid clean graph targets: {path_check}")
         node_indices = set(int(value) for value in indices.tolist())
         record = {
             "kind": "graph",
@@ -250,13 +269,17 @@ def _graph_records(ledger_path: Path, views: Sequence[Mapping[str, Any]], graph:
             "edge_valid": [True] * len(target_graph),
             "target_graph": target_graph,
             "target_graph_known": target_known,
+            "same_identity": same_identity,
+            "identity_graph_known": identity_known,
             "metadata": {
                 "role": "clean_pretrain",
                 "node_identities_loss_only": [int(view["identity"]) for view in window_views],
                 "node_known_loss_only": [True] * len(window_views),
                 "initial_graph_solver": initial_check,
                 "candidate_missed": bool(any(source in node_indices for source, _ in missed)),
-                "boundary_censored": bool(any((source in node_indices) != (target in node_indices) for source, target in known_successors)),
+                "boundary_censored": bool(any((source in node_indices) != (target in node_indices) for source, target in direct_pairs)),
+                "graph_target_diagnostics": graph_targets.diagnostics,
+                "graph_target_path_check": path_check,
                 "window_number": int(window_number),
                 "window_global_node_indices": indices.tolist(),
                 "window_global_edge_indices": positions.tolist(),

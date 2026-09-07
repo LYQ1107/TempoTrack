@@ -54,20 +54,24 @@ class GraphFlowMatcher(nn.Module):
             raise ValueError("initial_graph must have shape [B,E]")
         x0 = torch.randn(target_graph.shape, device=target_graph.device, dtype=target_graph.dtype, generator=generator)
         time = torch.rand(target_graph.shape[0], device=target_graph.device, dtype=target_graph.dtype, generator=generator)
-        x1 = 2.0 * target_graph - 1.0
+        supervised = edge_valid.bool()
+        if loss_edge_mask is not None:
+            if loss_edge_mask.shape != supervised.shape:
+                raise ValueError("loss_edge_mask must have shape [B,E]")
+            supervised = supervised & loss_edge_mask.bool()
+        # Unknown candidate coordinates are context-only: their endpoint is
+        # not allowed to turn the flow target into a synthetic negative.
+        x1_known = 2.0 * target_graph - 1.0
+        x1 = torch.where(supervised, x1_known, x0)
         xs = (1 - time[:, None]) * x0 + time[:, None] * x1
         target = x1 - x0
         predicted = self.vector_field(xs, time, node_features, edge_features, edge_index, node_valid, edge_valid, initial_graph)
-        mask = edge_valid.bool()
-        if loss_edge_mask is not None:
-            if loss_edge_mask.shape != mask.shape:
-                raise ValueError("loss_edge_mask must have shape [B,E]")
-            mask = mask & loss_edge_mask.bool()
+        mask = supervised
         mask_value = mask.to(predicted.dtype)
         loss = ((predicted - target).square() * mask_value).sum() / mask_value.sum().clamp_min(1.0)
         # Train the path-aware graph scorer on the same GT target graph, while
         # keeping the scorer's graph projection discrete and explicit.
-        target_score = self.reranker(node_features, edge_features, edge_index, target_graph > 0.5, node_valid, edge_valid)
+        target_score = self.reranker(node_features, edge_features, edge_index, (target_graph > 0.5) & supervised, node_valid, edge_valid)
         initial_score = self.reranker(node_features, edge_features, edge_index, initial_graph > 0.5, node_valid, edge_valid)
         rank = F.softplus(-(target_score - initial_score)).mean()
         total = loss + 0.1 * rank

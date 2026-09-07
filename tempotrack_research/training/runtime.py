@@ -343,8 +343,8 @@ def _loss_for(method: str, model: nn.Module, batch: Mapping[str, Any], *, device
     if method in {"s3_graph_fm", "s4_graph_diffusion"}:
         graph = _graph_inputs(batch, device)
         if method == "s3_graph_fm":
-            return model.compute_loss(graph.target_graph if hasattr(graph, "target_graph") else batch["target_graph"].float(), graph.node_features, graph.edge_features, graph.edge_index, graph.edge_valid, graph.node_valid, graph.initial_graph, generator=generator, loss_edge_mask=batch.get("target_graph_known"))
-        return model.compute_loss(batch["target_graph"].float().to(device), graph.node_features, graph.edge_features, graph.edge_index, graph.edge_valid, graph.initial_graph, graph.node_valid, generator=generator, loss_edge_mask=batch.get("target_graph_known"))
+            return model.compute_loss(batch["target_graph"].float().to(device), graph.node_features, graph.edge_features, graph.edge_index, graph.edge_valid, graph.node_valid, graph.initial_graph, generator=generator, loss_edge_mask=batch.get("loss_edge_mask", batch.get("target_graph_known")))
+        return model.compute_loss(batch["target_graph"].float().to(device), graph.node_features, graph.edge_features, graph.edge_index, graph.edge_valid, graph.initial_graph, graph.node_valid, generator=generator, loss_edge_mask=batch.get("loss_edge_mask", batch.get("target_graph_known")))
     if method == "s5_rl_edit":
         graph = _graph_inputs(batch, device)
         table = _action_table(batch, device)
@@ -483,8 +483,12 @@ def run_available_training(
     })
     if method == "predictive_dual":
         config.update({"history_dim": 2 * int(sample["initial_feature"].shape[-1]), "observation_dim": int(sample["initial_feature"].shape[-1]), "evidence_dim": 8})
+    artifact_signature = dependency.get("artifact_signature") or data.get("artifact_signature")
+    if artifact_signature is not None and not isinstance(artifact_signature, Mapping):
+        raise ValueError("artifact_signature must be a mapping when supplied")
+    artifact_signature = dict(artifact_signature) if artifact_signature is not None else None
     metadata = {
-        "schema_version": 3,
+        "schema_version": 4 if artifact_signature is not None else 3,
         "method": method,
         "frontend": frontend,
         "phase": phase,
@@ -500,6 +504,8 @@ def run_available_training(
         "tensor_contract_hash": data.get("tensor_contract_hash"),
         "category_protocol_hash": data.get("category_protocol_hash"),
         "data_hash": data_hash,
+        "artifact_signature": artifact_signature,
+        "artifact_signature_hash": object_hash(artifact_signature) if artifact_signature is not None else None,
         "model_config": config,
         "input_contract": "frozen_predicted_boxes_masa_features_gt_identity_supervision_only",
         "loader_config": {"microbatch_size": microbatch_size, "accumulation_steps": accumulation_steps, "effective_batch": effective_batch, "num_workers": int(train_config.get("num_workers", 0))},
@@ -596,31 +602,13 @@ def run_available_training(
     checkpoint = AtomicCheckpoint(run_dir / "last.pt")
     if resume == "auto" and checkpoint.path.exists():
         expected_checkpoint = {"method": method, "frontend": frontend, "data_hash": data_hash}
-        try:
-            payload = checkpoint.load(model, optimizer, scheduler=scheduler, scaler=engine.scaler, expected=expected_checkpoint, map_location=selected_device)
-        except ValueError:
-            # The active V3 repair can change orchestration/report/parser code
-            # while a semantically identical ordinary-metric trial is being
-            # promoted to full.  Permit that narrow, audited continuation only
-            # when the actual episode manifest, content signature, method,
-            # frontend, model configuration and count are unchanged.  A
-            # changed data/label/model contract still raises and invalidates
-            # the legacy checkpoint as required by V3.
-            raw = torch.load(checkpoint.path, map_location="cpu", weights_only=False)
-            old = dict(raw.get("metadata", {}))
-            same_episode = (
-                method == "ordinary_metric"
-                and old.get("episode_manifest") == str(overall_manifest)
-                and old.get("episode_content_hash") == manifest_payload.get("content_hash")
-                and int(old.get("episode_count", -1)) == len(dataset)
-                and old.get("model_config") == config
-                and dict(old.get("dependency_signatures", {})).get("category_protocol_hash") == data.get("category_protocol_hash")
-                and dict(old.get("dependency_signatures", {})).get("tensor_contract_hash") == data.get("tensor_contract_hash")
-            )
-            if not same_episode:
-                raise
-            payload = checkpoint.load(model, optimizer, scheduler=scheduler, scaler=engine.scaler, expected={"method": method, "frontend": frontend}, map_location=selected_device)
-            metadata["resume_compatibility"] = {"reason": "orchestration_only_code_hash_change", "legacy_data_hash": old.get("data_hash"), "current_data_hash": data_hash, "verified_fields": ["method", "frontend", "episode_manifest", "episode_content_hash", "episode_count", "model_config"]}
+        if artifact_signature is not None:
+            expected_checkpoint["artifact_signature"] = artifact_signature
+        # V4 has one strict semantic contract.  A checkpoint with a changed
+        # data/training/deployment signature is a new artifact, even when the
+        # Python change looks orchestration-only; never silently revive the
+        # ordinary-metric exception used by the old runner.
+        payload = checkpoint.load(model, optimizer, scheduler=scheduler, scaler=engine.scaler, expected=expected_checkpoint, map_location=selected_device)
         engine.global_step = int(payload.get("optimizer_step", payload.get("metadata", {}).get("global_step", 0)))
         engine.optimizer_steps = int(payload.get("optimizer_step", engine.global_step))
         engine.attempted_steps = int(payload.get("attempted_steps", engine.optimizer_steps))

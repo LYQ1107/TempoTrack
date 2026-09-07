@@ -457,7 +457,18 @@ def _load_learned_backend(method: str, frontend: str, artifact: CheckpointArtifa
         model = JEPAIdentityLinker(dim, int(config.get("hidden_dim", 256)), int(config.get("layers", 4)), int(config.get("heads", 8)), int(config.get("ff_dim", 1024)), int(config.get("dynamic_dim", 64))).to(device)
         model.load_state_dict(artifact.model_state, strict=True); model.eval()
         mode = str((run_spec.infer if run_spec else {}).get("mode", "forward_only"))
-        return LearnedPathBackend(lambda left, right: 0.0, score_all_fn=lambda views, candidates, generator=None: model.score_candidates(views, candidates, generator=generator, mode=mode).detach().cpu().numpy(), provenance={"backend": method, "frontend": frontend, "checkpoint": str(artifact.path), "scoring": "causal_unique_segment_cache", "mode": mode})
+        # Training and deployment must use the same absolute-clock query.
+        # Passing the immutable ledger/tensorizer here is deliberate: the
+        # scorer must not reconstruct a second local clock from view slices.
+        from .data.tensorization import TrajectoryTensorizer
+        transform_snapshot = dict((run_spec.data if run_spec else {}).get("transform_snapshot", {}))
+        tensorizer = TrajectoryTensorizer(transform_snapshot)
+        def score_all(views: Sequence[Mapping[str, Any]], candidates: CandidateGraph, *, generator: torch.Generator | None = None) -> np.ndarray:
+            return model.score_candidates(
+                views, candidates, generator=generator, mode=mode,
+                ledger=ledger, tensorizer=tensorizer,
+            ).detach().cpu().numpy()
+        return LearnedPathBackend(lambda left, right: 0.0, score_all_fn=score_all, provenance={"backend": method, "frontend": frontend, "checkpoint": str(artifact.path), "scoring": "shared_trajectory_tensorizer_link_evidence", "mode": mode, "tensor_contract_hash": tensorizer.tensor_contract_hash})
     if method == "s2_state_fm":
         config.setdefault("hidden_dim", 256)
         model = ContinuationFlowModel(latent_dim=int(config.get("latent_dim", 64)), hidden_dim=int(config.get("hidden_dim", 256)), layers=int(config.get("layers", 4)), appearance_dim=dim).to(device)

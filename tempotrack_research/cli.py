@@ -613,6 +613,34 @@ def _repair_v3(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown repair-v3 action: {action}")
 
 
+def _repair_v4(args: argparse.Namespace) -> int:
+    """Dispatch the implemented V4 production interfaces."""
+    from .orchestration.v4_pipeline import capabilities_v4, inspect_v4, plan_v4, report_v4, resources_v4, run_repair_v4, status_v4, stop_v4, verify_v4
+    repo = _repo(getattr(args, "repo", "."))
+    action = args.repair_v4_action
+    if action == "capabilities":
+        print(json.dumps(capabilities_v4(), ensure_ascii=False, indent=2)); return 0
+    if action == "inspect":
+        result = inspect_v4(repo, _path(repo, args.reference_root) or repo / "outputs/research_v3", _path(repo, args.output)); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0
+    if action == "resources":
+        devices = [item for item in str(args.devices or "").split(",") if item.strip()]
+        result = resources_v4(repo, _path(repo, args.local) or repo / "configs/research/local.v4.yaml", policy=args.device_policy, output=_path(repo, args.output), explicit_devices=devices or None); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0
+    if action == "plan":
+        result = plan_v4(repo, _path(repo, args.config) or repo / "configs/research/suite.v4.yaml", _path(repo, args.local) or repo / "configs/research/local.v4.yaml", _path(repo, args.run_root) or repo / "outputs/research_v4", through=args.through, output=_path(repo, args.output)); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0
+    if action == "verify":
+        result = verify_v4(repo, _path(repo, args.config) or repo / "configs/research/suite.v4.yaml", _path(repo, args.local) or repo / "configs/research/local.v4.yaml", _path(repo, args.run_root) or repo / "outputs/research_v4", skip_unchanged=args.skip_unchanged); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0 if result.get("compile", {}).get("status") == "PASS" else 1
+    if action == "run":
+        devices = [item for item in str(args.devices or "").split(",") if item.strip()]
+        result = run_repair_v4(repo, _path(repo, args.config) or repo / "configs/research/suite.v4.yaml", _path(repo, args.local) or repo / "configs/research/local.v4.yaml", _path(repo, args.reference_root) or repo / "outputs/research_v3", _path(repo, args.run_root) or repo / "outputs/research_v4", through=args.through, resume=args.resume, device_policy=args.device_policy, continue_independent=args.continue_independent, explicit_devices=devices or None); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0 if result.get("status") in {"COMPLETED", "WAITING_RESOURCES", "PARTIAL", "RUNNING"} else 3
+    if action == "status":
+        result = status_v4(repo, _path(repo, args.run_root) or repo / "outputs/research_v4", output=_path(repo, args.output) if args.output else None); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0
+    if action == "report":
+        result = report_v4(repo, _path(repo, args.run_root) or repo / "outputs/research_v4", _path(repo, args.output) or repo / "reports/v4/ICLR_V4_PROGRESS.md", final=args.final); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0
+    if action == "stop":
+        result = stop_v4(repo, _path(repo, args.run_root) or repo / "outputs/research_v4", args.job_id, after_checkpoint=args.after_checkpoint); print(json.dumps(result, ensure_ascii=False, indent=2, default=str)); return 0 if result.get("status") != "STOP_REFUSED" else 3
+    raise ValueError(f"unknown repair-v4 action: {action}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tempotrack-repair")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -638,6 +666,17 @@ def build_parser() -> argparse.ArgumentParser:
     q = v3.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output"); q.set_defaults(func=_repair_v3)
     q = v3.add_parser("controls"); q.add_argument("--repo", default="."); q.add_argument("--local", required=True); q.add_argument("--run-root", required=True); q.add_argument("--prepared"); q.set_defaults(func=_repair_v3)
     q = v3.add_parser("run"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--local", required=True); q.add_argument("--reference-root", required=True); q.add_argument("--run-root", required=True); q.add_argument("--through", choices=["repair", "integration", "trial", "full", "complete"], default="complete"); q.add_argument("--resume", choices=["auto", "never", "strict"], default="auto"); q.add_argument("--quiesce-owned", action="store_true"); q.set_defaults(func=_repair_v3)
+    p = sub.add_parser("repair-v4")
+    v4 = p.add_subparsers(dest="repair_v4_action", required=True)
+    q = v4.add_parser("capabilities"); q.add_argument("--json", action="store_true"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("inspect"); q.add_argument("--repo", default="."); q.add_argument("--reference-root"); q.add_argument("--output"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("resources"); q.add_argument("--repo", default="."); q.add_argument("--local"); q.add_argument("--device-policy", default="auto-idle"); q.add_argument("--devices"); q.add_argument("--output"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("plan"); q.add_argument("--repo", default="."); q.add_argument("--config"); q.add_argument("--local"); q.add_argument("--run-root"); q.add_argument("--through", choices=["baselines", "trial", "full", "complete"], default="complete"); q.add_argument("--output"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("verify"); q.add_argument("--repo", default="."); q.add_argument("--config"); q.add_argument("--local"); q.add_argument("--run-root"); q.add_argument("--skip-unchanged", action="store_true"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("run"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--local", required=True); q.add_argument("--reference-root", required=True); q.add_argument("--run-root", required=True); q.add_argument("--through", choices=["baselines", "trial", "full", "complete"], default="complete"); q.add_argument("--resume", choices=["auto", "never", "strict"], default="auto"); q.add_argument("--device-policy", default="auto-idle"); q.add_argument("--devices"); q.add_argument("--continue-independent", action="store_true"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("status"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output"); q.add_argument("--json", action="store_true"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output", required=True); q.add_argument("--final", action="store_true"); q.set_defaults(func=_repair_v4)
+    q = v4.add_parser("stop"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--job-id", required=True); q.add_argument("--after-checkpoint", action="store_true"); q.set_defaults(func=_repair_v4)
     return parser
 
 

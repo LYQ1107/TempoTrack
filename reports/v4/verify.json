@@ -1,0 +1,148 @@
+{
+  "checks": {
+    "checked_at": 1788793142.3186853,
+    "input_hash": "32d3ac510ac39d895fd5800a6483e5fca1399bebebd572a10dbb73b3d3301ded",
+    "results": [
+      {
+        "assertions": [
+          "formal_pair_dataset_loaded",
+          "explicit_query_times_present"
+        ],
+        "check": "C1_input_time_backend",
+        "checked_at": 1788793112.8808212,
+        "error": null,
+        "evidence": {
+          "episode_count": 207,
+          "manifest": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/episodes/m0_v4/val_base_internal/pair_manifest.json",
+          "manifest_hash": "1cc2b183092e8dda75c7c2529b7b2d18f61ba44e03c88b26895bf805c4fe9433"
+        },
+        "status": "PASS"
+      },
+      {
+        "assertions": [],
+        "check": "C2_s1_real_training",
+        "checked_at": 1788793112.880827,
+        "error": "no V4 S1 production training artifact; GPU training was not started",
+        "evidence": {
+          "reference_root_not_used_as_training": true,
+          "required_marker": "s1_jepa"
+        },
+        "status": "BLOCKED_EXTERNAL"
+      },
+      {
+        "assertions": [],
+        "check": "C3_m1_real_events",
+        "checked_at": 1788793112.8808293,
+        "error": "no V4 M1 memory/replay artifact; dependent training is waiting for GPU resources",
+        "evidence": {
+          "reference_root_not_used_as_training": true,
+          "required_marker": "m1_memory"
+        },
+        "status": "BLOCKED_EXTERNAL"
+      },
+      {
+        "assertions": [],
+        "check": "C7_s2_s5_execution",
+        "checked_at": 1788793112.8808312,
+        "error": "no V4 S2/S5 training and rollout artifacts; GPU resources are externally blocked",
+        "evidence": {
+          "reference_root_not_used_as_training": true,
+          "required_marker": "s2_s5"
+        },
+        "status": "BLOCKED_EXTERNAL"
+      },
+      {
+        "assertions": [
+          "v4_graph_windows_present"
+        ],
+        "check": "C4_graph_targets_unknown",
+        "checked_at": 1788793112.8811579,
+        "error": null,
+        "evidence": {
+          "graph_artifacts": [
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/episodes/m0_v4/train_base/matched_frontend/graph.jsonl",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/episodes/m0_v4/val_base_internal/internal_tune/graph.jsonl"
+          ]
+        },
+        "status": "PASS"
+      },
+      {
+        "assertions": [],
+        "check": "C5_checkpoint_signature_resume",
+        "checked_at": 1788793112.884399,
+        "error": "no V4 checkpoint boundary was produced",
+        "evidence": {
+          "reference_checkpoints_not_accepted": true
+        },
+        "status": "BLOCKED_EXTERNAL"
+      },
+      {
+        "assertions": [
+          "production_typed_dag_acyclic",
+          "independent_dependency_edges_recorded"
+        ],
+        "check": "C6_dag_and_gpu_lease",
+        "checked_at": 1788793112.9117148,
+        "error": null,
+        "evidence": {
+          "job_count": 186,
+          "multi_gpu": "NOT_EXERCISED_UNDER_CURRENT_RESOURCE_SNAPSHOT",
+          "topological_order_hash": "de525adefe94325d6d816ce7564e17af214c93e2e8efb0cb2146089e0273ab8a"
+        },
+        "status": "NOT_EXERCISED"
+      },
+      {
+        "assertions": [
+          "v4_prediction_bound",
+          "official_evaluator_completed",
+          "summary_artifact_present"
+        ],
+        "check": "C8_official_evaluation_loop",
+        "checked_at": 1788793142.3186786,
+        "error": null,
+        "evidence": {
+          "evaluations": [
+            {
+              "evaluation": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/evaluations/baseline/seed0/m0_no_offline_baseline_seed0_official_validation/evaluation.json",
+              "evaluation_hash": "c1129c84d64cd2f5f4218d06d8a96c23935c143957a8145a1193dc3a557f93a2",
+              "summary": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/evaluations/baseline/seed0/m0_no_offline_baseline_seed0_official_validation/teta_summary_results.pth",
+              "summary_hash": "60ed87cd9f150b5fa9f3a74eff17d188d5d4e6224a840b7cb459b1653d8f7da1"
+            },
+            {
+              "evaluation": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/evaluations/baseline/seed0/m0_stable_emd_baseline_seed0_official_validation/evaluation.json",
+              "evaluation_hash": "1ba4822251f297b628fee0ab1cac1b43be45a7b2de7280d34814fd50ad392e6a",
+              "summary": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/evaluations/baseline/seed0/m0_stable_emd_baseline_seed0_official_validation/teta_summary_results.pth",
+              "summary_hash": "609b3b064c40f67f1f42193d64e1f6fc83caa1d2c910d42104327d894cba138f"
+            }
+          ]
+        },
+        "status": "PASS"
+      }
+    ],
+    "schema_version": 4,
+    "summary": {
+      "BLOCKED_DATA": 0,
+      "BLOCKED_EXTERNAL": 4,
+      "FAIL": 0,
+      "NOT_EXERCISED": 1,
+      "PASS": 3,
+      "REFERENCE_ONLY": 0
+    }
+  },
+  "compile": {
+    "code_hash": "6ad930c6b73ad5b1030892a291165af75f25e7a9e886a6884c445981f1b54610",
+    "failures": [],
+    "files_checked": 95,
+    "status": "PASS"
+  },
+  "passed": true,
+  "production_entrypoints": {
+    "evaluate": true,
+    "infer": true,
+    "official_parser": true,
+    "train": true
+  },
+  "schema_version": 4,
+  "skip_unchanged": true,
+  "verified_at": "2026-09-07T14:59:02.589451+00:00"
+}

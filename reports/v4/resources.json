@@ -1,0 +1,959 @@
+{
+  "allocation_policy": {
+    "allow_downloads": false,
+    "allow_paid_services": false,
+    "allowed_devices": "auto_allocated_idle",
+    "cpu_threads_per_gpu_job": 4,
+    "device_policy": "auto-idle",
+    "evaluator_cores": 2,
+    "exclusive_gpu_per_job": true,
+    "gpu_memory_headroom_gib": 2,
+    "lock_dir": "~/.cache/tempotrack/gpu_leases",
+    "max_jobs_per_gpu": 1,
+    "max_parallel_cpu_jobs": 2,
+    "max_parallel_gpu_jobs": "auto",
+    "mode": "independent_jobs",
+    "respect_scheduler_allocation": true,
+    "skip_unrelated_compute_processes": true
+  },
+  "blocked_devices": [
+    {
+      "index": 0,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/masaenv_debug/bin/python",
+            "tools/l89_train_full_rmot.py",
+            "--epochs",
+            "40",
+            "--seed",
+            "20260829",
+            "--z1-cache",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/outputs/l85/features/fit_dev_eval_full_attempt2",
+            "--language-cache",
+            "outputs/l89/cache/language_tokens_retry1",
+            "--out",
+            "outputs/l89/train/joint40",
+            "--effective-frame-batch",
+            "8",
+            "--bf16"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT_L89",
+          "pid": 15428,
+          "process_name": "/home/lwr/anaconda3/envs/masaenv_debug/bin/python",
+          "start_ticks": 1319453428,
+          "uid": 1000,
+          "used_memory_mib": "1570"
+        },
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/fog",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_fog_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19115,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969403,
+          "uid": 1000,
+          "used_memory_mib": "35490"
+        }
+      ],
+      "reasons": [
+        "compute_process_present"
+      ],
+      "uuid": "GPU-d3a949d3-b3ef-04b0-92c5-594a63857898"
+    },
+    {
+      "index": 1,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0006-0005-authoritative_reassign-003",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25213,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503720,
+          "uid": 1000,
+          "used_memory_mib": "39354"
+        }
+      ],
+      "reasons": [
+        "compute_process_present",
+        "insufficient_free_memory"
+      ],
+      "uuid": "GPU-5de9a1c2-0cc1-4fda-7d25-493f86f52424"
+    },
+    {
+      "index": 2,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0016-0024-recover_identity-001",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25214,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503726,
+          "uid": 1000,
+          "used_memory_mib": "39260"
+        }
+      ],
+      "reasons": [
+        "compute_process_present",
+        "insufficient_free_memory"
+      ],
+      "uuid": "GPU-a4095968-9191-50eb-d56c-ed633b31e2c0"
+    },
+    {
+      "index": 3,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0016-0553-authoritative_reassign-007",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25255,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503733,
+          "uid": 1000,
+          "used_memory_mib": "40334"
+        }
+      ],
+      "reasons": [
+        "compute_process_present",
+        "insufficient_free_memory"
+      ],
+      "uuid": "GPU-f931e51b-55b2-c2c2-6506-b6f986864d54"
+    },
+    {
+      "index": 4,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0023-0498-atomic_id_swap-002",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25295,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503746,
+          "uid": 1000,
+          "used_memory_mib": "39546"
+        }
+      ],
+      "reasons": [
+        "compute_process_present",
+        "insufficient_free_memory"
+      ],
+      "uuid": "GPU-daa9b388-4540-242c-83d7-3261bb232a7c"
+    },
+    {
+      "index": 5,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/ovtr/bin/python",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/scripts/iclr27_phase88/train_controller.py",
+            "--fold",
+            "0",
+            "--device",
+            "cuda:5",
+            "--updates",
+            "20000",
+            "--tag",
+            "c0v2_repair3_f0",
+            "--checkpoint-interval",
+            "2000",
+            "--resume-checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/outputs/iclr27_phase88/checkpoints/c0v2_repair1_f0_step006000.pt"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT",
+          "pid": 30223,
+          "process_name": "/home/lwr/anaconda3/envs/ovtr/bin/python",
+          "start_ticks": 1320027822,
+          "uid": 1000,
+          "used_memory_mib": "2388"
+        }
+      ],
+      "reasons": [
+        "compute_process_present"
+      ],
+      "uuid": "GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81"
+    },
+    {
+      "index": 6,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/cloudy",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_cloudy_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19117,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969404,
+          "uid": 1000,
+          "used_memory_mib": "38818"
+        }
+      ],
+      "reasons": [
+        "compute_process_present",
+        "insufficient_free_memory"
+      ],
+      "uuid": "GPU-c2902ddf-62f4-cc2f-5d9f-d33c74555847"
+    },
+    {
+      "index": 7,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/rain",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_rain_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19118,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969404,
+          "uid": 1000,
+          "used_memory_mib": "38248"
+        }
+      ],
+      "reasons": [
+        "compute_process_present"
+      ],
+      "uuid": "GPU-995c9557-d84e-1a76-f02f-b1ddea34e56b"
+    },
+    {
+      "index": 8,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/snow",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_snow_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19119,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969404,
+          "uid": 1000,
+          "used_memory_mib": "35280"
+        }
+      ],
+      "reasons": [
+        "compute_process_present"
+      ],
+      "uuid": "GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119"
+    },
+    {
+      "index": 9,
+      "processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/ovtr/bin/python",
+            "-u",
+            "-"
+          ],
+          "cwd": "/data2/usr_for_deadline/C-MOT",
+          "pid": 39931,
+          "process_name": "/home/lwr/anaconda3/envs/ovtr/bin/python",
+          "start_ticks": 1320087951,
+          "uid": 1000,
+          "used_memory_mib": "8544"
+        }
+      ],
+      "reasons": [
+        "compute_process_present"
+      ],
+      "uuid": "GPU-e947d8da-fc7a-4c0b-7d91-e9e67d34f4a6"
+    }
+  ],
+  "checked_at": "2026-09-07T09:18:08.453432+00:00",
+  "configured_allowed_devices": "auto_allocated_idle",
+  "eligible_devices": [],
+  "explicit_devices": [],
+  "host_pid": 2215,
+  "host_start_ticks": 1320103826,
+  "inventory": [
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/masaenv_debug/bin/python",
+            "tools/l89_train_full_rmot.py",
+            "--epochs",
+            "40",
+            "--seed",
+            "20260829",
+            "--z1-cache",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/outputs/l85/features/fit_dev_eval_full_attempt2",
+            "--language-cache",
+            "outputs/l89/cache/language_tokens_retry1",
+            "--out",
+            "outputs/l89/train/joint40",
+            "--effective-frame-batch",
+            "8",
+            "--bf16"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT_L89",
+          "pid": 15428,
+          "process_name": "/home/lwr/anaconda3/envs/masaenv_debug/bin/python",
+          "start_ticks": 1319453428,
+          "uid": 1000,
+          "used_memory_mib": "1570"
+        },
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/fog",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_fog_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19115,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969403,
+          "uid": 1000,
+          "used_memory_mib": "35490"
+        }
+      ],
+      "index": 0,
+      "memory_free_mib": 3275,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 98,
+      "uuid": "GPU-d3a949d3-b3ef-04b0-92c5-594a63857898",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0006-0005-authoritative_reassign-003",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25213,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503720,
+          "uid": 1000,
+          "used_memory_mib": "39354"
+        }
+      ],
+      "index": 1,
+      "memory_free_mib": 981,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 0,
+      "uuid": "GPU-5de9a1c2-0cc1-4fda-7d25-493f86f52424",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0016-0024-recover_identity-001",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25214,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503726,
+          "uid": 1000,
+          "used_memory_mib": "39260"
+        }
+      ],
+      "index": 2,
+      "memory_free_mib": 1075,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 0,
+      "uuid": "GPU-a4095968-9191-50eb-d56c-ed633b31e2c0",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0016-0553-authoritative_reassign-007",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25255,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503733,
+          "uid": 1000,
+          "used_memory_mib": "40334"
+        }
+      ],
+      "index": 3,
+      "memory_free_mib": 1,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 0,
+      "uuid": "GPU-f931e51b-55b2-c2c2-6506-b6f986864d54",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/intermot/bin/python",
+            "-u",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/scripts/n72r11_on_demand_replay.py",
+            "--event-id",
+            "n72r5-pool-n37-dancetrack0023-0498-atomic_id_swap-002",
+            "--output-root",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/formal_replay_resource_censored_attempt_03",
+            "--device",
+            "cuda:0",
+            "--model-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/v3_training_resource_censored/v3_bootstrap.pt",
+            "--bridge-checkpoint",
+            "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree/outputs/N72R11R2/bridge_training_resource_censored/target_edge_bridge.pt",
+            "--horizon",
+            "100",
+            "--enable-live"
+          ],
+          "cwd": "/data2/usr_for_deadline/SAM3_InterMOT_N72R5/worktree",
+          "pid": 25295,
+          "process_name": "/home/lwr/anaconda3/envs/intermot/bin/python",
+          "start_ticks": 1319503746,
+          "uid": 1000,
+          "used_memory_mib": "39546"
+        }
+      ],
+      "index": 4,
+      "memory_free_mib": 789,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 0,
+      "uuid": "GPU-daa9b388-4540-242c-83d7-3261bb232a7c",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/ovtr/bin/python",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/scripts/iclr27_phase88/train_controller.py",
+            "--fold",
+            "0",
+            "--device",
+            "cuda:5",
+            "--updates",
+            "20000",
+            "--tag",
+            "c0v2_repair3_f0",
+            "--checkpoint-interval",
+            "2000",
+            "--resume-checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/outputs/iclr27_phase88/checkpoints/c0v2_repair1_f0_step006000.pt"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT",
+          "pid": 30223,
+          "process_name": "/home/lwr/anaconda3/envs/ovtr/bin/python",
+          "start_ticks": 1320027822,
+          "uid": 1000,
+          "used_memory_mib": "2388"
+        }
+      ],
+      "index": 5,
+      "memory_free_mib": 37947,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 12,
+      "uuid": "GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/cloudy",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_cloudy_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19117,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969404,
+          "uid": 1000,
+          "used_memory_mib": "38818"
+        }
+      ],
+      "index": 6,
+      "memory_free_mib": 1517,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 23,
+      "uuid": "GPU-c2902ddf-62f4-cc2f-5d9f-d33c74555847",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/rain",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_rain_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19118,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969404,
+          "uid": 1000,
+          "used_memory_mib": "38248"
+        }
+      ],
+      "index": 7,
+      "memory_free_mib": 2087,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 99,
+      "uuid": "GPU-995c9557-d84e-1a76-f02f-b1ddea34e56b",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+            "-u",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/build_generaltrack_vjepa21_cache.py",
+            "--prepared-dir",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/GeneralTrack-main/datasets/generaltrack_prepared_thr02/motsynth/snow",
+            "--output",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/outputs/official_vjepa21_cache/motsynth_snow_vjepa21_l384_w16_causalbox_predictor.npz",
+            "--checkpoint",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA/checkpoints/vjepa2_1/vjepa2_1_vitl_dist_vitG_384.pt",
+            "--image-root",
+            "/data1/LWR/vranlee/SERVER_ONLY/avis/DA-MOT/darth-main/data/motsynth/images",
+            "--window",
+            "16",
+            "--resolution",
+            "384",
+            "--patch-size",
+            "16",
+            "--roi-mode",
+            "causal_box_crop_predictor",
+            "--roi-context",
+            "1.5",
+            "--crop-batch-size",
+            "128",
+            "--frame-batch-size",
+            "16",
+            "--crop-backend",
+            "gpu_roi_align",
+            "--predictor-pool",
+            "mean",
+            "--feature-layers",
+            "final",
+            "--feature-score-min",
+            "0.35",
+            "--device",
+            "cuda",
+            "--log-every",
+            "500"
+          ],
+          "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/JEPA",
+          "pid": 19119,
+          "process_name": "/home/lwr/anaconda3/envs/mft25ocsort/bin/python",
+          "start_ticks": 1319969404,
+          "uid": 1000,
+          "used_memory_mib": "35280"
+        }
+      ],
+      "index": 8,
+      "memory_free_mib": 5055,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 13,
+      "uuid": "GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119",
+      "visible": true
+    },
+    {
+      "compute_processes": [
+        {
+          "argv": [
+            "/home/lwr/anaconda3/envs/ovtr/bin/python",
+            "-u",
+            "-"
+          ],
+          "cwd": "/data2/usr_for_deadline/C-MOT",
+          "pid": 39931,
+          "process_name": "/home/lwr/anaconda3/envs/ovtr/bin/python",
+          "start_ticks": 1320087951,
+          "uid": 1000,
+          "used_memory_mib": "8544"
+        }
+      ],
+      "index": 9,
+      "memory_free_mib": 31791,
+      "memory_total_mib": 40960,
+      "name": "NVIDIA A100-SXM4-40GB",
+      "occupied": true,
+      "utilization_gpu": 18,
+      "uuid": "GPU-e947d8da-fc7a-4c0b-7d91-e9e67d34f4a6",
+      "visible": true
+    }
+  ],
+  "local_path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/configs/research/local.v4.yaml",
+  "policy": "auto-idle",
+  "reason": "no_visible_gpu_without_compute_process",
+  "repo": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa",
+  "resource_blocked": true,
+  "scheduler_context": {},
+  "schema_version": 4
+}

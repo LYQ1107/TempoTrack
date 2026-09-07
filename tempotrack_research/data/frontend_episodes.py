@@ -16,6 +16,7 @@ from ..association.emd import stable_emd_batch
 from ..association.graph import project_graph_scores
 from ..config import file_hash, object_hash
 from .feature_export import iter_manifest_ledgers, load_dataset_manifest
+from .graph_targets import GraphTargets, build_direct_successor_targets, validate_target_paths
 from .label_builder import load_label_shard
 
 
@@ -187,34 +188,82 @@ def _first_future_candidates(views: Sequence[Mapping[str, Any]], identities: Seq
 
 
 def _memory_records(ledger_path: Path, views: Sequence[Mapping[str, Any]], identities: Sequence[int], known: Sequence[bool], event_values: Mapping[int, Mapping[str, Any]], *, k: int, role: str, split: str) -> list[dict[str, Any]]:
+    """Build M1 chunks with an explicit anchor and every real replay event.
+
+    The old V3 representation removed the anchor here and the dataset removed
+    one more item.  V4 keeps the first row in ``initial_ref`` and stores event
+    metadata next to each ``observation_ref``.  A mixed/contaminated tracklet
+    is retained when its initial anchor is known; later error events become
+    reliability=0 (or unknown), rather than deleting the evidence.
+    """
     records = []
-    future_candidates = _first_future_candidates(views, identities, known, negative_limit=max(1, k - 1))
+    order = sorted(range(len(views)), key=lambda index: (float(views[index]["first_frame"]), int(views[index]["local_id"]), int(index)))
     for source_index, view in enumerate(views):
-        rows = view["rows"].tolist()
-        if len(rows) < 3 or not known[source_index]:
+        rows = [int(row) for row in view["rows"].tolist()]
+        if len(rows) < 2:
             continue
-        positive_index, negative_indices = future_candidates.get(int(source_index), (None, []))
-        if positive_index is None:
+        anchor = dict(event_values.get(rows[0], {}))
+        anchor_known = bool(anchor.get("known_identity", False)) and int(anchor.get("gt_identity", -1)) >= 0
+        if not anchor_known:
             continue
-        selected = [positive_index] + negative_indices[: max(0, k - 1)]
-        selected = selected[:k]
-        while len(selected) < k:
-            selected.append(selected[-1])
+        anchor_identity = int(anchor["gt_identity"])
+        positive_index: int | None = None
+        negative_indices: list[int] = []
+        start_frame = float(view["last_frame"])
+        for target_index in order:
+            if float(views[target_index]["first_frame"]) <= start_frame:
+                continue
+            target_value = dict(event_values.get(int(views[target_index]["rows"][0]), {}))
+            target_known = bool(target_value.get("known_identity", False)) and int(target_value.get("gt_identity", -1)) >= 0
+            if not target_known:
+                continue
+            if int(target_value["gt_identity"]) == anchor_identity and positive_index is None:
+                positive_index = int(target_index)
+            elif int(target_value["gt_identity"]) != anchor_identity and len(negative_indices) < max(1, k - 1):
+                negative_indices.append(int(target_index))
+            if positive_index is not None and len(negative_indices) >= max(1, k - 1):
+                break
+        selected = ([] if positive_index is None else [positive_index]) + negative_indices[: max(0, k - 1)]
         candidate_refs = [_ref(ledger_path, views[index]["rows"].tolist()) for index in selected]
-        candidate_valid = [position < min(k, 1 + len(negative_indices)) for position in range(len(selected))]
-        positive = [bool(valid and known[index] and identities[index] == identities[source_index]) for index, valid in zip(selected, candidate_valid)]
-        known_mask = [bool(valid and known[index]) for index, valid in zip(selected, candidate_valid)]
+        candidate_valid = [True] * len(candidate_refs)
+        positive = [bool(index == positive_index) for index in selected]
+        known_mask = [True] * len(selected)
         event_rows = rows[1:]
-        observations = [_ref(ledger_path, [row]) for row in event_rows]
-        if not observations:
+        events: list[dict[str, Any]] = []
+        for row in event_rows:
+            value = dict(event_values.get(row, {}))
+            event_known = bool(value.get("known_identity", False)) and int(value.get("gt_identity", -1)) >= 0
+            events.append({
+                "observation_ref": _ref(ledger_path, [row]),
+                "competition_margin": float(value.get("competition_margin", 0.0)),
+                "margin_known": bool(value.get("margin_known", False)),
+                "reliability": float(event_known and int(value.get("gt_identity", -1)) == anchor_identity),
+                "reliability_known": bool(anchor_known and event_known),
+            })
+        if not events:
             continue
-        margins = [float(event_values.get(row, {}).get("competition_margin", 0.0)) for row in event_rows]
-        margin_known = [bool(event_values.get(row, {}).get("margin_known", False)) for row in event_rows]
-        # The reliability target is only known when both the initial anchor
-        # and the current event have independently known base identity.
-        reliability = [float(event_values.get(row, {}).get("known_identity", False) and event_values.get(rows[0], {}).get("known_identity", False) and int(event_values.get(row, {}).get("gt_identity", -1)) == identities[source_index]) for row in event_rows]
-        reliability_known = [bool(event_values.get(row, {}).get("known_identity", False) and event_values.get(rows[0], {}).get("known_identity", False)) for row in event_rows]
-        records.append({"kind": "memory", "episode_uid": f"v3memory:{split}:{view['video_id']}:{view['local_id']}", "observations": observations, "future": candidate_refs[0], "future_candidates": candidate_refs, "same_identity": 1, "candidate_valid": candidate_valid, "positive": positive, "known": known_mask, "match_margins": margins, "match_margin_known": margin_known, "reliability": reliability, "reliability_known": reliability_known, "metadata": {"role": role, "source_local_id": int(view["local_id"]), "candidate_k": k, "synthetic_corruption": False}})
+        record: dict[str, Any] = {
+            "kind": "memory",
+            "schema_version": 4,
+            "episode_uid": f"v4memory:{split}:{view['video_id']}:{view['local_id']}",
+            "initial_ref": _ref(ledger_path, [rows[0]]),
+            "burnin_refs": [],
+            "events": events,
+            "future_candidates": candidate_refs,
+            "candidate_valid": candidate_valid if candidate_valid else [False],
+            "positive": positive if positive else [False],
+            "known": known_mask if known_mask else [False],
+            "metadata": {
+                "role": role,
+                "source_local_id": int(view["local_id"]),
+                "anchor_uid": str(event_values.get(rows[0], {}).get("uid", f"row:{rows[0]}")),
+                "anchor_identity_loss_only": anchor_identity,
+                "candidate_k": k,
+                "synthetic_corruption": False,
+                "contains_error_event": bool(any(item["reliability_known"] and item["reliability"] == 0.0 for item in events)),
+            },
+        }
+        records.append(record)
     return records
 
 
@@ -376,23 +425,22 @@ def build_frontend_episode_manifests(output: str | Path, observation_manifest: s
         global_edges = graph.edge_index.detach().cpu().numpy().reshape(2, -1)
         global_pairs = {(int(source), int(target)) for source, target in global_edges.T.tolist()}
         max_gap = float(candidate_recipe.get("max_gap", 90))
-        known_by_identity: dict[int, list[int]] = {}
-        for index, (identity, is_known) in enumerate(zip(identities, known)):
-            if is_known:
-                known_by_identity.setdefault(int(identity), []).append(int(index))
-        known_successors: set[tuple[int, int]] = set()
-        for identity_indices in known_by_identity.values():
-            identity_indices.sort(key=lambda index: (float(views[index]["first_frame"]), int(views[index]["local_id"])))
-            for source_position, source_index in enumerate(identity_indices):
-                source_last = float(views[source_index]["last_frame"])
-                for target_index in identity_indices[source_position + 1 :]:
-                    gap = float(views[target_index]["first_frame"]) - source_last
-                    if gap <= 0.0:
-                        continue
-                    if gap > max_gap:
-                        break
-                    known_successors.add((source_index, target_index))
-        candidate_missed_pairs = known_successors.difference(global_pairs)
+        graph_nodes = [
+            {"video_id": int(view["video_id"]), "first_frame": float(view["first_frame"]), "last_frame": float(view["last_frame"]), "identity": int(identity), "known": bool(is_known)}
+            for view, identity, is_known in zip(views, identities, known)
+        ]
+        graph_targets = build_direct_successor_targets(
+            graph_nodes,
+            global_edges,
+            {"identity": identities, "known": known, "video_ids": [int(view["video_id"]) for view in views], "first_frames": [float(view["first_frame"]) for view in views], "last_frames": [float(view["last_frame"]) for view in views]},
+            full_video_context={"max_gap": max_gap},
+        )
+        candidate_missed_pairs = {
+            (int(source), int(target))
+            for edge_number, (source, target) in enumerate(global_edges.T.tolist())
+            if bool(graph_targets.successor[edge_number]) and bool(graph_targets.candidate_missed[int(source)] or graph_targets.candidate_missed[int(target)])
+        }
+        missed_nodes = set(np.flatnonzero(graph_targets.candidate_missed).tolist())
         graph_records: list[dict[str, Any]] = []
         edit_records: list[dict[str, Any]] = []
         from .episodes import _edit_records
@@ -424,18 +472,24 @@ def build_frontend_episode_manifests(output: str | Path, observation_manifest: s
             local_identities = [identities[int(index)] for index in window_indices.tolist()]
             local_known = [known[int(index)] for index in window_indices.tolist()]
             local_edges = window_graph.edge_index.detach().cpu().numpy().reshape(2, -1)
-            target_graph, target_known = [], []
-            for source_index, target_index in local_edges.T.tolist():
-                global_source = int(window_indices[int(source_index)])
-                global_target = int(window_indices[int(target_index)])
-                valid = bool(local_known[source_index] and local_known[target_index])
-                target_graph.append(float(valid and local_identities[source_index] == local_identities[target_index]))
-                target_known.append(valid)
-                assert (global_source, global_target) in global_pairs
+            target_graph = [float(graph_targets.successor[int(position)]) for position in global_edge_positions.tolist()]
+            target_known = [bool(graph_targets.successor_known[int(position)]) for position in global_edge_positions.tolist()]
+            same_identity = [bool(graph_targets.same_identity[int(position)]) for position in global_edge_positions.tolist()]
+            identity_known = [bool(graph_targets.identity_known[int(position)]) for position in global_edge_positions.tolist()]
+            local_target = GraphTargets(
+                np.asarray(target_graph, dtype=bool), np.asarray(target_known, dtype=bool),
+                np.asarray(same_identity, dtype=bool), np.asarray(identity_known, dtype=bool),
+                np.asarray(local_known, dtype=bool), np.zeros(len(window_indices), dtype=bool),
+                np.asarray([bool(int(index) in missed_nodes) for index in window_indices.tolist()], dtype=bool),
+                {"window_number": int(window_number)},
+            )
+            path_check = validate_target_paths(window_views, local_edges, local_target)
+            if not path_check["valid"]:
+                raise ValueError(f"invalid graph target paths for video {video_id} window {window_number}: {path_check}")
             window_set = set(int(index) for index in window_indices.tolist())
             boundary_censored = any(
                 (source in window_set) != (target in window_set)
-                for source, target in known_successors
+                for source, target in graph_targets.diagnostics.get("direct_pairs", [])
             )
             graph_record = {
                 "kind": "graph",
@@ -447,13 +501,17 @@ def build_frontend_episode_manifests(output: str | Path, observation_manifest: s
                 "edge_valid": [True] * len(target_graph),
                 "target_graph": target_graph,
                 "target_graph_known": target_known,
+                "same_identity": same_identity,
+                "identity_graph_known": identity_known,
                 "metadata": {
                     "role": role,
                     "node_identities_loss_only": local_identities,
                     "node_known_loss_only": local_known,
                     "initial_graph_solver": initial_check,
-                    "candidate_missed": bool(any(source in window_set for source, _ in candidate_missed_pairs)),
+                    "candidate_missed": bool(any(source in window_set for source, _ in candidate_missed_pairs) or any(int(index) in missed_nodes for index in window_indices.tolist())),
                     "boundary_censored": bool(boundary_censored),
+                    "graph_target_diagnostics": graph_targets.diagnostics,
+                    "graph_target_path_check": path_check,
                     "window_number": int(window_number),
                     "window_global_node_indices": window_indices.tolist(),
                     "window_global_edge_indices": global_edge_positions.tolist(),

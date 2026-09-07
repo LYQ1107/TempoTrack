@@ -48,20 +48,22 @@ class GraphDiffusionMatcher(nn.Module):
     def compute_loss(self, target_graph: Tensor, node_features: Tensor, edge_features: Tensor, edge_index: Tensor, edge_valid: Tensor, condition_graph: Tensor, node_valid: Tensor | None = None, generator: torch.Generator | None = None, loss_edge_mask: Tensor | None = None) -> dict[str, Tensor]:
         if target_graph.ndim != 2 or edge_valid.shape != target_graph.shape or condition_graph.shape != target_graph.shape:
             raise ValueError("S4 graph tensors must agree as [B,E]")
-        x0 = 2.0 * target_graph - 1.0
+        supervised = edge_valid.bool()
+        if loss_edge_mask is not None:
+            if loss_edge_mask.shape != supervised.shape:
+                raise ValueError("loss_edge_mask must have shape [B,E]")
+            supervised = supervised & loss_edge_mask.bool()
+        # Do not encode unknown labels as the negative endpoint (-1).
+        x0 = torch.where(supervised, 2.0 * target_graph - 1.0, torch.zeros_like(target_graph))
         timestep = torch.randint(0, self.diffusion_steps, (target_graph.shape[0],), device=target_graph.device, generator=generator)
         noise = torch.randn(x0.shape, device=x0.device, dtype=x0.dtype, generator=generator)
         abar = self.alpha_bar[timestep].to(x0.dtype).unsqueeze(-1)
         xt = abar.sqrt() * x0 + (1 - abar).sqrt() * noise
         predicted = self.predict_epsilon(xt, timestep, node_features, edge_features, edge_index, edge_valid, node_valid, condition_graph)
-        mask = edge_valid.bool()
-        if loss_edge_mask is not None:
-            if loss_edge_mask.shape != mask.shape:
-                raise ValueError("loss_edge_mask must have shape [B,E]")
-            mask = mask & loss_edge_mask.bool()
+        mask = supervised
         mask_value = mask.to(predicted.dtype)
         loss = ((predicted - noise).square() * mask_value).sum() / mask_value.sum().clamp_min(1.0)
-        target_score = self.reranker(node_features, edge_features, edge_index, target_graph > 0.5, node_valid, edge_valid)
+        target_score = self.reranker(node_features, edge_features, edge_index, (target_graph > 0.5) & supervised, node_valid, edge_valid)
         initial_score = self.reranker(node_features, edge_features, edge_index, condition_graph > 0.5, node_valid, edge_valid)
         rank = F.softplus(-(target_score - initial_score)).mean()
         total = loss + 0.1 * rank

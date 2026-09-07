@@ -6,11 +6,52 @@ import hashlib
 import json
 import os
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping
 
 from .schemas import RunSpec
+
+
+@dataclass(frozen=True)
+class ArtifactSignature:
+    """Semantic identity shared by data, training and deployment artifacts."""
+
+    data_semantics: str
+    training_semantics: str
+    deployment_semantics: str
+    runtime_provenance: str
+    schema_version: int = 4
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": int(self.schema_version),
+            "data_semantics": str(self.data_semantics),
+            "training_semantics": str(self.training_semantics),
+            "deployment_semantics": str(self.deployment_semantics),
+            "runtime_provenance": str(self.runtime_provenance),
+        }
+
+    def content_hash(self) -> str:
+        return object_hash(self.to_dict())
+
+    def compatible_with(self, other: "ArtifactSignature") -> tuple[bool, list[str]]:
+        reasons: list[str] = []
+        if self.data_semantics != other.data_semantics:
+            reasons.append("data_semantics")
+        if self.training_semantics != other.training_semantics:
+            reasons.append("training_semantics")
+        if self.deployment_semantics != other.deployment_semantics:
+            reasons.append("deployment_semantics")
+        return not reasons, reasons
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "ArtifactSignature":
+        required = ("data_semantics", "training_semantics", "deployment_semantics", "runtime_provenance")
+        missing = [key for key in required if key not in value]
+        if missing:
+            raise ValueError(f"artifact signature missing fields: {missing}")
+        return cls(*(str(value[key]) for key in required), schema_version=int(value.get("schema_version", 4)))
 
 
 def canonical_json(value: Any) -> str:

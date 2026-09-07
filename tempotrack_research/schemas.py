@@ -119,6 +119,11 @@ class SegmentClock:
     time_unit: str
     scale: float
 
+    @property
+    def unit(self) -> str:
+        """V4 spelling; ``time_unit`` remains a compatibility alias."""
+        return self.time_unit
+
 
 @dataclass
 class PairInputs:
@@ -240,6 +245,17 @@ class PredictionQuery:
     relative_times: Any
     valid: Any = None
     mode: str = "forward_only"
+
+
+@dataclass
+class LinkEvidence:
+    """Score evidence shared by S1/ordinary training and deployment."""
+
+    score: Any
+    prediction_identity: Any
+    dynamic_error: Any
+    frozen_anchor: Any
+    valid: Any
 
 
 @dataclass

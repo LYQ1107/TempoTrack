@@ -69,17 +69,36 @@ class TrajectoryTensorizer:
     def tensor_contract_hash(self) -> str:
         return self.spec.content_hash()
 
-    def encode_segment(self, ledger: ObservationLedger, rows: Sequence[int] | np.ndarray) -> tuple[SegmentInputs, SegmentClock]:
+    def select_rows(self, ledger: ObservationLedger, rows: Sequence[int] | np.ndarray, *, role: str = "source") -> np.ndarray:
+        """Select a causal prefix without changing the immutable ledger.
+
+        ``role`` is part of the V4 tensor contract.  Source/context segments
+        keep the most recent observations while target/event segments keep
+        their causal prefix.  The selected rows remain in absolute-time order
+        and every caller uses the returned rows for both features and clocks.
+        """
+        if role not in {"source", "target", "event", "context", "heldout"}:
+            raise ValueError(f"unknown tensorization role: {role}")
         rows_array = np.asarray(rows, dtype=np.int64).reshape(-1)
         if rows_array.size == 0:
             raise ValueError("segment must contain at least one observation")
         if np.any(rows_array < 0) or np.any(rows_array >= ledger.row_count):
             raise IndexError("segment row out of bounds")
+        limit = self.spec.max_source_tokens if role in {"source", "context"} else self.spec.max_target_tokens
+        if limit > 0 and rows_array.size > limit:
+            rows_array = rows_array[-limit:] if role in {"source", "context"} else rows_array[:limit]
+        return rows_array
+
+    def encode_segment(self, ledger: ObservationLedger, rows: Sequence[int] | np.ndarray, *, role: str = "source") -> tuple[SegmentInputs, SegmentClock]:
+        rows_array = self.select_rows(ledger, rows, role=role)
         # Caller controls a segment's causal order, but the contract refuses
         # non-monotonic input instead of silently constructing a different one.
         times_np = np.asarray(ledger.arrays["frame_times"][rows_array], dtype=np.float64)
         if np.any(np.diff(times_np) < 0):
             raise ValueError("segment rows must be sorted by observation time")
+        ledger_unit = str(ledger.metadata.get("time_unit", self.spec.time_unit))
+        if ledger_unit != self.spec.time_unit:
+            raise ValueError(f"ledger time unit {ledger_unit!r} disagrees with tensor contract {self.spec.time_unit!r}")
         batch = ledger.model_batch(rows_array)
         app = torch.as_tensor(np.asarray(batch.appearance, dtype=np.float32), dtype=torch.float32).clone()
         boxes = torch.as_tensor(np.asarray(batch.bboxes_xyxy, dtype=np.float32), dtype=torch.float32).clone()
@@ -89,18 +108,24 @@ class TrajectoryTensorizer:
         bw = (x2 - x1).clamp_min(1e-6)
         bh = (y2 - y1).clamp_min(1e-6)
         geometry = torch.stack(((x1 + x2) / (2 * widths), (y1 + y2) / (2 * heights), torch.log(bw / widths), torch.log(bh / heights)), dim=-1)
-        raw_times = torch.as_tensor(times_np, dtype=torch.float32)
-        local = (raw_times - raw_times[-1]) / float(self.spec.time_scale)
+        # Do time subtraction in float64 before exposing a float32 model
+        # feature.  Absolute timestamps are routing metadata only.
+        raw_times64 = torch.as_tensor(times_np, dtype=torch.float64)
+        local = ((raw_times64 - raw_times64[-1]) / float(self.spec.time_scale)).to(torch.float32)
         valid = torch.ones((len(rows_array),), dtype=torch.bool)
-        return SegmentInputs(app, geometry, local, valid), SegmentClock(raw_times, raw_times[0], raw_times[-1], self.spec.time_unit, float(self.spec.time_scale))
+        return SegmentInputs(app, geometry, local, valid), SegmentClock(raw_times64, raw_times64[0], raw_times64[-1], self.spec.time_unit, float(self.spec.time_scale))
 
-    def build_prediction_query(self, source_clock: SegmentClock, target_clocks: Sequence[SegmentClock], target_valid: Tensor | None = None) -> PredictionQuery:
+    def build_prediction_query(self, source_clock: SegmentClock, target_clocks: Sequence[SegmentClock], target_valid: Tensor | None = None, *, mode: str = "forward_only") -> PredictionQuery:
         if not target_clocks:
             raise ValueError("prediction query needs at least one target clock")
+        if mode not in {"forward_only", "bidirectional_inpainting"}:
+            raise ValueError(f"unsupported prediction mode: {mode}")
         values = []
         for clock in target_clocks:
-            times = torch.as_tensor(clock.observation_times, dtype=torch.float32)
-            values.append((times - float(source_clock.last_time)) / float(source_clock.scale))
+            if clock.time_unit != source_clock.time_unit or float(clock.scale) != float(source_clock.scale):
+                raise ValueError("source and target clocks use incompatible time contracts")
+            times = torch.as_tensor(clock.observation_times, dtype=torch.float64)
+            values.append(((times - torch.as_tensor(source_clock.last_time, dtype=torch.float64)) / float(source_clock.scale)).to(torch.float32))
         length = max(int(item.numel()) for item in values)
         result = torch.zeros((len(values), length), dtype=torch.float32)
         valid = torch.zeros((len(values), length), dtype=torch.bool)
@@ -109,16 +134,16 @@ class TrajectoryTensorizer:
             valid[index, : value.numel()] = True
         if target_valid is not None:
             valid = valid & target_valid.bool()
-        return PredictionQuery(result, valid, "forward_only")
+        return PredictionQuery(result, valid, mode)
 
     def build_pair(self, source_ref: tuple[ObservationLedger, Sequence[int]], candidate_refs: Sequence[tuple[ObservationLedger, Sequence[int]]]) -> PairInputs:
         if not candidate_refs:
             raise ValueError("pair requires at least one candidate")
-        source, source_clock = self.encode_segment(*source_ref)
+        source, source_clock = self.encode_segment(*source_ref, role="source")
         candidates: list[SegmentInputs] = []
         clocks: list[SegmentClock] = []
         for ledger, rows in candidate_refs:
-            segment, clock = self.encode_segment(ledger, rows)
+            segment, clock = self.encode_segment(ledger, rows, role="target")
             candidates.append(segment)
             clocks.append(clock)
         max_len = max(int(item.appearance.shape[0]) for item in candidates)
@@ -136,6 +161,28 @@ class TrajectoryTensorizer:
         candidate_batch = SegmentInputs(app, geo, times, valid)
         query = self.build_prediction_query(source_clock, clocks)
         return PairInputs(source, candidate_batch, query, torch.ones((len(candidates),), dtype=torch.bool))
+
+    def build_inpainting_query(self, context_refs: Sequence[tuple[ObservationLedger, Sequence[int]]], heldout_ref: tuple[ObservationLedger, Sequence[int]]) -> PairInputs:
+        """Build the explicit bidirectional held-out query from absolute clocks."""
+        if len(context_refs) < 2:
+            raise ValueError("inpainting requires at least two context segments")
+        context_segments = [self.encode_segment(ledger, rows, role="context") for ledger, rows in context_refs]
+        heldout, held_clock = self.encode_segment(heldout_ref[0], heldout_ref[1], role="heldout")
+        appearance = torch.cat([item[0].appearance for item in context_segments], dim=0).unsqueeze(0)
+        geometry = torch.cat([item[0].geometry for item in context_segments], dim=0).unsqueeze(0)
+        local = torch.cat([item[0].local_time for item in context_segments], dim=0).unsqueeze(0)
+        valid = torch.cat([item[0].valid for item in context_segments], dim=0).unsqueeze(0)
+        source = SegmentInputs(appearance, geometry, local, valid)
+        target = SegmentInputs(heldout.appearance.unsqueeze(0), heldout.geometry.unsqueeze(0), heldout.local_time.unsqueeze(0), heldout.valid.unsqueeze(0))
+        source_clock = SegmentClock(
+            torch.cat([item[1].observation_times for item in context_segments]),
+            context_segments[0][1].first_time,
+            context_segments[-1][1].last_time,
+            context_segments[0][1].time_unit,
+            context_segments[0][1].scale,
+        )
+        query = self.build_prediction_query(source_clock, [held_clock], heldout.valid.unsqueeze(0), mode="bidirectional_inpainting")
+        return PairInputs(source, target, query, torch.ones((1,), dtype=torch.bool))
 
     def encode_graph_node(self, segment: SegmentInputs, clock: SegmentClock, graph_origin: float, transform_spec: TransformSpec | None = None) -> Tensor:
         spec = transform_spec or self.spec

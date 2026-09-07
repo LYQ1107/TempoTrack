@@ -36,6 +36,74 @@ class MemoryTargets:
     valid: Tensor | None = None
 
 
+def normalize_memory_targets(
+    targets: MemoryTargets,
+    *,
+    batch_size: int,
+    event_count: int,
+    candidate_count: int,
+) -> MemoryTargets:
+    """Normalize the shared-candidate M1 contract before any broadcasting.
+
+    Candidate labels commonly arrive as ``[B,K]`` while the controller emits
+    ``T`` event states.  Expansion is allowed only from axis length one; a
+    shorter non-singleton target is a data-contract error, never silently
+    padded with a negative label.
+    """
+    if event_count < 1 or candidate_count < 1:
+        raise ValueError("M1 normalization requires positive event/candidate axes")
+
+    future = targets.future_embedding
+    if future.ndim == 3:
+        future = future.unsqueeze(1)
+    if future.ndim != 4 or future.shape[0] != batch_size or future.shape[2] != candidate_count:
+        raise ValueError("future_embedding must be [B,T,K,D] after candidate construction")
+    if future.shape[1] == 1 and event_count > 1:
+        future = future.expand(-1, event_count, -1, -1)
+    elif future.shape[1] >= event_count:
+        future = future[:, :event_count]
+    else:
+        raise ValueError("future_embedding event axis is shorter than the real unroll")
+
+    def candidate_axis(value: Tensor, name: str) -> Tensor:
+        if value.ndim == 2:
+            value = value.unsqueeze(1)
+        if value.ndim != 3 or value.shape[0] != batch_size or value.shape[2] != candidate_count:
+            raise ValueError(f"{name} must be [B,T,K] or [B,K]")
+        if value.shape[1] == 1 and event_count > 1:
+            return value.expand(-1, event_count, -1)
+        if value.shape[1] >= event_count:
+            return value[:, :event_count]
+        raise ValueError(f"{name} event axis is shorter than the real unroll")
+
+    positive = candidate_axis(targets.positive_mask.bool(), "positive_mask")
+    known = candidate_axis(targets.candidate_known.bool(), "candidate_known")
+    if bool((positive & ~known).any()):
+        raise ValueError("M1 positive labels cannot be unknown")
+    reliability = targets.reliability
+    reliability_known = targets.reliability_known
+    if reliability is not None:
+        if reliability.ndim == 1:
+            reliability = reliability.unsqueeze(1)
+        if reliability.shape[0] != batch_size or reliability.shape[1] < event_count:
+            raise ValueError("reliability must cover the real event axis")
+        reliability = reliability[:, :event_count]
+    if reliability_known is not None:
+        if reliability_known.ndim == 1:
+            reliability_known = reliability_known.unsqueeze(1)
+        if reliability_known.shape[0] != batch_size or reliability_known.shape[1] < event_count:
+            raise ValueError("reliability_known must cover the real event axis")
+        reliability_known = reliability_known[:, :event_count].bool()
+    valid = targets.valid
+    if valid is not None:
+        if valid.ndim == 1:
+            valid = valid.unsqueeze(1)
+        if valid.shape[0] != batch_size or valid.shape[1] < event_count:
+            raise ValueError("M1 valid mask must cover the real event axis")
+        valid = valid[:, :event_count].bool()
+    return MemoryTargets(future, positive, known, reliability, reliability_known, valid)
+
+
 class MemoryTrainingTask(nn.Module):
     """Unroll a controller over an event chunk without per-event detach."""
 
@@ -119,46 +187,13 @@ class MemoryTrainingTask(nn.Module):
         fast = torch.stack(fast_values, dim=1)
         slow = torch.stack(slow_values, dim=1)
         rates = {name: torch.stack(values, dim=1) for name, values in rate_values.items()}
-        future = targets.future_embedding
-        positive = targets.positive_mask.bool()
-        known = targets.candidate_known.bool()
-        if future.ndim == 3:
-            future = future.unsqueeze(1)
-        if future.ndim != 4:
-            raise ValueError("future_embedding must be [B,T,K,D] or [B,K,D]")
-        if positive.ndim == 2:
-            positive = positive.unsqueeze(1)
-        if known.ndim == 2:
-            known = known.unsqueeze(1)
-        # A memory episode stores one candidate set for the complete causal
-        # event chunk.  The collator therefore legitimately returns labels as
-        # [B,K], while the candidate embeddings are padded per event as
-        # [B,T,K,D].  Expand the shared candidate labels over the real event
-        # axis before masking; merely unsqueezing them leaves [B,1,K] and
-        # rejects every multi-event M1 batch.  Keep the unroll contract
-        # explicit by slicing padded/longer target chunks to the states that
-        # were actually produced above.
         target_steps = int(fast.shape[1])
-        if future.shape[0] != batch or future.shape[1] < target_steps:
-            raise ValueError("future_embedding does not cover the M1 unroll")
-        if future.shape[1] == 1 and target_steps > 1:
-            future = future.expand(-1, target_steps, -1, -1)
-        else:
-            future = future[:, :target_steps]
-        for name, value in (("positive_mask", positive), ("candidate_known", known)):
-            if value.shape[0] != batch or value.shape[1] < target_steps:
-                raise ValueError(f"{name} does not cover the M1 unroll")
-            if value.shape[1] == 1 and target_steps > 1:
-                value = value.expand(-1, target_steps, -1)
-            else:
-                value = value[:, :target_steps]
-            if name == "positive_mask":
-                positive = value
-            else:
-                known = value
-        if positive.shape != known.shape or future.shape[:3] != positive.shape:
-            raise ValueError("M1 future candidate tensors have inconsistent shapes")
-        valid_steps = torch.ones((batch, fast.shape[1]), dtype=torch.bool, device=fast.device) if targets.valid is None else targets.valid[:, :fast.shape[1]].bool()
+        candidate_count = int(targets.future_embedding.shape[-2]) if targets.future_embedding.ndim >= 3 else 1
+        targets = normalize_memory_targets(targets, batch_size=batch, event_count=target_steps, candidate_count=candidate_count)
+        future = targets.future_embedding
+        positive = targets.positive_mask
+        known = targets.candidate_known
+        valid_steps = torch.ones((batch, target_steps), dtype=torch.bool, device=fast.device) if targets.valid is None else targets.valid
         if valid_steps.shape != fast.shape[:2]:
             raise ValueError("M1 valid event mask must be [B,T]")
         # Flatten time into independent retrieval queries, while the state is

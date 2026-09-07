@@ -11,6 +11,7 @@ import torch.nn.functional as F
 
 from .trajectory_encoder import TrajectoryEncoder
 from ..losses.regularization import vicreg_regularization
+from ..schemas import LinkEvidence, PairInputs
 
 
 def _masked_mean(value: Tensor, mask: Tensor | None = None) -> Tensor:
@@ -35,6 +36,74 @@ def _multi_positive_ce(scores: Tensor, positive: Tensor, known: Tensor) -> tuple
     denominator = torch.logsumexp(scores.masked_fill(~known, floor), dim=-1)
     numerator = torch.logsumexp(scores.masked_fill(~positive, floor), dim=-1)
     return (-(numerator - denominator)[valid]).mean(), valid.sum()
+
+
+def masked_link_objectives(score: Tensor, positive: Tensor, known: Tensor, candidate_valid: Tensor) -> dict[str, Tensor]:
+    """Compute the shared S1/ordinary candidate objectives with real masks."""
+    if score.ndim != 2:
+        raise ValueError("link scores must have shape [B,K]")
+    for name, value in (("positive", positive), ("known", known), ("candidate_valid", candidate_valid)):
+        if value.shape != score.shape:
+            raise ValueError(f"{name} must have shape {tuple(score.shape)}")
+    effective = known.bool() & candidate_valid.bool()
+    positive = positive.bool() & effective
+    zero = score.sum() * 0.0
+    if bool(effective.any()):
+        bce = F.binary_cross_entropy_with_logits(score[effective], positive.to(score.dtype)[effective])
+    else:
+        bce = zero
+    ce, ce_rows = _multi_positive_ce(score, positive, effective)
+    total = bce + ce
+    return {
+        "total": total,
+        "bce": bce,
+        "ce": ce,
+        "known_count": effective.sum().to(score.dtype),
+        "positive_count": positive.sum().to(score.dtype),
+        "positive_rows": ce_rows.to(score.dtype),
+    }
+
+
+def compute_link_evidence(
+    context: Mapping[str, Tensor],
+    predicted: Mapping[str, Tensor],
+    target: Mapping[str, Tensor],
+    inputs: Mapping[str, Tensor],
+    *,
+    temperature: float = 0.07,
+    dynamic_weight: float = 1.0,
+    anchor_weight: float = 0.1,
+) -> LinkEvidence:
+    """Single score formula used by formal loss and deployment."""
+    if temperature <= 0 or dynamic_weight < 0 or anchor_weight < 0:
+        raise ValueError("link score weights must be non-negative and temperature positive")
+    prediction_identity = F.normalize(predicted["identity"], dim=-1)
+    target_identity = F.normalize(target["identity"].detach(), dim=-1)
+    if prediction_identity.shape != target_identity.shape:
+        raise ValueError("predicted and target identity tensors disagree")
+    candidate_axis = prediction_identity.ndim == 3
+    if candidate_axis:
+        anchor = F.normalize(context["identity"], dim=-1).unsqueeze(1)
+    else:
+        anchor = F.normalize(context["identity"], dim=-1)
+    frozen_anchor = (anchor * target_identity).sum(-1)
+    prediction_identity_cosine = (prediction_identity * target_identity).sum(-1)
+    target_valid = inputs.get("target_valid")
+    query_valid = inputs.get("query_valid", target_valid)
+    if target_valid is None:
+        target_valid = torch.ones(predicted["dynamic"].shape[:-1], dtype=torch.bool, device=predicted["dynamic"].device)
+    if query_valid is None:
+        query_valid = target_valid
+    token_valid = target_valid.bool() & query_valid.bool()
+    dynamic_difference = F.smooth_l1_loss(predicted["dynamic"], target["dynamic"].detach(), reduction="none")
+    while token_valid.ndim < dynamic_difference.ndim:
+        token_valid = token_valid.unsqueeze(-1)
+    denominator = token_valid.to(dynamic_difference.dtype).sum(dim=tuple(range(-2, 0))).clamp_min(1.0)
+    dynamic_error = (dynamic_difference * token_valid.to(dynamic_difference.dtype)).sum(dim=tuple(range(-2, 0))) / denominator
+    valid = token_valid.squeeze(-1) if token_valid.ndim == predicted["dynamic"].ndim else token_valid
+    valid = valid.any(dim=-1) if valid.ndim == prediction_identity.ndim else valid
+    score = prediction_identity_cosine / float(temperature) - float(dynamic_weight) * dynamic_error + float(anchor_weight) * frozen_anchor
+    return LinkEvidence(score, prediction_identity, dynamic_error, frozen_anchor, valid.bool())
 
 
 class JEPAIdentityLinker(nn.Module):
@@ -116,6 +185,61 @@ class JEPAIdentityLinker(nn.Module):
         if geometry is None and hasattr(appearance, "appearance"):
             return self.target_encoder(appearance)
         return self.target_encoder(appearance, geometry, time_offsets, valid_mask)
+
+    @torch.no_grad()
+    def score_pair_inputs(self, inputs: PairInputs) -> LinkEvidence:
+        """Score the exact tensor contract used by training."""
+        source = inputs.source
+        candidates = inputs.candidates
+        source_app = source.appearance.unsqueeze(0) if source.appearance.ndim == 2 else source.appearance
+        source_geo = source.geometry.unsqueeze(0) if source.geometry.ndim == 2 else source.geometry
+        source_time = source.local_time.unsqueeze(0) if source.local_time.ndim == 1 else source.local_time
+        source_valid = source.valid.unsqueeze(0) if source.valid.ndim == 1 else source.valid
+        candidate_app = candidates.appearance
+        candidate_geo = candidates.geometry
+        candidate_time = candidates.local_time
+        candidate_valid_tokens = candidates.valid
+        if candidate_app.ndim == 3:
+            candidate_app = candidate_app.unsqueeze(0)
+            candidate_geo = candidate_geo.unsqueeze(0)
+            candidate_time = candidate_time.unsqueeze(0)
+            candidate_valid_tokens = candidate_valid_tokens.unsqueeze(0)
+        if candidate_app.ndim != 4:
+            raise ValueError("PairInputs candidates must be [B,K,L,D]")
+        batch, candidate_count, length, dim = candidate_app.shape
+        if source_app.shape[0] != batch:
+            if source_app.shape[0] == 1:
+                source_app = source_app.expand(batch, -1, -1)
+                source_geo = source_geo.expand(batch, -1, -1)
+                source_time = source_time.expand(batch, -1)
+                source_valid = source_valid.expand(batch, -1)
+            else:
+                raise ValueError("PairInputs source/candidate batch mismatch")
+        context = self.encode_context(source_app, source_geo, source_time, source_valid)
+        flat_target = self.encode_target(
+            candidate_app.reshape(batch * candidate_count, length, dim),
+            candidate_geo.reshape(batch * candidate_count, length, candidate_geo.shape[-1]),
+            candidate_time.reshape(batch * candidate_count, length),
+            candidate_valid_tokens.reshape(batch * candidate_count, length),
+        )
+        target = {key: value.reshape(batch, candidate_count, *value.shape[1:]) for key, value in flat_target.items() if torch.is_tensor(value)}
+        query = inputs.query.relative_times if inputs.query is not None else candidate_time
+        query_valid = inputs.query.valid if inputs.query is not None else candidate_valid_tokens
+        if query.ndim == 2:
+            query = query.unsqueeze(0)
+        if query_valid is not None and query_valid.ndim == 2:
+            query_valid = query_valid.unsqueeze(0)
+        predicted = self.predict(context, query, query_valid=query_valid)
+        evidence = compute_link_evidence(context, predicted, target, {"target_valid": candidate_valid_tokens, "query_valid": query_valid})
+        candidate_valid = inputs.candidate_valid
+        if candidate_valid is None:
+            candidate_valid = torch.ones((batch, candidate_count), dtype=torch.bool, device=source_app.device)
+        else:
+            candidate_valid = torch.as_tensor(candidate_valid, dtype=torch.bool, device=source_app.device)
+            if candidate_valid.ndim == 1:
+                candidate_valid = candidate_valid.unsqueeze(0).expand(batch, -1)
+        evidence.valid = evidence.valid & candidate_valid
+        return evidence
 
     @staticmethod
     def _query_tensor(query: Any) -> Tensor:
@@ -287,20 +411,22 @@ class JEPAIdentityLinker(nn.Module):
         predicted = self.predict(context, query, query_valid=query_valid)
         target_dynamic = target["dynamic"]
         if candidate_axis:
-            valid = episode.get("query_valid", episode.get("target_valid")).bool()
-            target_token_valid = episode.get("target_valid", valid).bool()
-            valid = valid & target_token_valid
+            target_token_valid = episode.get("target_valid", torch.ones_like(predicted["valid"])).bool()
+            query_token_valid = episode.get("query_valid", target_token_valid).bool()
             positive_mask = episode.get("positive_mask", episode.get("positive")).bool()
             known_mask = episode.get("candidate_known", torch.ones_like(positive_mask)).bool()
+            candidate_valid = episode.get("candidate_valid", torch.ones_like(positive_mask)).bool()
             if positive_mask.shape != known_mask.shape or positive_mask.shape != predicted["identity"].shape[:2]:
                 raise ValueError("S1 candidate masks do not match predicted candidate axis")
-            dynamic_valid = valid & positive_mask.unsqueeze(-1)
+            evidence = compute_link_evidence(context, predicted, target, {"target_valid": target_token_valid, "query_valid": query_token_valid})
+            dynamic_valid = target_token_valid & query_token_valid & positive_mask.unsqueeze(-1)
         else:
-            valid = episode.get("target_valid", target["valid"]).bool()
-            positive_mask = labels.get("positive", episode.get("positive", torch.ones(valid.shape[0], dtype=torch.bool, device=valid.device))).bool()
-            while positive_mask.ndim < valid.ndim:
+            target_token_valid = episode.get("target_valid", target["valid"]).bool()
+            positive_mask = labels.get("positive", episode.get("positive", torch.ones(target_token_valid.shape[0], dtype=torch.bool, device=target_token_valid.device))).bool()
+            while positive_mask.ndim < target_token_valid.ndim:
                 positive_mask = positive_mask.unsqueeze(-1)
-            dynamic_valid = valid & positive_mask
+            evidence = compute_link_evidence(context, predicted, target, {"target_valid": target_token_valid, "query_valid": target_token_valid})
+            dynamic_valid = target_token_valid & positive_mask
         if predicted["dynamic"].shape != target_dynamic.shape:
             raise ValueError("S1 prediction and target dynamic shapes disagree")
         if bool(dynamic_valid.any()):
@@ -310,36 +436,16 @@ class JEPAIdentityLinker(nn.Module):
         else:
             prediction_loss = context["summary"].new_zeros(())
 
-        # A single target is represented as K=1; candidate episodes may pass
-        # precomputed candidate identity tensors for a genuine multi-positive
-        # objective.  The target branch never feeds the predictor.
         if candidate_axis:
-            target_identity = F.normalize(target["identity"].detach(), dim=-1)
-            # ``predict`` preserves the candidate axis: [B,K,H].  Score each
-            # predicted candidate against its independent EMA target.  The
-            # previous singleton insertion produced [B,1,K] logits, which
-            # bypassed the intended [B,K] candidate-mask contract and made
-            # the real S1 identity head untrainable on candidate episodes.
-            if predicted["identity"].shape != target_identity.shape:
-                raise ValueError("S1 candidate identity prediction/target shapes disagree")
-            scores = (predicted["identity"] * target_identity).sum(-1) / 0.07
-            identity_loss, identity_count = _multi_positive_ce(scores, positive_mask, known_mask)
+            objectives = masked_link_objectives(evidence.score, positive_mask, known_mask, candidate_valid)
+            identity_loss = objectives["total"]
+            identity_count = objectives["known_count"]
         else:
-            target_identity = target["identity"].detach()
-            # This is the S1 prediction head's supervised identity objective:
-            # the predicted identity (not the source anchor) is matched to the
-            # independent EMA target branch.  Negative known candidates use
-            # the same target branch and therefore cannot be hidden by an
-            # anchor-only metric loss.
-            similarity = (predicted["identity"] * target_identity).sum(-1) / 0.07
-            same = episode.get("same_identity", positive_mask.squeeze(-1)).to(similarity.dtype)
-            known = episode.get("candidate_known", torch.ones_like(same, dtype=torch.bool)).bool()
-            if bool(known.any()):
-                identity_loss = F.binary_cross_entropy_with_logits(similarity[known], same[known])
-                identity_count = known.sum()
-            else:
-                identity_loss = similarity.new_zeros(())
-                identity_count = similarity.new_zeros((), dtype=torch.long)
+            same = episode.get("same_identity", episode.get("positive", torch.ones_like(evidence.score))).bool().reshape(-1, 1)
+            known = episode.get("candidate_known", torch.ones_like(same)).bool().reshape(-1, 1)
+            objectives = masked_link_objectives(evidence.score.reshape(-1, 1), same, known, torch.ones_like(known))
+            identity_loss = objectives["total"]
+            identity_count = objectives["known_count"]
         regularization, reg_metrics = self._representation_regularization(context)
         total = (
             self.loss_weights["prediction"] * prediction_loss
@@ -351,6 +457,9 @@ class JEPAIdentityLinker(nn.Module):
             "prediction": prediction_loss.detach(),
             "identity": identity_loss.detach(),
             "identity_queries": identity_count.detach(),
+            "link_bce": objectives["bce"].detach(),
+            "link_ce": objectives["ce"].detach(),
+            "link_known_count": objectives["known_count"].detach(),
             **reg_metrics,
             "dynamic_valid_count": dynamic_valid.sum().detach(),
             "prediction_weight": context["summary"].new_tensor(self.loss_weights["prediction"]),
@@ -408,56 +517,52 @@ class JEPAIdentityLinker(nn.Module):
         ra, rg, rt = self._tracklet_inputs(right, device)
         lc = self.encode_context(la, lg, lt)
         target = self.encode_target(ra, rg, rt)
-        query = (rt - lt[:, -1:])
+        left_absolute = torch.as_tensor(left.get("absolute_times", left.get("frames")), dtype=torch.float64, device=device).reshape(-1)
+        right_absolute = torch.as_tensor(right.get("absolute_times", right.get("frames")), dtype=torch.float64, device=device).reshape(-1)
+        query = (right_absolute - left_absolute[-1]).to(torch.float32).unsqueeze(0)
         predicted = self.predict(lc, query)
-        forward_error = F.smooth_l1_loss(predicted["dynamic"], target["dynamic"], reduction="mean")
-        anchor_similarity = (lc["identity"] * target["identity"]).sum(-1).mean()
-        error = forward_error
+        evidence = compute_link_evidence(lc, predicted, target, {"target_valid": torch.ones_like(query, dtype=torch.bool), "query_valid": torch.ones_like(query, dtype=torch.bool)})
+        error = evidence.dynamic_error.mean()
         if mode == "bidirectional_inpainting":
             rc = self.encode_context(ra, rg, rt)
             back_target = self.encode_target(la, lg, lt)
-            reverse = self.predict(rc, (lt - rt[:, -1:]))
-            reverse_error = F.smooth_l1_loss(reverse["dynamic"], back_target["dynamic"], reduction="mean")
-            error = 0.5 * (forward_error + reverse_error)
+            reverse_query = (left_absolute - right_absolute[-1]).to(torch.float32).unsqueeze(0)
+            reverse = self.predict(rc, reverse_query)
+            reverse_evidence = compute_link_evidence(rc, reverse, back_target, {"target_valid": torch.ones_like(reverse_query, dtype=torch.bool), "query_valid": torch.ones_like(reverse_query, dtype=torch.bool)})
+            reverse_error = reverse_evidence.dynamic_error.mean()
+            error = 0.5 * (error + reverse_error)
         return {
-            "edge_score": -error + 0.1 * anchor_similarity,
+            "edge_score": evidence.score.reshape(-1).mean(),
             "prediction_error": error,
-            "anchor_similarity": anchor_similarity,
+            "anchor_similarity": evidence.frozen_anchor.reshape(-1).mean(),
+            "predicted_identity": evidence.prediction_identity,
         }
 
     @torch.no_grad()
-    def score_candidates(self, tracklets: Sequence[Mapping[str, Any]], candidate_graph: Any, generator: torch.Generator | None = None, mode: str = "forward_only") -> Tensor:
+    def score_candidates(self, tracklets: Sequence[Mapping[str, Any]], candidate_graph: Any, generator: torch.Generator | None = None, mode: str = "forward_only", *, ledger: Any | None = None, tensorizer: Any | None = None, edge_batch_size: int = 64) -> Tensor:
         del generator
+        if mode not in {"forward_only", "bidirectional_inpainting"}:
+            raise ValueError("mode must be forward_only or bidirectional_inpainting")
         edge_index = candidate_graph.edge_index if hasattr(candidate_graph, "edge_index") else candidate_graph["edge_index"]
         edge_index = edge_index.detach().cpu() if torch.is_tensor(edge_index) else torch.as_tensor(edge_index)
         if edge_index.numel() == 0:
             return torch.empty(0, device=next(self.parameters()).device)
-        # Encode every unique segment once.  Scoring remains deterministic and
-        # does not launch a separate model path for every edge.
-        cache: dict[int, tuple[dict[str, Tensor], dict[str, Tensor], Tensor, Tensor, Tensor]] = {}
-        for node in sorted(set(int(value) for value in edge_index.flatten().tolist())):
-            appearance, geometry, times = self._tracklet_inputs(tracklets[node], next(self.parameters()).device)
-            cache[node] = (
-                self.encode_context(appearance, geometry, times),
-                self.encode_target(appearance, geometry, times),
-                appearance,
-                geometry,
-                times,
-            )
-        values = []
+        values: list[Tensor] = []
+        if ledger is not None and tensorizer is not None:
+            # This is the production path: candidate tensorization and query
+            # construction both come from the shared absolute-clock factory.
+            for start in range(0, edge_index.shape[1], max(1, int(edge_batch_size))):
+                batch_inputs: list[PairInputs] = []
+                for source, target in edge_index[:, start : start + max(1, int(edge_batch_size))].t().tolist():
+                    batch_inputs.append(tensorizer.build_pair((ledger, tracklets[int(source)]["rows"]), [(ledger, tracklets[int(target)]["rows"]) ]))
+                for pair in batch_inputs:
+                    values.append(self.score_pair_inputs(pair).score.reshape(-1)[0])
+            return torch.stack(values).to(next(self.parameters()).device)
+        # Compatibility path for callers that only have routed tracklet views.
+        # It still calls the real predictor and computes each pair's absolute
+        # query independently; no pair-gap output is cached across edges.
         for source, target in edge_index.t().tolist():
-            left_context, _, _, _, left_times = cache[int(source)]
-            right_context, right_target, _, _, right_times = cache[int(target)]
-            predicted = self.predict(left_context, right_times - left_times[:, -1:])
-            forward_error = F.smooth_l1_loss(predicted["dynamic"], right_target["dynamic"], reduction="mean")
-            anchor_similarity = (left_context["identity"] * right_target["identity"]).sum(-1).mean()
-            error = forward_error
-            if mode == "bidirectional_inpainting":
-                _, left_target, _, _, _ = cache[int(source)]
-                reverse = self.predict(right_context, left_times - right_times[:, -1:])
-                reverse_error = F.smooth_l1_loss(reverse["dynamic"], left_target["dynamic"], reduction="mean")
-                error = 0.5 * (forward_error + reverse_error)
-            values.append(-error + 0.1 * anchor_similarity)
+            values.append(self.score_link(tracklets[int(source)], tracklets[int(target)], mode=mode)["edge_score"].reshape(-1).mean())
         return torch.stack(values)
 
     @torch.no_grad()
@@ -472,9 +577,14 @@ class JEPAIdentityLinker(nn.Module):
         # Keep the original segment time origin; query times are never reset
         # independently for the held-out segment.
         times = torch.cat([part[2] for part in context_parts], dim=1)
+        context_absolute = torch.cat([
+            torch.as_tensor(item.get("absolute_times", item.get("frames")), dtype=torch.float64, device=device).reshape(1, -1)
+            for item in context_segments
+        ], dim=1)
+        held_absolute = torch.as_tensor(heldout_segment.get("absolute_times", heldout_segment.get("frames")), dtype=torch.float64, device=device).reshape(1, -1)
         context = self.encode_context(appearance, geometry, times)
         target = self.encode_target(held_app, held_geo, held_time)
-        predicted = self.predict(context, held_time - times[:, -1:])
+        predicted = self.predict(context, (held_absolute - context_absolute[:, -1:]).to(torch.float32))
         error = F.smooth_l1_loss(predicted["dynamic"], target["dynamic"], reduction="mean")
         return {"heldout": heldout_segment, "mode": mode, "error": error, "edge_score": -error, "context_count": len(context_segments)}
 

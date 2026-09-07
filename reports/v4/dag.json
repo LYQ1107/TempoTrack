@@ -1,0 +1,5518 @@
+{
+  "jobs": [
+    {
+      "artifacts": [
+        {
+          "kind": "prepared_manifest.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/v4.prepare.fixed_observation/prepared_manifest.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "v4.prepare.fixed_observation",
+      "method": "prepare",
+      "phase": "prepare",
+      "run_dir": "",
+      "run_signature": "b9171d37d395b53fcea1892259c57b1e527827cc78129fe87da3ec1f20c73eb7",
+      "scheme": "shared",
+      "seed": 0,
+      "stage": "prepare",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "replay_manifest.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/v4.replay.m0.fixed_dual/replay_manifest.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "v4.prepare.fixed_observation"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "v4.replay.m0.fixed_dual",
+      "method": "replay",
+      "phase": "replay",
+      "run_dir": "",
+      "run_signature": "48207d155bd6cc87592f077414669e001548d78739973281659e24e34a2a05d3",
+      "scheme": "m0",
+      "seed": 0,
+      "stage": "replay",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_memory.trial.train.seed0",
+      "method": "predictive_dual",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "ece4c93da01031e32492cfa4e3243c5674b6b56b016ed4c52118687bf12c096b",
+      "scheme": "m1_memory",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "replay_manifest.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.trial.replay.seed0/replay_manifest.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_memory.trial.replay.seed0",
+      "method": "predictive_dual",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "ec7920652e024c17426e423010e09d9725a2882c767088623655132d600c4738",
+      "scheme": "m1_memory",
+      "seed": 0,
+      "stage": "replay",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_memory.full.train.seed0",
+      "method": "predictive_dual",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "8c4a34b91227fcf389fcaff318e8563fd2dc3d3e8aa2d6d61ac958ff1ee1be0b",
+      "scheme": "m1_memory",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "replay_manifest.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.replay.seed0/replay_manifest.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_memory.full.replay.seed0",
+      "method": "predictive_dual",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "cf7eab3f278743e744f4b1c2e1ef348790886e0c665a989c916d0ba3016797b4",
+      "scheme": "m1_memory",
+      "seed": 0,
+      "stage": "replay",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_memory.full.train.seed1",
+      "method": "predictive_dual",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "438cb49118396be15df720bfe0ca6f2383bb6b4f8e0034cdbc7f047ff3c46418",
+      "scheme": "m1_memory",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "replay_manifest.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.replay.seed1/replay_manifest.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_memory.full.replay.seed1",
+      "method": "predictive_dual",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "4d93a176851865fbcd224a0954518508d4365dafb5b6ee2a64e41fc411fbbed6",
+      "scheme": "m1_memory",
+      "seed": 1,
+      "stage": "replay",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_memory.full.train.seed2",
+      "method": "predictive_dual",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "5f0375629c9a86d388af724c0026095a13e49f15197a7abde9c762e7632958de",
+      "scheme": "m1_memory",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "replay_manifest.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_memory.full.replay.seed2/replay_manifest.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_memory.full.replay.seed2",
+      "method": "predictive_dual",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "98e407ac9717ffd2819900c45579d63b08631b931d5a180a98cf0d9cbdf65a62",
+      "scheme": "m1_memory",
+      "seed": 2,
+      "stage": "replay",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_no_offline.trial.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_no_offline.trial.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_no_offline.trial.infer_eval.seed0",
+      "method": "no_offline",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "893ec4a475b4d0ccc276c4a7ce37173268d8f9959a428ad464cfe3d361f93011",
+      "scheme": "m0_no_offline",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_no_offline.full.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_no_offline.full.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_no_offline.trial.infer_eval.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_no_offline.full.infer_eval.seed0",
+      "method": "no_offline",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "222a0e85854c1ab20bfcea3680db6146f192e689354d6127e25a5b2a2ad252a9",
+      "scheme": "m0_no_offline",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_stable_emd.trial.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_stable_emd.trial.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_stable_emd.trial.infer_eval.seed0",
+      "method": "stable_emd",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "3ab851ff14929e5dc5b149480e8348becba33a37e947e339b92243ac2d0d5dd0",
+      "scheme": "m0_stable_emd",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_stable_emd.full.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_stable_emd.full.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_stable_emd.trial.infer_eval.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_stable_emd.full.infer_eval.seed0",
+      "method": "stable_emd",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2f6e19ff6bf8a28afb1a007b89c54fc176d1b0646ab6620c170a032d2d22d9ba",
+      "scheme": "m0_stable_emd",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.trial.train.seed0",
+      "method": "ordinary_metric",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "c6751e72a1763c8c6085ad485dfae17f21d6d2806a06e6f1656ad8daf5721607",
+      "scheme": "m0_ordinary_metric",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_ordinary_metric.trial.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.trial.infer.seed0",
+      "method": "ordinary_metric",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "03ae4d0a7582cd8e1e7ea8f14d870aadd143255ca4988395c73f9897654f1a83",
+      "scheme": "m0_ordinary_metric",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_ordinary_metric.trial.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_ordinary_metric.trial.evaluate.seed0",
+      "method": "ordinary_metric",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "1c306d5d9f86640c5ffee43de1b5392f0804a6daa2d96aa5f7f14cf11a3a7ad7",
+      "scheme": "m0_ordinary_metric",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_ordinary_metric.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.full.train.seed0",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "99450a52457da41b3525f632322854006144d17fc92360566ceeed44b9e8b7f5",
+      "scheme": "m0_ordinary_metric",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_ordinary_metric.full.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.full.infer.seed0",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "dfd5a7f1a48a685a39138c34a35039347ab4a28092cd7cbf616250808cfb11ac",
+      "scheme": "m0_ordinary_metric",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_ordinary_metric.full.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_ordinary_metric.full.evaluate.seed0",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "03ba379b1c383d39075bc5658a92bd2169cb4d1a14be716fb6a065d8b9166df7",
+      "scheme": "m0_ordinary_metric",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_ordinary_metric.trial.evaluate.seed0",
+        "m0_ordinary_metric.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.full.train.seed1",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "16664dcee91c89439815a3bbd0a5280b2a0fe26eacef5ae0e05812f7c1931e1a",
+      "scheme": "m0_ordinary_metric",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_ordinary_metric.full.train.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.full.infer.seed1",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2a3505de7a43df6d86d29adcfa82b9854ed1bd591541952a2bc7580a328d0ba5",
+      "scheme": "m0_ordinary_metric",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_ordinary_metric.full.infer.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_ordinary_metric.full.evaluate.seed1",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "f72d80ae60ed299b945da08ba82c2152f0424712295b03dffc1cb0f2255533d7",
+      "scheme": "m0_ordinary_metric",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_ordinary_metric.trial.evaluate.seed0",
+        "m0_ordinary_metric.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.full.train.seed2",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "fd029e2b466665f04a91e309b78b7983d18c0a1bb2ab5646c4f8a59e127db781",
+      "scheme": "m0_ordinary_metric",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_ordinary_metric.full.train.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_ordinary_metric.full.infer.seed2",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "52cb08c512408f1b451df4d147b08d4e5453cf680f3eb59598f8b537377c0071",
+      "scheme": "m0_ordinary_metric",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_ordinary_metric.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_ordinary_metric.full.infer.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_ordinary_metric.full.evaluate.seed2",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "354d8054c3ef9bff88abc510a83bdfa57f9fb2b1147eafa8009e5b9307b42e93",
+      "scheme": "m0_ordinary_metric",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.trial.train.seed0",
+      "method": "s1_jepa",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "0b953aa3f2c9c1f59c9b82dc0f3684a7af847f946dd0a757a896b7bd2e798298",
+      "scheme": "m0_s1_jepa",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s1_jepa.trial.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.trial.infer.seed0",
+      "method": "s1_jepa",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "f6eea7df0aedd57374e28b1da9836c0111c68671ce8497ea5c9a30f4583dbae8",
+      "scheme": "m0_s1_jepa",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s1_jepa.trial.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s1_jepa.trial.evaluate.seed0",
+      "method": "s1_jepa",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "7ecf95f6cc8c0b0ba56fd552333fe2258eb7372b741485c68ae3fc641ce4c533",
+      "scheme": "m0_s1_jepa",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s1_jepa.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.full.train.seed0",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "5ddc4384f266bec161b9f0f91fda9aba2694c136c083cfa3666f3d64a57a198d",
+      "scheme": "m0_s1_jepa",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s1_jepa.full.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.full.infer.seed0",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "5125b9537b494084efc958dac89b01b1c38d4d774dbe9c4e72bec7b8aa914563",
+      "scheme": "m0_s1_jepa",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s1_jepa.full.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s1_jepa.full.evaluate.seed0",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "0764afd9fea381b851c05672a0bd3498409655589a806b301bb465602bbb2835",
+      "scheme": "m0_s1_jepa",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s1_jepa.trial.evaluate.seed0",
+        "m0_s1_jepa.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.full.train.seed1",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "16d7cd581209b03b5f6beeb3215feb99376f538ca5f56341048d08e874a1da1c",
+      "scheme": "m0_s1_jepa",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s1_jepa.full.train.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.full.infer.seed1",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "aa1974bee86da6b7a7be2a0af432655b9935feebf41e4a97dd330f4b5681c8b5",
+      "scheme": "m0_s1_jepa",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s1_jepa.full.infer.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s1_jepa.full.evaluate.seed1",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "894ecdc2ae4946e536a45e883896b18efc10efd0d5dafd6d702d128ec194f94f",
+      "scheme": "m0_s1_jepa",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s1_jepa.trial.evaluate.seed0",
+        "m0_s1_jepa.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.full.train.seed2",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "4a04e574cb8370397beffa8e3bf55967761437baa6b82b37b72f837570a83a3f",
+      "scheme": "m0_s1_jepa",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s1_jepa.full.train.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s1_jepa.full.infer.seed2",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "8a150ac92543b31d5979f7fdb3e7911080b8f34ed362d2f860d1b1780ef1a6b4",
+      "scheme": "m0_s1_jepa",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s1_jepa.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s1_jepa.full.infer.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s1_jepa.full.evaluate.seed2",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "ea6ed8d30bf3ae17d3f3b92a3feea84ef1e53e8371226c0e20dd86be28d1537d",
+      "scheme": "m0_s1_jepa",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.trial.train.seed0",
+      "method": "s2_state_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "5518714e14557c4e86dc605b723ccf6e468bbb28ddeb229c4d63b841cabadc7d",
+      "scheme": "m0_s2_state_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s2_state_fm.trial.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.trial.infer.seed0",
+      "method": "s2_state_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "9615ec7db4d1002703e2b8a7f1c16f62edc953839c1d491b416e8135ecfd8182",
+      "scheme": "m0_s2_state_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s2_state_fm.trial.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s2_state_fm.trial.evaluate.seed0",
+      "method": "s2_state_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "456845c066ab4da3d6e204be48cffc05db4f7a022e906a6f20a4cfad2c9bdc21",
+      "scheme": "m0_s2_state_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s2_state_fm.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.full.train.seed0",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "0dabc42d168be38e84d9c67fd1478d2b3ee88fe673ec39c31a3f808bc652894f",
+      "scheme": "m0_s2_state_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s2_state_fm.full.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.full.infer.seed0",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "337abd661196198d6572140cafb9731c194ffa7fab2e351c84626e237b2dab2d",
+      "scheme": "m0_s2_state_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s2_state_fm.full.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s2_state_fm.full.evaluate.seed0",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "79e7ef2a7a161363c716828dff2cbe85e80294deb81466ade6b98e25270a6550",
+      "scheme": "m0_s2_state_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s2_state_fm.trial.evaluate.seed0",
+        "m0_s2_state_fm.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.full.train.seed1",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "d3135297019bc2402cd3b928d95215168fa15420339c7f6cf0b346351e60ac29",
+      "scheme": "m0_s2_state_fm",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s2_state_fm.full.train.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.full.infer.seed1",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "10a18588bf9b89597587f97c901561973696f85b3f48eae6c613c36faaf42931",
+      "scheme": "m0_s2_state_fm",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s2_state_fm.full.infer.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s2_state_fm.full.evaluate.seed1",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "e79f607bd029ba2b91fed9e6e975eb0cb94c0a9847cd931db86f8a6e6e429be5",
+      "scheme": "m0_s2_state_fm",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s2_state_fm.trial.evaluate.seed0",
+        "m0_s2_state_fm.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.full.train.seed2",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "f504a5966fe91dd1d3691757f128deb6ea66da9bf34ac6c0818b70ca49cc8be6",
+      "scheme": "m0_s2_state_fm",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s2_state_fm.full.train.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s2_state_fm.full.infer.seed2",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "b81393fdec5d144088df6c4d2179ab32e03d7869d6ca4852dc17bef7268c3491",
+      "scheme": "m0_s2_state_fm",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s2_state_fm.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s2_state_fm.full.infer.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s2_state_fm.full.evaluate.seed2",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "c0798362e378efc02bbbd0e62c5b1be0e2de03c2ccaa485fae9ea1eef3ce2fd7",
+      "scheme": "m0_s2_state_fm",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.trial.train.seed0",
+      "method": "s3_graph_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "baf3ee9d22f89f465c1d6d680878eb3f7f467ee8e449a3431ca5c048a3e8b4e2",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s3_graph_fm.trial.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.trial.infer.seed0",
+      "method": "s3_graph_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "643565ac6f2d6044a2295e535c8f41cbc3b4030a93d14a93f8d54c3070f4c0d8",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s3_graph_fm.trial.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s3_graph_fm.trial.evaluate.seed0",
+      "method": "s3_graph_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "015037b9fd010978ad3e324eaef8f9be48e8638c535b67cc2d2ad19489cd866b",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s3_graph_fm.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.full.train.seed0",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "0ff53d4278d9c931ecb67eda48476daac91870ac91d61caf0974dd8b810c267e",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s3_graph_fm.full.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.full.infer.seed0",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "61b6fe66aa4a3f57fe240c97444c7b4d831a8ccf36224bc4b2bf331f4e3fc4b1",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s3_graph_fm.full.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s3_graph_fm.full.evaluate.seed0",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "095ebbe3676d8ea8ab5c9e2cae6594824c8c877ffb8813f6cb2cb020f8dec281",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s3_graph_fm.trial.evaluate.seed0",
+        "m0_s3_graph_fm.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.full.train.seed1",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2eacee074a6d8f38fa4fad09f9c96fa1a4ff038000353443c23eb13deb073777",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s3_graph_fm.full.train.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.full.infer.seed1",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "6ba9493d851b2bcc26024b2b0b54332ac9fba8b9755bbb5ad131c8acc6cff382",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s3_graph_fm.full.infer.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s3_graph_fm.full.evaluate.seed1",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "d1f77830bc348ad69c5c768b3b3a262fa02e085f70403591720f9a0b7f0b8108",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s3_graph_fm.trial.evaluate.seed0",
+        "m0_s3_graph_fm.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.full.train.seed2",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "352182a5f04a22c50b26583696c29e7b8f2b9916080588a7d6f3fd7f49087eae",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s3_graph_fm.full.train.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s3_graph_fm.full.infer.seed2",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "4439bda9e0fd0b6433bef935fa7933dc944935a45d4a813aefcf4e8adf44cbe5",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s3_graph_fm.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s3_graph_fm.full.infer.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s3_graph_fm.full.evaluate.seed2",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "bd75e5dd509ba41199652396e7f75ae46d7a1a518e561bdd1ef98b3715a96370",
+      "scheme": "m0_s3_graph_fm",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.trial.train.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "5ddb9f6115f586fcc16454b84e9e3cd1cf19ec9ab7d1bf812fd61b1f3f816a91",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s4_graph_diffusion.trial.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.trial.infer.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "0a1cd132c34e1b1952b0b25ea12c8320a339b729c2f37dddb114bf183e090440",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s4_graph_diffusion.trial.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s4_graph_diffusion.trial.evaluate.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "c24ab6998687e54ca66ddb9ff39548dcc1d8f6e6135e49e3a7f1ad93562c7225",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s4_graph_diffusion.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.full.train.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "a8d7728b9e9346c2494830fd6bb49afb8bfa8722d594536c9a86e44c00b1b7f2",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s4_graph_diffusion.full.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.full.infer.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "17a6aca670d579485e88a44f110e8a017196f24e7556e1f1c42cb3df415e914f",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s4_graph_diffusion.full.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s4_graph_diffusion.full.evaluate.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "940d4ffa3b0152bdcb12429573fcd7531571a8aa07c3bd1644a123a75937b6f0",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s4_graph_diffusion.trial.evaluate.seed0",
+        "m0_s4_graph_diffusion.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.full.train.seed1",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "f387746efb20e6308fde3821b9646449a1f2dbb6febe7ae66402130b6f9f6bd3",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s4_graph_diffusion.full.train.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.full.infer.seed1",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "781d9b79453d2aac41c65d818e346fa69e16a1a08468535be27cc421ee05aec4",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s4_graph_diffusion.full.infer.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s4_graph_diffusion.full.evaluate.seed1",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "5f3d2fb97f33f27aee7e5a18c7efe9b4ff580569ea14cea00ec29e510b0e66f2",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s4_graph_diffusion.trial.evaluate.seed0",
+        "m0_s4_graph_diffusion.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.full.train.seed2",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "9fb613520ba3f7c47f4df753cc1e0230bf4eefbd8417ecfbed9225762473795b",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s4_graph_diffusion.full.train.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s4_graph_diffusion.full.infer.seed2",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "c170fba9d7d1d13dc6d66f07d3e8b584c0151e2693ae45b2f0c64d6e51476a8e",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s4_graph_diffusion.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s4_graph_diffusion.full.infer.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s4_graph_diffusion.full.evaluate.seed2",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "b5753556301b8721a0d566d543eb5e7321f50a35788264a03c7e79ee067b8dc3",
+      "scheme": "m0_s4_graph_diffusion",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.trial.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "6766b7ebaa24c63b9379490a2930fa90231dcee27820b8333faf3b0825090b8e",
+      "scheme": "m0_s5_bc",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_bc.trial.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.trial.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "83cbb3830fdfcf854a3d141e5166b70ee0f6cc905ad09cd715818c9ede676fda",
+      "scheme": "m0_s5_bc",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_bc.trial.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_bc.trial.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "8f04054ff78915ef7194cbb20e87bcb00a6c2e91fc1a643d8357ac850ce23326",
+      "scheme": "m0_s5_bc",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s5_bc.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.full.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "a78151453f5c610251ff58d30e4b402e2506de4e45e9e06702b40f387eb3ce11",
+      "scheme": "m0_s5_bc",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_bc.full.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.full.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "9a7f8d1c596cd13de433bee38748b123aab2824ca0f1629f344889e5d39e22bd",
+      "scheme": "m0_s5_bc",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_bc.full.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_bc.full.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "c31f2da9da37f985453907157e94072bc759dff4d0b0350b9d156e3aa8475c55",
+      "scheme": "m0_s5_bc",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s5_bc.trial.evaluate.seed0",
+        "m0_s5_bc.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.full.train.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "0f7be3cffe376f9c313d255a4c8adbcfd0f1ee955ac78a0d547a7e1a8d0776a6",
+      "scheme": "m0_s5_bc",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_bc.full.train.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.full.infer.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "e4c7c95b274a4274047e707bef49144b803409fbb8df5dd7a3f67b94be4dcb86",
+      "scheme": "m0_s5_bc",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_bc.full.infer.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_bc.full.evaluate.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "47fdbd606ce19eae7c37e02fac462dfa4d9baeb5b4d243ffca9661925932838b",
+      "scheme": "m0_s5_bc",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s5_bc.trial.evaluate.seed0",
+        "m0_s5_bc.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.full.train.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "8af1e3a2deee1fe07b8036c5562d6482865793d445d431367844761ef9184f91",
+      "scheme": "m0_s5_bc",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_bc.full.train.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_bc.full.infer.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "13dba01c0e77ccb03b091ffbd76f3cb6b269bed4c166bbfb10f34949b9c3896a",
+      "scheme": "m0_s5_bc",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_bc.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_bc.full.infer.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_bc.full.evaluate.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2d344df19eb8b4a912aef103a75bb1a4161574340948c43756c2dfab556f63ac",
+      "scheme": "m0_s5_bc",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s5_bc.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.trial.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "57569f61058baffbd2bccf7239c295d198bc61a15441baae1133689a2c2b9e9c",
+      "scheme": "m0_s5_ppo",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_ppo.trial.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.trial.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "ed02bd94cefb1029283f37f6fee80358e5eba99d92faff8b07de758f4a7f27fa",
+      "scheme": "m0_s5_ppo",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_ppo.trial.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_ppo.trial.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "8d853351a15f4cf3928c8d4ef3559c3b68d80c340e67964dc9a03b6270b78293",
+      "scheme": "m0_s5_ppo",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s5_bc.full.evaluate.seed0",
+        "m0_s5_ppo.trial.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.full.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "715e7e0daab1da87525ef7abb14f57bf3b5e9f44b0aafe2b2355ecce5bc90459",
+      "scheme": "m0_s5_ppo",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_ppo.full.train.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.full.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "6eeac3055132225f9c06100e5e634c292fba66048d1b6678005d81fac772f803",
+      "scheme": "m0_s5_ppo",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_ppo.full.infer.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_ppo.full.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "0c8ec349391c70ef290205b27c9a72e229c81e8fe2550cf856977cd6d53107a7",
+      "scheme": "m0_s5_ppo",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s5_bc.full.evaluate.seed1",
+        "m0_s5_ppo.trial.evaluate.seed0",
+        "m0_s5_ppo.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.full.train.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2c445660a40a7f687286d54f673b790b48b63d7bd4b95c0bc434808b9078b0d7",
+      "scheme": "m0_s5_ppo",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_ppo.full.train.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.full.infer.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "58cc84def8045fb1f7da53a0debc828d789f19f61c46a89acea1be208a2df4c8",
+      "scheme": "m0_s5_ppo",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_ppo.full.infer.seed1"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_ppo.full.evaluate.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "7abf2d762f5012f51ef48ffc57c37cf594374e570a6ccdc344de7f1115174bcb",
+      "scheme": "m0_s5_ppo",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "v4.replay.m0.fixed_dual",
+        "m0_s5_bc.full.evaluate.seed2",
+        "m0_s5_ppo.trial.evaluate.seed0",
+        "m0_s5_ppo.full.evaluate.seed0"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.full.train.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "dc0142b4edda7293dc99d2192bb1bda2d83bfa735c843f38cd5e583483dbe39e",
+      "scheme": "m0_s5_ppo",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m0_s5_ppo.full.train.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": true,
+      "job_id": "m0_s5_ppo.full.infer.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "02b4f169592e0207a959e93de2b370073445b946b4a91c79a9d33c0e57973712",
+      "scheme": "m0_s5_ppo",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m0_s5_ppo.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m0_s5_ppo.full.infer.seed2"
+      ],
+      "frontend": "fixed_dual",
+      "gpu_required": false,
+      "job_id": "m0_s5_ppo.full.evaluate.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "13a4b810baf5ba0299db994c76aa366787ef7719da0330f3ba7a792ea88cfbc8",
+      "scheme": "m0_s5_ppo",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_no_offline.trial.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_no_offline.trial.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_no_offline.trial.infer_eval.seed0",
+      "method": "no_offline",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "0a4c6d03b0562d6220a29c21ed1568c54ee19f168e51a3551134c609d48bf76e",
+      "scheme": "m1_no_offline",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_no_offline.full.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_no_offline.full.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_no_offline.trial.infer_eval.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_no_offline.full.infer_eval.seed0",
+      "method": "no_offline",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "d210050b2fcb0130490ece58f4141249e491d93f0df8acc912b3190a152f8ff0",
+      "scheme": "m1_no_offline",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_stable_emd.trial.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_stable_emd.trial.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_stable_emd.trial.infer_eval.seed0",
+      "method": "stable_emd",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "20697103a2c9db542a99a17c8f3f50fad2950bedbbb8cc4d6d3322f9fb96c8fe",
+      "scheme": "m1_stable_emd",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_stable_emd.full.infer_eval.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_stable_emd.full.infer_eval.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_stable_emd.trial.infer_eval.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_stable_emd.full.infer_eval.seed0",
+      "method": "stable_emd",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "0855609f14de477e165f8b99da79f290f6fd466ecd4fafd7281ea8bc4666937d",
+      "scheme": "m1_stable_emd",
+      "seed": 0,
+      "stage": "infer_eval",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.trial.train.seed0",
+      "method": "ordinary_metric",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "f939154a5150aa8b5856b777622eee3e45a5dda0b373f61743649f0e33846654",
+      "scheme": "m1_ordinary_metric",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_ordinary_metric.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.trial.infer.seed0",
+      "method": "ordinary_metric",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "3bcbd3e3a4a58c7f04175862a785293510f6e437635d765658c594ffbaead923",
+      "scheme": "m1_ordinary_metric",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_ordinary_metric.trial.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_ordinary_metric.trial.evaluate.seed0",
+      "method": "ordinary_metric",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "579b8de6eadd09b3fa91533805b56ca6822fc8f3d86f6865de1fe31a5a33b5f9",
+      "scheme": "m1_ordinary_metric",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_ordinary_metric.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.full.train.seed0",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "95b446fbfdf24b8640e106a3d4f50ad5e8dee1b1b929938f810bba2c745ff3aa",
+      "scheme": "m1_ordinary_metric",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_ordinary_metric.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.full.infer.seed0",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "8b0ad83e07c89cebd8cbeaee8a6b569de66b93f58c01e9a36fcaa3f5ee7945b7",
+      "scheme": "m1_ordinary_metric",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_ordinary_metric.full.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_ordinary_metric.full.evaluate.seed0",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "d3376e542dc6239415345ce509d9b42be2b50444e97a92f515306c1d281fb424",
+      "scheme": "m1_ordinary_metric",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1",
+        "m1_ordinary_metric.trial.evaluate.seed0",
+        "m1_ordinary_metric.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.full.train.seed1",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "fdfdf16d071b2bfc5f1fa7ab4833ba9e713a3aacfb32912f7d17e1fe4bd9bc1b",
+      "scheme": "m1_ordinary_metric",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_ordinary_metric.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.full.infer.seed1",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "ab6f350ca182fe0b20770d0571666f5badbe352208f8d8d1d4cc19f87d80216c",
+      "scheme": "m1_ordinary_metric",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_ordinary_metric.full.infer.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_ordinary_metric.full.evaluate.seed1",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "e397c34f7e512f6e3886eae381c7630668b93f8dc1f9f62595aca8ebf9f4914e",
+      "scheme": "m1_ordinary_metric",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed2",
+        "m1_ordinary_metric.trial.evaluate.seed0",
+        "m1_ordinary_metric.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.full.train.seed2",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "c16e0ac524611bfc3c835ba99ee9fb6e79d39901693ba25a30742a593c277729",
+      "scheme": "m1_ordinary_metric",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_ordinary_metric.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_ordinary_metric.full.infer.seed2",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "8a6d07c165e2cef3879e02033ebb7c070a9f33f0d1f75a47d69823113aebf01c",
+      "scheme": "m1_ordinary_metric",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_ordinary_metric.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_ordinary_metric.full.infer.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_ordinary_metric.full.evaluate.seed2",
+      "method": "ordinary_metric",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "423704ce3598fff56f2129eb519af76a0d1382184d75ed6ec7fd474a37899360",
+      "scheme": "m1_ordinary_metric",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.trial.train.seed0",
+      "method": "s1_jepa",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "f6c07234cf45f04500a602508436faf9fdc99720855d134a4ad2e9e2b608a583",
+      "scheme": "m1_s1_jepa",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s1_jepa.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.trial.infer.seed0",
+      "method": "s1_jepa",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "1c9429a76492a17f0082f77b41a7398ddbbb747763fcf4768ff70b6b51545cb1",
+      "scheme": "m1_s1_jepa",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s1_jepa.trial.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s1_jepa.trial.evaluate.seed0",
+      "method": "s1_jepa",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "bd0a24be1315c26d2dfe9bce3176a53a4e764667774d40ea9673650fc7580d77",
+      "scheme": "m1_s1_jepa",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_s1_jepa.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.full.train.seed0",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "6fde5dd480b7650fc42754c3b38d6cd955acd9e7e0625d4c70bec502975a2b70",
+      "scheme": "m1_s1_jepa",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s1_jepa.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.full.infer.seed0",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "ebf3f3e75e7c825c219e28a323e1d5631f8fcb9d982121b7cd7dfd0b6ef872c2",
+      "scheme": "m1_s1_jepa",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s1_jepa.full.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s1_jepa.full.evaluate.seed0",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "df1104d62f94e48cb0cc36485bf2a346ee6f37a7f76c04ceb7821205b295aef4",
+      "scheme": "m1_s1_jepa",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1",
+        "m1_s1_jepa.trial.evaluate.seed0",
+        "m1_s1_jepa.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.full.train.seed1",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "a8028c032df1e19098edab3928527d627a6b671269c4b431f8447d436a6dea7c",
+      "scheme": "m1_s1_jepa",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s1_jepa.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.full.infer.seed1",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "ba5cc63dd742e98d52e601d264807926fb5b631bf9472b8f6a302e3619200d5f",
+      "scheme": "m1_s1_jepa",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s1_jepa.full.infer.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s1_jepa.full.evaluate.seed1",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "c72967ed4a076727519f0bff48bc051702ad43d89c84986875ae76660ad2e2bf",
+      "scheme": "m1_s1_jepa",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed2",
+        "m1_s1_jepa.trial.evaluate.seed0",
+        "m1_s1_jepa.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.full.train.seed2",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "573bb77b1a01a83134b63949052f883a485aeb55292c56a604c6377cd2b65055",
+      "scheme": "m1_s1_jepa",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s1_jepa.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s1_jepa.full.infer.seed2",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "7b4daa12e993a9dce318c25542c21ad9ac40b34051b8dc68ea23a92bb3a4b8dd",
+      "scheme": "m1_s1_jepa",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s1_jepa.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s1_jepa.full.infer.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s1_jepa.full.evaluate.seed2",
+      "method": "s1_jepa",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2f97f048a88a4c0ccddc7bc963ad3184b302d96584517000e6bcc3a4e7be5b58",
+      "scheme": "m1_s1_jepa",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.trial.train.seed0",
+      "method": "s2_state_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "8c90f786d07d6786e67de8e3535cddb91b8eb936a7f7d19ab9d59424a197b510",
+      "scheme": "m1_s2_state_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s2_state_fm.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.trial.infer.seed0",
+      "method": "s2_state_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "3f3baf77345c192155ae80879050215cd59b07b93e2bdf92fabdf29b52e8c912",
+      "scheme": "m1_s2_state_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s2_state_fm.trial.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s2_state_fm.trial.evaluate.seed0",
+      "method": "s2_state_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "77a7f60cb23b8b478cf5559268528189e8fabf2ace2501206ebb6f56b132177b",
+      "scheme": "m1_s2_state_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_s2_state_fm.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.full.train.seed0",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "089a877f3841901b6e576c3235f23050a8c4d358eb57d253ba38f4f384ce19a4",
+      "scheme": "m1_s2_state_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s2_state_fm.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.full.infer.seed0",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "735644ade09f6deb40256e5c6a63e03c71a455232e7377989375d37d0fc6dbcd",
+      "scheme": "m1_s2_state_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s2_state_fm.full.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s2_state_fm.full.evaluate.seed0",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "6c71c810400972055222965aed8b59d73c647cd30000ca672c2d43850a6d05a5",
+      "scheme": "m1_s2_state_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1",
+        "m1_s2_state_fm.trial.evaluate.seed0",
+        "m1_s2_state_fm.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.full.train.seed1",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "c2527dc1e313dea5d17a3ca0c3e02afb2720bd85d85e53c0a00fe7078f7347bf",
+      "scheme": "m1_s2_state_fm",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s2_state_fm.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.full.infer.seed1",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "28117eb0d5a0a82b6dcaf9549ad23d3f18c2e10b3731460a46a92f217362122a",
+      "scheme": "m1_s2_state_fm",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s2_state_fm.full.infer.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s2_state_fm.full.evaluate.seed1",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "4f838c905a32779923a9fceefa48a67048418b1f9962d78f1f43723852adf1ad",
+      "scheme": "m1_s2_state_fm",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed2",
+        "m1_s2_state_fm.trial.evaluate.seed0",
+        "m1_s2_state_fm.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.full.train.seed2",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "4d37c500d77b79605d4c168076c883d70e895cfd8df69bba09ad24649d92b7e1",
+      "scheme": "m1_s2_state_fm",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s2_state_fm.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s2_state_fm.full.infer.seed2",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "68af59c86b0ce8743bca61aba1a01aae9a842e2b3e50cf022ef32d792afda300",
+      "scheme": "m1_s2_state_fm",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s2_state_fm.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s2_state_fm.full.infer.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s2_state_fm.full.evaluate.seed2",
+      "method": "s2_state_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2d2e08cd5a76b80ff712c7248144c6435647fa7135de46d1f8b886bbeb131a8e",
+      "scheme": "m1_s2_state_fm",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.trial.train.seed0",
+      "method": "s3_graph_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "cc7fc21466a54fa54afbd3d6cb08b7e1fb990d1be984d9ce641bfdd50c9050b6",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s3_graph_fm.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.trial.infer.seed0",
+      "method": "s3_graph_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "f999453e1a4e91f2396801203f94b1eb4253bf0a89fbdb36a709822ea0c50736",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s3_graph_fm.trial.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s3_graph_fm.trial.evaluate.seed0",
+      "method": "s3_graph_fm",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "6ff1ec57939ef10b76f0db6ef18340b75ad169ffbcda6fb18436306c0591d7e2",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_s3_graph_fm.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.full.train.seed0",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "5fc08a52f8ef09971895ee6a73f52401e35ee2c3c04ba87606104dc244a2ca68",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s3_graph_fm.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.full.infer.seed0",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "16c3cd74525f4a13a498394f85fea272f6f8e938a14383efad0f2c53d2e9f7a1",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s3_graph_fm.full.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s3_graph_fm.full.evaluate.seed0",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2b933f4da52605349c19e28e64b2bf57ca54e19b9677dc85be1030abd76ed6f6",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1",
+        "m1_s3_graph_fm.trial.evaluate.seed0",
+        "m1_s3_graph_fm.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.full.train.seed1",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "a67d8c9119661ba6a6fcec57a5d11e2eb636b785ad38d5c289013cb54ddd2271",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s3_graph_fm.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.full.infer.seed1",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "a7cbd33e0761957c73416b18f9ebe4b974a407eeda072fa8afb10cc377b8cf4a",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s3_graph_fm.full.infer.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s3_graph_fm.full.evaluate.seed1",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "f12d8ec8c68fc6dc1d265003e8c69b2fc8aab0e7d3b24a109bbb07455a5bbe1f",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed2",
+        "m1_s3_graph_fm.trial.evaluate.seed0",
+        "m1_s3_graph_fm.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.full.train.seed2",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "4b65f0ff22f0850000f4cd5558dfc98a6eb08a86c9990de3b652ea6bc0f53516",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s3_graph_fm.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s3_graph_fm.full.infer.seed2",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "75aea02fe8d673a553ad6c0ee029d16046bb1eceeb583e14ad5458f93eabc292",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s3_graph_fm.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s3_graph_fm.full.infer.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s3_graph_fm.full.evaluate.seed2",
+      "method": "s3_graph_fm",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "1ad8bb51a4a5e299e0551fbe7557af610f402251a9fd4b011d17243c7dd7e2ab",
+      "scheme": "m1_s3_graph_fm",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.trial.train.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "4fa6d77d0d49bb16cd95e3b7619b1045f39f914981b5a23d3bfe6ac304834731",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s4_graph_diffusion.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.trial.infer.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "f61b011a3d61348cb04e67aee29eaa96ead88575ca804b41763b8f8802c381ce",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s4_graph_diffusion.trial.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s4_graph_diffusion.trial.evaluate.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "4b41fb339db506de1c663cdfd5d7878b8572965fc7aa5368ccb620e799514029",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_s4_graph_diffusion.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.full.train.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "9bcf9975d4a9614816d966e6953b1bf3f5b202b5090a09f9f00d0fc7bd3db03d",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s4_graph_diffusion.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.full.infer.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "1f7929df177791f4c98c403879af74241fd9ed226f4a864581265857c4388e63",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s4_graph_diffusion.full.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s4_graph_diffusion.full.evaluate.seed0",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "8ecc3c55df34b03ef635724409cecdd61e19d91012e121f03e53363e51bd7e57",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1",
+        "m1_s4_graph_diffusion.trial.evaluate.seed0",
+        "m1_s4_graph_diffusion.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.full.train.seed1",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "068fec2837d911baa51dd0b4971e52661ac3b0b24a43884f9189f05d75b6cb1d",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s4_graph_diffusion.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.full.infer.seed1",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "753f1039dc1ce502f261da39d50e5b1337740ab0166dad9d2e7bd84eb732f993",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s4_graph_diffusion.full.infer.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s4_graph_diffusion.full.evaluate.seed1",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "2a1d719d5370df596c3e7a563d26e0c4e6d44a12627023263879e5e9169d59e8",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed2",
+        "m1_s4_graph_diffusion.trial.evaluate.seed0",
+        "m1_s4_graph_diffusion.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.full.train.seed2",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "10fb634a7658320787d03abbc84a7d05dc74e0340883d908ce8c95ca8e1c862d",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s4_graph_diffusion.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s4_graph_diffusion.full.infer.seed2",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "1854069db437afe7cffa201e8bd269c126679c233ea30ac176d8abdce652a7da",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s4_graph_diffusion.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s4_graph_diffusion.full.infer.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s4_graph_diffusion.full.evaluate.seed2",
+      "method": "s4_graph_diffusion",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "3351e817c573e08fc98148aa604f06ee131ca5665911ad43a160534e7f46a179",
+      "scheme": "m1_s4_graph_diffusion",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.trial.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "b036d760889abe6d8ad5defe167afd3c94c47c623f2d626cc30f9b9a726b2288",
+      "scheme": "m1_s5_bc",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_bc.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.trial.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "f2c34f63c0b316b8c5723401ea446f05e92689baf5ca239ddfd33f00a08b41c8",
+      "scheme": "m1_s5_bc",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_bc.trial.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_bc.trial.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "7d4c782163132afd451a376c0fd2053fa2b566d936ed0faed3d9a92c10fbd132",
+      "scheme": "m1_s5_bc",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_s5_bc.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.full.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "cfb249b65842dcc77eb289eebec928f032a1b289218f7b5f7d80efc5a12f134a",
+      "scheme": "m1_s5_bc",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_bc.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.full.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "5db35e1437fcc111b3578f456bbaa4346276ff2183826a4817c2b087fe9bfe7b",
+      "scheme": "m1_s5_bc",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_bc.full.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_bc.full.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "69272f0c86a85dc53975b819ca6409df5ed78ccbe9729462829a59d32bb872a7",
+      "scheme": "m1_s5_bc",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1",
+        "m1_s5_bc.trial.evaluate.seed0",
+        "m1_s5_bc.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.full.train.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "a08a454ce47a433145be7c94bc98c8968d69976602648d08d083e1190749c6c9",
+      "scheme": "m1_s5_bc",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_bc.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.full.infer.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "28ef84f7b47ef525178f8741b275a492f6808b4d8381424ab63becb224eaa51c",
+      "scheme": "m1_s5_bc",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_bc.full.infer.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_bc.full.evaluate.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "7dcbdce25c36656a80ade46ebd22d9e50785713e1acd31ac30d7b9ad1cd5db1b",
+      "scheme": "m1_s5_bc",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed2",
+        "m1_s5_bc.trial.evaluate.seed0",
+        "m1_s5_bc.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.full.train.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "efef9e88ff378190f3bafd872390d632b244000c1d6d46540e46df777a32c34f",
+      "scheme": "m1_s5_bc",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_bc.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_bc.full.infer.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "d10c4671630b6cd43b377b90d953c7706cd2a34cca498fbbef71990815498139",
+      "scheme": "m1_s5_bc",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_bc.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_bc.full.infer.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_bc.full.evaluate.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "12aab0a96f5d70421965f12a00fa882f401badb68a05b9c3b9e8ba99892b0557",
+      "scheme": "m1_s5_bc",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.trial.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.trial.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.trial.replay.seed0",
+        "m1_s5_bc.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.trial.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "350e9a7fbb6411484bf22efac572354a20ff6d8c675d9279b7eed2aa63cac2e7",
+      "scheme": "m1_s5_ppo",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.trial.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_ppo.trial.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.trial.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "e455e4fc3df1d0d1733bbcd35f9811bf5dfae46d6fa85e1891abb41433e95760",
+      "scheme": "m1_s5_ppo",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.trial.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_ppo.trial.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_ppo.trial.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "trial",
+      "run_dir": "",
+      "run_signature": "11d5a0415930cf5df3ed861bc2e34e76220e422f3b3523ee4ddee949e0a35719",
+      "scheme": "m1_s5_ppo",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.train.seed0/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.train.seed0/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed0",
+        "m1_s5_bc.full.evaluate.seed0",
+        "m1_s5_ppo.trial.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.full.train.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "62529521c786c9a98314894fd3880937828f9d12996bd0b2720a0df6524ddc43",
+      "scheme": "m1_s5_ppo",
+      "seed": 0,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.infer.seed0/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_ppo.full.train.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.full.infer.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "204384b924358707ca3adc544de6848cf531a431f040238e9b080055db21c47d",
+      "scheme": "m1_s5_ppo",
+      "seed": 0,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.evaluate.seed0/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_ppo.full.infer.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_ppo.full.evaluate.seed0",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "b54686fccaeaf241dd44b022f6fec7fe68b381717063604ed848d5cf1dd0622f",
+      "scheme": "m1_s5_ppo",
+      "seed": 0,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.train.seed1/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.train.seed1/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed1",
+        "m1_s5_bc.full.evaluate.seed1",
+        "m1_s5_ppo.trial.evaluate.seed0",
+        "m1_s5_ppo.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.full.train.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "aa366bbe1ac967bb2ecb550ba2d32513ab110beb6c2cb2b70ec3bc88888e1b19",
+      "scheme": "m1_s5_ppo",
+      "seed": 1,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.infer.seed1/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_ppo.full.train.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.full.infer.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "09d1b0beff408aeaba33550a24ff61341193dedc3e6c2a33b8b21f2269f7dbdc",
+      "scheme": "m1_s5_ppo",
+      "seed": 1,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.evaluate.seed1/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_ppo.full.infer.seed1"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_ppo.full.evaluate.seed1",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "0751660d27f74f6945bea422f3f64eb6e187b7c1a0ced488eaac9022555dba6d",
+      "scheme": "m1_s5_ppo",
+      "seed": 1,
+      "stage": "evaluate",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "last.pt",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.train.seed2/last.pt",
+          "required": true,
+          "signature": null
+        },
+        {
+          "kind": "train_result.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.train.seed2/train_result.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_memory.full.replay.seed2",
+        "m1_s5_bc.full.evaluate.seed2",
+        "m1_s5_ppo.trial.evaluate.seed0",
+        "m1_s5_ppo.full.evaluate.seed0"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.full.train.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "542b720318a53d7ea3168d8d9b127b32c1fa862d2f4a1fd19509c6a374c3745b",
+      "scheme": "m1_s5_ppo",
+      "seed": 2,
+      "stage": "train",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "prediction.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.infer.seed2/prediction.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": false,
+      "dependencies": [
+        "m1_s5_ppo.full.train.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": true,
+      "job_id": "m1_s5_ppo.full.infer.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "8c933d8d9509250bca38efe01af5d9962d62a8c977aca80befd34eea3840487a",
+      "scheme": "m1_s5_ppo",
+      "seed": 2,
+      "stage": "infer",
+      "status": "PENDING"
+    },
+    {
+      "artifacts": [
+        {
+          "kind": "evaluation.json",
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/artifacts/m1_s5_ppo.full.evaluate.seed2/evaluation.json",
+          "required": true,
+          "signature": null
+        }
+      ],
+      "command": [],
+      "cpu_only": true,
+      "dependencies": [
+        "m1_s5_ppo.full.infer.seed2"
+      ],
+      "frontend": "predictive_dual",
+      "gpu_required": false,
+      "job_id": "m1_s5_ppo.full.evaluate.seed2",
+      "method": "s5_rl_edit",
+      "phase": "full",
+      "run_dir": "",
+      "run_signature": "3abf91c1ed1310c9bac6196050d811114b7407192d7384af5ca76986292e91dd",
+      "scheme": "m1_s5_ppo",
+      "seed": 2,
+      "stage": "evaluate",
+      "status": "PENDING"
+    }
+  ],
+  "order": [
+    "v4.prepare.fixed_observation",
+    "v4.replay.m0.fixed_dual",
+    "m0_no_offline.trial.infer_eval.seed0",
+    "m0_no_offline.full.infer_eval.seed0",
+    "m0_ordinary_metric.trial.train.seed0",
+    "m0_ordinary_metric.trial.infer.seed0",
+    "m0_ordinary_metric.trial.evaluate.seed0",
+    "m0_ordinary_metric.full.train.seed0",
+    "m0_ordinary_metric.full.infer.seed0",
+    "m0_ordinary_metric.full.evaluate.seed0",
+    "m0_ordinary_metric.full.train.seed1",
+    "m0_ordinary_metric.full.infer.seed1",
+    "m0_ordinary_metric.full.evaluate.seed1",
+    "m0_ordinary_metric.full.train.seed2",
+    "m0_ordinary_metric.full.infer.seed2",
+    "m0_ordinary_metric.full.evaluate.seed2",
+    "m0_s1_jepa.trial.train.seed0",
+    "m0_s1_jepa.trial.infer.seed0",
+    "m0_s1_jepa.trial.evaluate.seed0",
+    "m0_s1_jepa.full.train.seed0",
+    "m0_s1_jepa.full.infer.seed0",
+    "m0_s1_jepa.full.evaluate.seed0",
+    "m0_s1_jepa.full.train.seed1",
+    "m0_s1_jepa.full.infer.seed1",
+    "m0_s1_jepa.full.evaluate.seed1",
+    "m0_s1_jepa.full.train.seed2",
+    "m0_s1_jepa.full.infer.seed2",
+    "m0_s1_jepa.full.evaluate.seed2",
+    "m0_s2_state_fm.trial.train.seed0",
+    "m0_s2_state_fm.trial.infer.seed0",
+    "m0_s2_state_fm.trial.evaluate.seed0",
+    "m0_s2_state_fm.full.train.seed0",
+    "m0_s2_state_fm.full.infer.seed0",
+    "m0_s2_state_fm.full.evaluate.seed0",
+    "m0_s2_state_fm.full.train.seed1",
+    "m0_s2_state_fm.full.infer.seed1",
+    "m0_s2_state_fm.full.evaluate.seed1",
+    "m0_s2_state_fm.full.train.seed2",
+    "m0_s2_state_fm.full.infer.seed2",
+    "m0_s2_state_fm.full.evaluate.seed2",
+    "m0_s3_graph_fm.trial.train.seed0",
+    "m0_s3_graph_fm.trial.infer.seed0",
+    "m0_s3_graph_fm.trial.evaluate.seed0",
+    "m0_s3_graph_fm.full.train.seed0",
+    "m0_s3_graph_fm.full.infer.seed0",
+    "m0_s3_graph_fm.full.evaluate.seed0",
+    "m0_s3_graph_fm.full.train.seed1",
+    "m0_s3_graph_fm.full.infer.seed1",
+    "m0_s3_graph_fm.full.evaluate.seed1",
+    "m0_s3_graph_fm.full.train.seed2",
+    "m0_s3_graph_fm.full.infer.seed2",
+    "m0_s3_graph_fm.full.evaluate.seed2",
+    "m0_s4_graph_diffusion.trial.train.seed0",
+    "m0_s4_graph_diffusion.trial.infer.seed0",
+    "m0_s4_graph_diffusion.trial.evaluate.seed0",
+    "m0_s4_graph_diffusion.full.train.seed0",
+    "m0_s4_graph_diffusion.full.infer.seed0",
+    "m0_s4_graph_diffusion.full.evaluate.seed0",
+    "m0_s4_graph_diffusion.full.train.seed1",
+    "m0_s4_graph_diffusion.full.infer.seed1",
+    "m0_s4_graph_diffusion.full.evaluate.seed1",
+    "m0_s4_graph_diffusion.full.train.seed2",
+    "m0_s4_graph_diffusion.full.infer.seed2",
+    "m0_s4_graph_diffusion.full.evaluate.seed2",
+    "m0_s5_bc.trial.train.seed0",
+    "m0_s5_bc.trial.infer.seed0",
+    "m0_s5_bc.trial.evaluate.seed0",
+    "m0_s5_bc.full.train.seed0",
+    "m0_s5_bc.full.infer.seed0",
+    "m0_s5_bc.full.evaluate.seed0",
+    "m0_s5_bc.full.train.seed1",
+    "m0_s5_bc.full.infer.seed1",
+    "m0_s5_bc.full.evaluate.seed1",
+    "m0_s5_bc.full.train.seed2",
+    "m0_s5_bc.full.infer.seed2",
+    "m0_s5_bc.full.evaluate.seed2",
+    "m0_s5_ppo.trial.train.seed0",
+    "m0_s5_ppo.trial.infer.seed0",
+    "m0_s5_ppo.trial.evaluate.seed0",
+    "m0_s5_ppo.full.train.seed0",
+    "m0_s5_ppo.full.infer.seed0",
+    "m0_s5_ppo.full.evaluate.seed0",
+    "m0_s5_ppo.full.train.seed1",
+    "m0_s5_ppo.full.infer.seed1",
+    "m0_s5_ppo.full.evaluate.seed1",
+    "m0_s5_ppo.full.train.seed2",
+    "m0_s5_ppo.full.infer.seed2",
+    "m0_s5_ppo.full.evaluate.seed2",
+    "m0_stable_emd.trial.infer_eval.seed0",
+    "m0_stable_emd.full.infer_eval.seed0",
+    "m1_memory.trial.train.seed0",
+    "m1_memory.trial.replay.seed0",
+    "m1_memory.full.train.seed0",
+    "m1_memory.full.replay.seed0",
+    "m1_memory.full.train.seed1",
+    "m1_memory.full.replay.seed1",
+    "m1_memory.full.train.seed2",
+    "m1_memory.full.replay.seed2",
+    "m1_no_offline.trial.infer_eval.seed0",
+    "m1_no_offline.full.infer_eval.seed0",
+    "m1_ordinary_metric.trial.train.seed0",
+    "m1_ordinary_metric.trial.infer.seed0",
+    "m1_ordinary_metric.trial.evaluate.seed0",
+    "m1_ordinary_metric.full.train.seed0",
+    "m1_ordinary_metric.full.infer.seed0",
+    "m1_ordinary_metric.full.evaluate.seed0",
+    "m1_ordinary_metric.full.train.seed1",
+    "m1_ordinary_metric.full.infer.seed1",
+    "m1_ordinary_metric.full.evaluate.seed1",
+    "m1_ordinary_metric.full.train.seed2",
+    "m1_ordinary_metric.full.infer.seed2",
+    "m1_ordinary_metric.full.evaluate.seed2",
+    "m1_s1_jepa.trial.train.seed0",
+    "m1_s1_jepa.trial.infer.seed0",
+    "m1_s1_jepa.trial.evaluate.seed0",
+    "m1_s1_jepa.full.train.seed0",
+    "m1_s1_jepa.full.infer.seed0",
+    "m1_s1_jepa.full.evaluate.seed0",
+    "m1_s1_jepa.full.train.seed1",
+    "m1_s1_jepa.full.infer.seed1",
+    "m1_s1_jepa.full.evaluate.seed1",
+    "m1_s1_jepa.full.train.seed2",
+    "m1_s1_jepa.full.infer.seed2",
+    "m1_s1_jepa.full.evaluate.seed2",
+    "m1_s2_state_fm.trial.train.seed0",
+    "m1_s2_state_fm.trial.infer.seed0",
+    "m1_s2_state_fm.trial.evaluate.seed0",
+    "m1_s2_state_fm.full.train.seed0",
+    "m1_s2_state_fm.full.infer.seed0",
+    "m1_s2_state_fm.full.evaluate.seed0",
+    "m1_s2_state_fm.full.train.seed1",
+    "m1_s2_state_fm.full.infer.seed1",
+    "m1_s2_state_fm.full.evaluate.seed1",
+    "m1_s2_state_fm.full.train.seed2",
+    "m1_s2_state_fm.full.infer.seed2",
+    "m1_s2_state_fm.full.evaluate.seed2",
+    "m1_s3_graph_fm.trial.train.seed0",
+    "m1_s3_graph_fm.trial.infer.seed0",
+    "m1_s3_graph_fm.trial.evaluate.seed0",
+    "m1_s3_graph_fm.full.train.seed0",
+    "m1_s3_graph_fm.full.infer.seed0",
+    "m1_s3_graph_fm.full.evaluate.seed0",
+    "m1_s3_graph_fm.full.train.seed1",
+    "m1_s3_graph_fm.full.infer.seed1",
+    "m1_s3_graph_fm.full.evaluate.seed1",
+    "m1_s3_graph_fm.full.train.seed2",
+    "m1_s3_graph_fm.full.infer.seed2",
+    "m1_s3_graph_fm.full.evaluate.seed2",
+    "m1_s4_graph_diffusion.trial.train.seed0",
+    "m1_s4_graph_diffusion.trial.infer.seed0",
+    "m1_s4_graph_diffusion.trial.evaluate.seed0",
+    "m1_s4_graph_diffusion.full.train.seed0",
+    "m1_s4_graph_diffusion.full.infer.seed0",
+    "m1_s4_graph_diffusion.full.evaluate.seed0",
+    "m1_s4_graph_diffusion.full.train.seed1",
+    "m1_s4_graph_diffusion.full.infer.seed1",
+    "m1_s4_graph_diffusion.full.evaluate.seed1",
+    "m1_s4_graph_diffusion.full.train.seed2",
+    "m1_s4_graph_diffusion.full.infer.seed2",
+    "m1_s4_graph_diffusion.full.evaluate.seed2",
+    "m1_s5_bc.trial.train.seed0",
+    "m1_s5_bc.trial.infer.seed0",
+    "m1_s5_bc.trial.evaluate.seed0",
+    "m1_s5_bc.full.train.seed0",
+    "m1_s5_bc.full.infer.seed0",
+    "m1_s5_bc.full.evaluate.seed0",
+    "m1_s5_bc.full.train.seed1",
+    "m1_s5_bc.full.infer.seed1",
+    "m1_s5_bc.full.evaluate.seed1",
+    "m1_s5_bc.full.train.seed2",
+    "m1_s5_bc.full.infer.seed2",
+    "m1_s5_bc.full.evaluate.seed2",
+    "m1_s5_ppo.trial.train.seed0",
+    "m1_s5_ppo.trial.infer.seed0",
+    "m1_s5_ppo.trial.evaluate.seed0",
+    "m1_s5_ppo.full.train.seed0",
+    "m1_s5_ppo.full.infer.seed0",
+    "m1_s5_ppo.full.evaluate.seed0",
+    "m1_s5_ppo.full.train.seed1",
+    "m1_s5_ppo.full.infer.seed1",
+    "m1_s5_ppo.full.evaluate.seed1",
+    "m1_s5_ppo.full.train.seed2",
+    "m1_s5_ppo.full.infer.seed2",
+    "m1_s5_ppo.full.evaluate.seed2",
+    "m1_stable_emd.trial.infer_eval.seed0",
+    "m1_stable_emd.full.infer_eval.seed0"
+  ],
+  "plan_hash": "5242707d28c6feff79351fc1e838d5918c228ecc1fee161dcaf5a3ca7fb88920",
+  "schema_version": 4
+}
