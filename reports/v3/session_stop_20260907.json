@@ -1,0 +1,39 @@
+{
+  "schema_version": 3,
+  "status": "INTERRUPTED_INCOMPLETE_RECOVERABLE",
+  "stopped_at": "2026-09-07T07:39Z",
+  "reason": "session execution window; full V3 budget is multi-day at the measured real-training throughput",
+  "requested_command": "LD_PRELOAD=/home/lwr/anaconda3/envs/masaenv/lib/libsqlite3.so.3.52.0 CUDA_VISIBLE_DEVICES=0 /home/lwr/anaconda3/envs/masaenv/bin/python -m tempotrack_research.cli repair-v3 run --repo . --config configs/research/suite.v3.yaml --local configs/research/local.v3.yaml --reference-root outputs/research_v2 --run-root outputs/research_v3 --through complete --resume auto --quiesce-owned",
+  "active_job_at_stop": {
+    "job_id": "m0_ordinary_metric.full.seed0",
+    "parent_pid": 4352,
+    "child_pid": 15725,
+    "pgid": 4352,
+    "uid": 1000,
+    "cwd": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa",
+    "profile": "full",
+    "seed": 0,
+    "checkpoint_step": 1000,
+    "requested_steps": 100000
+  },
+  "stop_action": {
+    "signal": "SIGINT",
+    "target": "process-group:-4352",
+    "identity_verified": ["uid", "cwd", "argv", "pgid", "child membership"],
+    "unrelated_processes_stopped": 0,
+    "unrelated_gpu_processes_left_running": true
+  },
+  "checkpoint": {
+    "path": "outputs/research_v3/lineages/main/runs/fixed_dual_ordinary_metric_train_seed0_full/last.pt",
+    "optimizer_step": 1000,
+    "attempted_steps": 1000,
+    "data_hash": "d885d81805941f146c87e5465c4703e696b15f372c54a2b8374d158fb6cafb11",
+    "sha256": "07c81d973b4b492809bcbcf1f21330105bda46405d2c048268ae9d4f36aa36a9"
+  },
+  "metrics": {
+    "path": "outputs/research_v3/lineages/main/runs/fixed_dual_ordinary_metric_train_seed0_full/metrics.jsonl",
+    "last_step": 1009,
+    "sha256": "b445d13fc3f2d8adbf91e3619dd89db245bf8da5cd1ecc025a5f11a72b050506"
+  },
+  "resume": "Re-run the requested command with --resume auto after reviewing this artifact; the full profile is isolated and will resume from the verified step-1000 checkpoint."
+}

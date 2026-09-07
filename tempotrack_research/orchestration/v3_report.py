@@ -75,6 +75,8 @@ def _active_processes(repo: Path) -> list[dict[str, Any]]:
         if not ("repair-v3" in tokens or any(command in tokens for command in ("train", "infer", "evaluate"))):
             continue
         pid = int(fields[0])
+        if pid == os.getpid():
+            continue
         try:
             cwd = Path(os.readlink(f"/proc/{pid}/cwd")).resolve()
         except OSError:
