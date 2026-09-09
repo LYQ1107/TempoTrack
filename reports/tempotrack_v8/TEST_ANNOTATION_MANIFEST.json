@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "generated_by": "V8 read-only annotation audit",
+  "frameworks": {
+    "masa_test": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_test_lvis_v1_classes.json",
+      "sha256": "0892a2ec8591f41912c5aa2562462162875b15cc6686ce7e508e1d989192c37e",
+      "schema": [
+        "annotations",
+        "categories",
+        "images",
+        "tracks",
+        "videos"
+      ],
+      "counts": {
+        "videos": 1419,
+        "images": 52155,
+        "annotations": 166764,
+        "categories": 1203,
+        "tracks": 7946
+      },
+      "category_id_min": 1,
+      "category_id_max": 1203
+    },
+    "vov_cov_test_burst": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json",
+      "sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+      "schema": [
+        "annotations",
+        "categories",
+        "images",
+        "tracks",
+        "videos"
+      ],
+      "counts": {
+        "videos": 1419,
+        "images": 52155,
+        "annotations": 166764,
+        "categories": 1203,
+        "tracks": 7946
+      },
+      "category_id_min": 1,
+      "category_id_max": 1203
+    },
+    "vov_cov_val": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/validation_ours_v1.json",
+      "sha256": "1347fdc4e3eb6880f957e81014fa505080b55d895f27afcc3d6343cff4dc6fe7",
+      "schema": [
+        "annotations",
+        "categories",
+        "images",
+        "info",
+        "licenses",
+        "tracks",
+        "videos"
+      ],
+      "counts": {
+        "videos": 988,
+        "images": 36375,
+        "annotations": 112798,
+        "categories": 1203,
+        "tracks": 5473
+      },
+      "category_id_min": 1,
+      "category_id_max": 1203
+    },
+    "masa_val": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_val_lvis_v1_classes.json",
+      "sha256": "6372076018b7a2158106e90e6d5de8800fa50263b3af25c1a907ce49e5a5123a",
+      "schema": [
+        "annotations",
+        "categories",
+        "images",
+        "info",
+        "licenses",
+        "tracks",
+        "videos"
+      ],
+      "counts": {
+        "videos": 988,
+        "images": 36375,
+        "annotations": 112798,
+        "categories": 1203,
+        "tracks": 5473
+      },
+      "category_id_min": 1,
+      "category_id_max": 1203
+    }
+  },
+  "notes": [
+    "MASA uses the exact tao_test_lvis_v1_classes.json requested by the V8 protocol.",
+    "VOVTrack/COVTrack TAO old-pipeline test path uses the locally verified BURST-derived tao_test_burst_v1.json; it has the same videos/images/annotations/tracks counts as the MASA file but a distinct categories section and therefore is not substituted across frameworks.",
+    "VOVTrack/COVTrack validation uses validation_ours_v1.json from the existing OVTR reference artifact."
+  ]
+}

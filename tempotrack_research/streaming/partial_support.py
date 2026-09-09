@@ -1,4 +1,4 @@
-"""Streaming PSMR primitives used by V7 C9/C10."""
+"""Streaming PSMR primitives used by V8 per-anchor C9/C10."""
 
 from __future__ import annotations
 
@@ -23,6 +23,22 @@ class MemoryAnchor:
     features: np.ndarray
     evidence: np.ndarray
     row_indices: list[int] = field(default_factory=list)
+    # ``row_indices`` is the retained memory bank.  The full fragment rows
+    # remain separate so a successful reactivation rewrites every original
+    # observation, including observations removed by feature deduplication.
+    fragment_rows: list[int] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.features = np.asarray(self.features, dtype=np.float32)
+        self.evidence = np.asarray(self.evidence, dtype=np.float32)
+        if self.features.ndim != 2:
+            raise ValueError(f"MemoryAnchor.features must be [K,D], got {self.features.shape}")
+        if self.evidence.ndim != 2 or self.evidence.shape[-1] != 7:
+            raise ValueError(f"MemoryAnchor.evidence must be [K,7], got {self.evidence.shape}")
+        if len(self.features) != len(self.evidence) or len(self.features) != len(self.row_indices):
+            raise ValueError("MemoryAnchor feature/evidence/row_indices lengths must agree")
+        if not self.fragment_rows:
+            self.fragment_rows = list(self.row_indices)
 
 
 @dataclass
@@ -66,6 +82,76 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / denom)
 
 
+def build_anchor_evidence_sequence(
+    features: np.ndarray,
+    boxes_xyxy: np.ndarray,
+    scores: np.ndarray,
+    frames: np.ndarray,
+    *,
+    alpha_fast: float = 0.70,
+    alpha_slow: float = 0.15,
+    max_gap: int = 60,
+) -> np.ndarray:
+    """Build one causal seven-dimensional evidence vector per observation.
+
+    Evidence for observation k is emitted before z_k updates either memory
+    state.  This makes the sequence causal and gives every retained anchor a
+    distinct evidence row instead of assigning one fragment-level vector to
+    the whole bank.
+    """
+    feats = np.asarray(features, dtype=np.float32)
+    boxes = np.asarray(boxes_xyxy, dtype=np.float32)
+    det_scores = np.asarray(scores, dtype=np.float32)
+    frame_values = np.asarray(frames, dtype=np.int64)
+    if feats.ndim != 2 or boxes.ndim != 2 or boxes.shape[-1] != 4:
+        raise ValueError("features must be [N,D] and boxes_xyxy must be [N,4]")
+    n = len(feats)
+    if len(boxes) != n or len(det_scores) != n or len(frame_values) != n:
+        raise ValueError("anchor evidence inputs must have the same length")
+    if n == 0:
+        return np.zeros((0, 7), dtype=np.float32)
+    if not (0.0 <= float(alpha_fast) <= 1.0 and 0.0 <= float(alpha_slow) <= 1.0):
+        raise ValueError("alpha_fast and alpha_slow must be in [0,1]")
+
+    def normalize(value: np.ndarray) -> np.ndarray:
+        value = np.asarray(value, dtype=np.float32)
+        return value / max(float(np.linalg.norm(value)), 1e-6)
+
+    first_frame = int(frame_values[0])
+    fast = normalize(feats[0])
+    slow = normalize(feats[0])
+    previous_box = boxes[0]
+    previous_frame = int(frame_values[0])
+    evidence = np.zeros((n, 7), dtype=np.float32)
+    for index in range(n):
+        current = feats[index]
+        box = boxes[index]
+        frame = int(frame_values[index])
+        if index == 0:
+            # Birth contract: detection score is retained and the initial
+            # fast/slow states are identical, so their agreement is 1.
+            evidence[index] = np.asarray([det_scores[index], 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        else:
+            area = max(float(max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])), 1e-6)
+            old_area = max(float(max(0.0, previous_box[2] - previous_box[0]) * max(0.0, previous_box[3] - previous_box[1])), 1e-6)
+            evidence[index] = np.asarray([
+                det_scores[index],
+                _cosine(current, fast),
+                _cosine(current, slow),
+                _cosine(fast, slow),
+                min(1.0, max(0, frame - first_frame) / 100.0),
+                min(1.0, max(0, frame - previous_frame) / max(int(max_gap), 1)),
+                float(np.clip(np.log(area / old_area), -2.0, 2.0) / 2.0),
+            ], dtype=np.float32)
+        # The state update happens only after evidence has been recorded.
+        z = normalize(current)
+        fast = normalize((1.0 - float(alpha_fast)) * fast + float(alpha_fast) * z)
+        slow = normalize((1.0 - float(alpha_slow)) * slow + float(alpha_slow) * z)
+        previous_box = box
+        previous_frame = frame
+    return evidence
+
+
 def build_anchor_evidence(
     features: np.ndarray,
     boxes_xyxy: np.ndarray,
@@ -73,37 +159,53 @@ def build_anchor_evidence(
     frames: np.ndarray,
     *,
     max_gap: int = 60,
-    previous: MemoryAnchor | None = None,
 ) -> np.ndarray:
-    """Build the fixed seven-dimensional, causal anchor evidence vector.
+    """Backward-compatible single-row helper; new code uses the sequence."""
+    sequence = build_anchor_evidence_sequence(features, boxes_xyxy, scores, frames, max_gap=max_gap)
+    return sequence[-1] if len(sequence) else np.zeros(7, dtype=np.float32)
 
-    The first anchor follows the task-book birth contract exactly.  Later
-    anchors use only an already-observed prior anchor; no future rows or GT
-    labels are consulted.
-    """
-    if len(features) == 0:
-        return np.zeros(7, dtype=np.float32)
-    current = np.asarray(features[0], dtype=np.float32)
-    box = np.asarray(boxes_xyxy[0], dtype=np.float32)
-    det_score = float(np.asarray(scores)[0])
-    if previous is None:
-        return np.asarray([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
-    fast = np.mean(previous.features[-min(4, len(previous.features)):], axis=0)
-    slow = np.mean(previous.features, axis=0)
-    prev_box = previous._last_box if hasattr(previous, "_last_box") else box
-    area = max(float(max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])), 1e-6)
-    old_area = max(float(max(0.0, prev_box[2] - prev_box[0]) * max(0.0, prev_box[3] - prev_box[1])), 1e-6)
-    area_change = float(np.clip(np.log(area / old_area), -2.0, 2.0) / 2.0)
-    gap = max(0, int(frames[0]) - int(previous.last_frame))
-    return np.asarray([
-        det_score,
-        _cosine(current, fast),
-        _cosine(current, slow),
-        _cosine(fast, slow),
-        min(1.0, len(previous.features) / 100.0),
-        min(1.0, gap / max(int(max_gap), 1)),
-        area_change,
-    ], dtype=np.float32)
+
+def build_memory_anchor(
+    *,
+    fragment_id: str,
+    root_id: int,
+    video_id: int,
+    rows: Sequence[int],
+    features: np.ndarray,
+    boxes_xyxy: np.ndarray,
+    scores: np.ndarray,
+    frames: np.ndarray,
+    dedup_cos: float = 0.95,
+    capacity: int = 64,
+    max_gap: int = 60,
+) -> MemoryAnchor:
+    """Build the canonical synchronized memory bank used by train/inference."""
+    all_rows = [int(row) for row in rows]
+    if not all_rows:
+        raise ValueError("a memory fragment must contain at least one row")
+    local_features = np.asarray(features[all_rows], dtype=np.float32)
+    local_boxes = np.asarray(boxes_xyxy[all_rows], dtype=np.float32)
+    local_scores = np.asarray(scores[all_rows], dtype=np.float32)
+    local_frames = np.asarray(frames[all_rows], dtype=np.int64)
+    sequence = build_anchor_evidence_sequence(local_features, local_boxes, local_scores, local_frames, max_gap=max_gap)
+    bank_features: list[np.ndarray] = []
+    bank_evidence: list[np.ndarray] = []
+    bank_rows: list[int] = []
+    for row, feature, evidence in zip(all_rows, local_features, sequence):
+        if not bank_features or max(_cosine(feature, old) for old in bank_features) < float(dedup_cos):
+            bank_features.append(np.asarray(feature, dtype=np.float32))
+            bank_evidence.append(np.asarray(evidence, dtype=np.float32))
+            bank_rows.append(int(row))
+    bank_features = bank_features[-int(capacity):]
+    bank_evidence = bank_evidence[-int(capacity):]
+    bank_rows = bank_rows[-int(capacity):]
+    return MemoryAnchor(
+        fragment_id=str(fragment_id), root_id=int(root_id), video_id=int(video_id),
+        first_frame=int(local_frames[0]), last_frame=int(local_frames[-1]),
+        features=np.asarray(bank_features, dtype=np.float32),
+        evidence=np.asarray(bank_evidence, dtype=np.float32),
+        row_indices=bank_rows, fragment_rows=all_rows,
+    )
 
 
 def _split_fragments(records: Sequence[Mapping[str, Any]], embeddings: np.ndarray) -> list[MemoryAnchor]:
@@ -132,21 +234,12 @@ def _split_fragments(records: Sequence[Mapping[str, Any]], embeddings: np.ndarra
         boxes = np.asarray([records[i]["_box_xyxy"] for i in indices], dtype=np.float32)
         scores = np.asarray([records[i]["score"] for i in indices], dtype=np.float32)
         frames = np.asarray([records[i]["frame_index"] for i in indices], dtype=np.int64)
-        # Store a compact recent bank.  Deduplication is performed against the
-        # existing bank, never by averaging the bank before top-r scoring.
-        bank: list[np.ndarray] = []
-        for feature in feats:
-            if not bank or max(_cosine(feature, old) for old in bank) < 0.95:
-                bank.append(feature)
-        if not bank:
-            bank = [feats[0]]
-        bank = bank[-64:]
-        anchor = MemoryAnchor(
+        anchor = build_memory_anchor(
             fragment_id=f"{video_id}:{local_id}:{serial}", root_id=int(local_id), video_id=int(video_id),
-            first_frame=int(frames[0]), last_frame=int(frames[-1]), features=np.asarray(bank, dtype=np.float32),
-            evidence=build_anchor_evidence(feats, boxes, scores, frames), row_indices=indices,
+            rows=indices, features=embeddings, boxes_xyxy=np.asarray([records[i]["_box_xyxy"] for i in range(len(records))], dtype=np.float32),
+            scores=np.asarray([records[i]["score"] for i in range(len(records))], dtype=np.float32),
+            frames=np.asarray([records[i]["frame_index"] for i in range(len(records))], dtype=np.int64),
         )
-        anchor._last_box = boxes[-1]  # type: ignore[attr-defined]
         output.append(anchor)
     return sorted(output, key=lambda item: (item.video_id, item.first_frame, item.fragment_id))
 
@@ -177,12 +270,12 @@ def _has_frame_collision(
 ) -> bool:
     """Reject a causal merge if another current-frame row already owns target."""
     own_target_counts: dict[tuple[int, int], int] = defaultdict(int)
-    for row_index in fragment.row_indices:
+    for row_index in fragment.fragment_rows:
         row = result[row_index]
         key = (int(row["video_id"]), int(row["frame_index"]))
         if int(row["track_id"]) == int(target):
             own_target_counts[key] += 1
-    for key in {(int(result[i]["video_id"]), int(result[i]["frame_index"])) for i in fragment.row_indices}:
+    for key in {(int(result[i]["video_id"]), int(result[i]["frame_index"])) for i in fragment.fragment_rows}:
         total = int(occupancy.get(key, {}).get(int(target), 0))
         if total - own_target_counts.get(key, 0) > 0:
             return True
@@ -198,7 +291,7 @@ def _apply_fragment_target(
 ) -> int:
     """Rewrite source rows and keep per-frame counts synchronized."""
     changed = 0
-    for row_index in fragment.row_indices:
+    for row_index in fragment.fragment_rows:
         row = result[row_index]
         if int(row["track_id"]) != int(source):
             continue
@@ -233,7 +326,9 @@ class StreamingReactivationEngine:
         self.use_reliability = bool(use_reliability)
         self.reliability_model = reliability_model
         self.device = device
-        self.scorer = PartialSupportScorer(self.config, beta=0.25 if use_reliability else 0.0).to(device)
+        self.scorer = PartialSupportScorer(self.config, beta=0.0).to(device)
+        if self.reliability_model is not None:
+            self.reliability_model = self.reliability_model.to(device)
 
     def process_video(self, records: Sequence[Mapping[str, Any]], embeddings: np.ndarray) -> tuple[list[dict[str, Any]], ReactivationDiagnostics]:
         if not records:
@@ -251,7 +346,7 @@ class StreamingReactivationEngine:
                 root_for_fragment[fragment.fragment_id] = fragment.root_id
                 prior_buckets[fragment.video_id].setdefault(fragment.last_frame, []).append(fragment)
                 continue
-            q_indices = fragment.row_indices[: self.config.query_observations]
+            q_indices = fragment.fragment_rows[: self.config.query_observations]
             query = torch.as_tensor(embeddings[q_indices], dtype=torch.float32, device=self.device)
             # top-k is only a prefilter.  Scoring calls are made on the actual
             # candidate memory, and no candidate is replaced by a GT row.
@@ -280,10 +375,11 @@ class StreamingReactivationEngine:
                 memory_mask[candidate_index, :count] = True
                 if reliability_batch is not None:
                     with torch.no_grad():
-                        value = self.reliability_model.reliability(torch.as_tensor(candidate.evidence, dtype=torch.float32, device=self.device).reshape(1, 7)).reshape(())
-                    reliability_batch[candidate_index, :count] = value
+                        values = self.reliability_model.reliability(torch.as_tensor(candidate.evidence, dtype=torch.float32, device=self.device)).reshape(-1)
+                    reliability_batch[candidate_index, :count] = values
             with torch.no_grad():
-                evidence = self.scorer(query.unsqueeze(0).expand(len(candidates), -1, -1), memory_batch, memory_mask=memory_mask, memory_reliability=reliability_batch)
+                beta = self.reliability_model.reliability_scale if self.use_reliability and self.reliability_model is not None else None
+                evidence = self.scorer(query.unsqueeze(0).expand(len(candidates), -1, -1), memory_batch, memory_mask=memory_mask, memory_reliability=reliability_batch, reliability_scale=beta)
             diagnostics.scorer_calls += len(candidates)
             scored: list[tuple[float, MemoryAnchor]] = []
             values = evidence.score.detach().cpu().numpy().reshape(-1)
@@ -348,7 +444,7 @@ class StreamingReactivationEngine:
         for fragment_index, fragment in enumerate(fragments):
             same_video = _causal_candidates(prior_buckets.setdefault(fragment.video_id, {}), fragment, self.config.max_gap)
             if same_video:
-                q_indices = fragment.row_indices[: self.config.query_observations]
+                q_indices = fragment.fragment_rows[: self.config.query_observations]
                 query_features = np.asarray(embeddings[q_indices], dtype=np.float32)
                 query_features = query_features / np.maximum(np.linalg.norm(query_features, axis=1, keepdims=True), self.config.eps)
                 last_features = np.asarray([item.features[-1] for item in same_video], dtype=np.float32)
@@ -378,7 +474,7 @@ class StreamingReactivationEngine:
             dim = int(embeddings.shape[1])
             for fragment_index, candidate in chunk:
                 fragment = fragments[fragment_index]
-                q_indices = fragment.row_indices[:max_query]
+                q_indices = fragment.fragment_rows[:max_query]
                 q = np.asarray(embeddings[q_indices], dtype=np.float32)
                 qmask = np.zeros(max_query, dtype=bool); qmask[:len(q)] = True
                 qpad = np.zeros((max_query, dim), dtype=np.float32); qpad[:len(q)] = q
@@ -392,11 +488,14 @@ class StreamingReactivationEngine:
             memory_mask_tensor = torch.as_tensor(np.asarray(memory_masks), dtype=torch.bool, device=self.device)
             reliability_tensor = None
             if self.use_reliability and self.reliability_model is not None:
+                reliability_tensor = torch.zeros((len(chunk), max_memory), dtype=torch.float32, device=self.device)
                 with torch.no_grad():
-                    rel = self.reliability_model.reliability(torch.as_tensor(np.asarray(evidences), dtype=torch.float32, device=self.device)).reshape(-1, 1)
-                reliability_tensor = rel.expand(-1, max_memory)
+                    for index, evidence_rows in enumerate(evidences):
+                        values = self.reliability_model.reliability(torch.as_tensor(evidence_rows, dtype=torch.float32, device=self.device)).reshape(-1)
+                        reliability_tensor[index, :len(values)] = values
             with torch.no_grad():
-                scores = self.scorer(query_tensor, memory_tensor, query_mask=query_mask_tensor, memory_mask=memory_mask_tensor, memory_reliability=reliability_tensor).score
+                beta = self.reliability_model.reliability_scale if self.use_reliability and self.reliability_model is not None else None
+                scores = self.scorer(query_tensor, memory_tensor, query_mask=query_mask_tensor, memory_mask=memory_mask_tensor, memory_reliability=reliability_tensor, reliability_scale=beta).score
             diagnostics.scorer_batches += 1
             values = scores.detach().cpu().numpy().reshape(-1)
             diagnostics.scorer_calls += len(chunk)
@@ -437,4 +536,4 @@ class StreamingReactivationEngine:
         return result, diagnostics
 
 
-__all__ = ["MemoryAnchor", "ReactivationDecision", "ReactivationDiagnostics", "StreamingReactivationEngine", "build_anchor_evidence"]
+__all__ = ["MemoryAnchor", "ReactivationDecision", "ReactivationDiagnostics", "StreamingReactivationEngine", "build_anchor_evidence", "build_anchor_evidence_sequence", "build_memory_anchor"]

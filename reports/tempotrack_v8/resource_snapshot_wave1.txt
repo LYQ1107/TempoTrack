@@ -1,0 +1,26 @@
+=== 2026-09-10 00:11:33 CST ===
+0, GPU-d3a949d3-b3ef-04b0-92c5-594a63857898, NVIDIA A100-SXM4-40GB, 40960, 3635, 36703, 78
+1, GPU-5de9a1c2-0cc1-4fda-7d25-493f86f52424, NVIDIA A100-SXM4-40GB, 40960, 3, 40335, 0
+2, GPU-a4095968-9191-50eb-d56c-ed633b31e2c0, NVIDIA A100-SXM4-40GB, 40960, 3, 40335, 0
+3, GPU-f931e51b-55b2-c2c2-6506-b6f986864d54, NVIDIA A100-SXM4-40GB, 40960, 3, 40335, 0
+4, GPU-daa9b388-4540-242c-83d7-3261bb232a7c, NVIDIA A100-SXM4-40GB, 40960, 1871, 38467, 16
+5, GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81, NVIDIA A100-SXM4-40GB, 40960, 3, 40335, 0
+6, GPU-c2902ddf-62f4-cc2f-5d9f-d33c74555847, NVIDIA A100-SXM4-40GB, 40960, 3, 40335, 0
+7, GPU-995c9557-d84e-1a76-f02f-b1ddea34e56b, NVIDIA A100-SXM4-40GB, 40960, 3, 40335, 0
+8, GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119, NVIDIA A100-SXM4-40GB, 40960, 1537, 38801, 21
+9, GPU-e947d8da-fc7a-4c0b-7d91-e9e67d34f4a6, NVIDIA A100-SXM4-40GB, 40960, 3, 40335, 0
+
+GPU-d3a949d3-b3ef-04b0-92c5-594a63857898, 6055, /home/lwr/anaconda3/envs/masaenv/bin/python, 1280
+GPU-d3a949d3-b3ef-04b0-92c5-594a63857898, 7212, /home/lwr/anaconda3/envs/ovtr/bin/python, 2352
+GPU-daa9b388-4540-242c-83d7-3261bb232a7c, 33084, /home/lwr/anaconda3/envs/locatemot/bin/python, 1868
+GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119, 35474, /home/lwr/anaconda3/envs/BoT-SORT/bin/python, 1534
+
+              total        used        free      shared  buff/cache   available
+Mem:           125G         27G        2.5G        449M         95G         96G
+Swap:            0B          0B          0B
+
+40
+ 00:11:33 up 155 days,  1:50,  3 users,  load average: 26.68, 25.39, 24.91
+
+6055 /home/lwr/anaconda3/envs/masaenv/bin/python -m tempotrack_research.cli psmr-v7 train --repo . --config configs/research/psmr_v8.yaml --resolved-inputs reports/tempotrack_v8/resolved_inputs.json --episodes outputs/tempotrack_v8/episodes/train_base.jsonl --run-root outputs/tempotrack_v8/psmr_anchor/training/seed0 --seed 0 --device cuda:0 --max-steps 20000 --resume auto
+7951 /bin/bash -lc bash /home/user/.codex/attachments/78089224-772a-4478-b13b-d6dd5b25e0b1/CODEX_TEMPOTRACK_V8_RESOURCE_LAUNCH_TEMPLATE.sh resources > reports/tempotrack_v8/resource_snapshot_wave1.txt; /home/lwr/anaconda3/envs/masaenv/bin/python - <<'PY' import hashlib, json, os from pathlib import Path files = {  'masa_test': Path('/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_test_lvis_v1_classes.json'),  'vov_cov_test_burst': Path('/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json'),  'vov_cov_val': Path('/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/validation_ours_v1.json'),  'masa_val': Path('/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_val_lvis_v1_classes.json'), } def sha(p):  h=hashlib.sha256()  with p.open('rb') as f:   for b in iter(lambda:f.read(1024*1024),b''): h.update(b)  return h.hexdigest() result={'schema_version':1,'generated_by':'V8 read-only annotation audit','frameworks':{}} for key,p in files.items():  d=json.loads(p.read_text())  result['frameworks'][key]={'path':str(p),'sha256':sha(p),'schema':sorted(d),'counts':{k:len(d.get(k,[])) for k in ('videos','images','annotations','categories','tracks') if k in d},'category_id_min':min(int(x['id']) for x in d['categories']),'category_id_max':max(int(x['id']) for x in d['categories'])} result['notes']=[  'MASA uses the exact tao_test_lvis_v1_classes.json requested by the V8 protocol.',  'VOVTrack/COVTrack TAO old-pipeline test path uses the locally verified BURST-derived tao_test_burst_v1.json; it has the same videos/images/annotations/tracks counts as the MASA file but a distinct categories section and therefore is not substituted across frameworks.',  'VOVTrack/COVTrack validation uses validation_ours_v1.json from the existing OVTR reference artifact.' ] out=Path('reports/tempotrack_v8/TEST_ANNOTATION_MANIFEST.json'); out.parent.mkdir(parents=True,exist_ok=True); out.write_text(json.dumps(result,indent=2)+'\n') print(out) PY sha256sum reports/tempotrack_v8/TEST_ANNOTATION_MANIFEST.json reports/tempotrack_v8/resource_snapshot_wave1.txt

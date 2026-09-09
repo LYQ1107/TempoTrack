@@ -15,6 +15,7 @@ import torch.nn.functional as F
 
 from ..analysis.partial_support import PartialSupportConfig, PartialSupportScorer
 from ..models.memory_reliability import MemoryReliabilityCalibrator
+from ..streaming.partial_support import build_memory_anchor
 from ..streaming.psmr_dataset import VideoData, load_episodes
 
 
@@ -23,25 +24,12 @@ def _sha(value: object) -> str:
 
 
 def _evidence(video: VideoData, rows: Sequence[int], max_gap: int = 60) -> torch.Tensor:
-    rows = list(rows)
-    if not rows:
-        return torch.zeros((1, 7), dtype=torch.float32)
-    first = int(rows[0]); last = int(rows[-1])
-    feat = video.features[rows]
-    if len(feat) > 1:
-        fast = feat[-min(4, len(feat)):].mean(axis=0)
-        slow = feat.mean(axis=0)
-        norm = lambda a: a / max(float(np.linalg.norm(a)), 1e-6)
-        fast_cos = float(np.dot(norm(feat[0]), norm(fast)))
-        slow_cos = float(np.dot(norm(feat[0]), norm(slow)))
-        agreement = float(np.dot(norm(fast), norm(slow)))
-    else:
-        fast_cos = slow_cos = 0.0
-        agreement = 1.0
-    boxes = video.boxes_xyxy[rows]
-    area = np.maximum((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]), 1e-6)
-    area_change = float(np.clip(np.log(area[-1] / area[0]), -2.0, 2.0) / 2.0)
-    return torch.as_tensor([[float(video.scores[first]), fast_cos, slow_cos, agreement, min(1.0, len(rows) / 100.0), min(1.0, max(0, last - first) / max_gap), area_change]], dtype=torch.float32)
+    anchor = build_memory_anchor(
+        fragment_id="training", root_id=0, video_id=int(video.video_id), rows=list(rows),
+        features=video.features, boxes_xyxy=video.boxes_xyxy, scores=video.scores,
+        frames=video.frames, dedup_cos=0.95, capacity=64, max_gap=max_gap,
+    )
+    return torch.as_tensor(anchor.evidence, dtype=torch.float32)
 
 
 def _candidate_score(
@@ -55,15 +43,20 @@ def _candidate_score(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     dev = next(calibrator.parameters()).device
     query = torch.as_tensor(video.features[list(query_rows)], dtype=torch.float32, device=dev)
-    memory = torch.as_tensor(video.features[list(candidate_rows)][-64:], dtype=torch.float32, device=dev)
-    evidence = _evidence(video, candidate_rows).to(dev)
-    logit = calibrator(evidence).reshape(())
+    anchor = build_memory_anchor(
+        fragment_id="training", root_id=0, video_id=int(video.video_id), rows=list(candidate_rows),
+        features=video.features, boxes_xyxy=video.boxes_xyxy, scores=video.scores,
+        frames=video.frames, dedup_cos=float(scorer.config.dedup_cos), capacity=int(scorer.config.memory_capacity), max_gap=int(scorer.config.max_gap),
+    )
+    memory = torch.as_tensor(anchor.features, dtype=torch.float32, device=dev)
+    evidence = torch.as_tensor(anchor.evidence, dtype=torch.float32, device=dev)
+    logits = calibrator(evidence).reshape(-1)
     if learned:
-        reliability = calibrator.reliability(evidence).expand(memory.shape[0])
-        result = scorer(query, memory, memory_reliability=reliability)
+        reliability = calibrator.reliability(evidence)
+        result = scorer(query, memory, memory_reliability=reliability, reliability_scale=calibrator.reliability_scale)
     else:
         result = scorer(query, memory)
-    return result.score, logit
+    return result.score, logits
 
 
 def train_psmr(
@@ -87,7 +80,7 @@ def train_psmr(
     requested_device = str(device)
     actual_device = torch.device(requested_device if requested_device.startswith("cuda") and torch.cuda.is_available() else "cpu")
     pconfig = PartialSupportConfig(**dict(config.get("partial_support", {})))
-    scorer = PartialSupportScorer(pconfig, beta=float(config.get("training", {}).get("reliability_beta", 0.25))).to(actual_device)
+    scorer = PartialSupportScorer(pconfig, beta=0.0).to(actual_device)
     calibrator = MemoryReliabilityCalibrator().to(actual_device)
     optimizer = torch.optim.AdamW(calibrator.parameters(), lr=float(config.get("training", {}).get("lr", 1e-3)), weight_decay=float(config.get("training", {}).get("weight_decay", 1e-4)))
     config_hash = _sha(config)
@@ -95,53 +88,78 @@ def train_psmr(
     last_path = run_root / "last.pt"
     if resume in {"auto", "strict"} and last_path.exists():
         checkpoint = torch.load(last_path, map_location=actual_device)
+        if checkpoint.get("algorithm_revision") != "per_anchor_v8" or checkpoint.get("artifact") != "psmr_v8_checkpoint":
+            raise ValueError("refusing to resume a pre-V8 candidate-level PSMR checkpoint")
         if checkpoint.get("config_hash") != config_hash or checkpoint.get("input_hash", input_hash) != input_hash:
             if resume == "strict":
                 raise ValueError("existing PSMR checkpoint is incompatible with config/input hash")
         else:
             calibrator.load_state_dict(checkpoint["model_state"]); optimizer.load_state_dict(checkpoint["optimizer_state"])
-            start_step = int(checkpoint["step"]); best_loss = float(checkpoint.get("best_loss", best_loss))
+            start_step = int(checkpoint.get("optimizer_steps", checkpoint.get("step", 0))); best_loss = float(checkpoint.get("best_loss", best_loss))
             if start_step >= int(max_steps):
-                return {"status": "REUSED", "checkpoint": str(last_path), "step": start_step, "device": str(actual_device)}
+                result = {"status": "COMPLETED", "requested_steps": int(max_steps), "optimizer_steps": start_step, "algorithm_revision": "per_anchor_v8", "base_only_supervision": True, "official_validation_used": False, "checkpoint": str(last_path), "best_checkpoint": str(run_root / "best.pt"), "step": start_step, "device": str(actual_device), "config_hash": config_hash, "input_hash": input_hash}
+                (run_root / "train_result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+                return result
     metrics_path = run_root / "metrics.jsonl"
     log_mode = "a" if start_step else "w"
     handle = metrics_path.open(log_mode, encoding="utf-8")
     try:
         generator = np.random.default_rng(int(seed) + start_step)
-        for step in range(start_step + 1, int(max_steps) + 1):
+        optimizer_steps = int(start_step)
+        attempts = 0
+        while optimizer_steps < int(max_steps):
+            attempts += 1
+            if attempts > max(1000, int(max_steps) * 1000):
+                raise RuntimeError("unable to sample a valid rank episode with masked anchor supervision")
             episode = episodes[int(generator.integers(0, len(episodes)))]
             video = videos[int(episode["video_id"])]
-            scores = []; rel_logits = []; labels = []
+            scores = []; rel_logits = []; labels = []; anchor_targets = []; anchor_masks = []
             for candidate in episode["candidates"]:
                 score, rel_logit = _candidate_score(scorer, calibrator, video, episode["query_rows"], candidate["rows"], learned=True)
                 if torch.isfinite(score):
                     scores.append(score); rel_logits.append(rel_logit); labels.append(float(candidate["label"]))
+                    labels_for_anchor = candidate.get("anchor_labels")
+                    masks_for_anchor = candidate.get("anchor_label_mask")
+                    if labels_for_anchor is None or masks_for_anchor is None or len(labels_for_anchor) != len(rel_logit) or len(masks_for_anchor) != len(rel_logit):
+                        raise ValueError("V8 episode is missing aligned per-anchor labels/masks")
+                    anchor_targets.append(torch.as_tensor(labels_for_anchor, dtype=torch.float32, device=actual_device))
+                    anchor_masks.append(torch.as_tensor(masks_for_anchor, dtype=torch.bool, device=actual_device))
             if not scores or sum(labels) < 1 or sum(label == 0 for label in labels) < 1:
                 continue
             score_tensor = torch.stack(scores)
             label_tensor = torch.as_tensor(labels, dtype=torch.float32, device=actual_device)
             positive = torch.where(label_tensor > 0.5)[0][0]
             rank_loss = -F.log_softmax(score_tensor / float(config.get("training", {}).get("temperature", 0.07)), dim=0)[positive]
-            logits = torch.stack(rel_logits)
-            pos_weight = torch.where(label_tensor > 0.5, (label_tensor.numel() - label_tensor.sum()).clamp_min(1) / label_tensor.sum().clamp_min(1), torch.ones_like(label_tensor))
-            rel_loss = F.binary_cross_entropy_with_logits(logits, label_tensor, weight=pos_weight)
+            logits = torch.cat(rel_logits)
+            rel_targets = torch.cat(anchor_targets)
+            rel_mask = torch.cat(anchor_masks)
+            if bool(rel_mask.any()):
+                positive_count = rel_targets[rel_mask].sum().clamp_min(1.0)
+                negative_count = (rel_mask.sum() - rel_targets[rel_mask].sum()).clamp_min(1.0)
+                pos_weight = negative_count / positive_count
+                rel_loss = F.binary_cross_entropy_with_logits(logits[rel_mask], rel_targets[rel_mask], pos_weight=pos_weight)
+            else:
+                rel_loss = logits.sum() * 0.0
             loss = rank_loss + 0.5 * rel_loss
             optimizer.zero_grad(set_to_none=True); loss.backward()
             torch.nn.utils.clip_grad_norm_(calibrator.parameters(), float(config.get("training", {}).get("grad_clip", 1.0)))
             optimizer.step()
-            record = {"step": step, "loss": float(loss.detach()), "rank_loss": float(rank_loss.detach()), "reliability_loss": float(rel_loss.detach()), "episode_id": int(episode["episode_id"])}
+            optimizer_steps += 1
+            record = {"step": optimizer_steps, "loss": float(loss.detach()), "rank_loss": float(rank_loss.detach()), "reliability_loss": float(rel_loss.detach()), "episode_id": int(episode["episode_id"]), "anchor_supervision_count": int(rel_mask.sum())}
             handle.write(json.dumps(record) + "\n")
-            if step % int(config.get("training", {}).get("log_every", 100)) == 0:
+            if optimizer_steps % int(config.get("training", {}).get("log_every", 100)) == 0:
                 handle.flush()
             current = float(loss.detach())
             if current < best_loss:
                 best_loss = current
-                torch.save({"schema_version": 1, "artifact": "psmr_v7_checkpoint", "step": step, "seed": int(seed), "model_state": calibrator.state_dict(), "optimizer_state": optimizer.state_dict(), "config_hash": config_hash, "input_hash": input_hash, "partial_support_config": dict(config.get("partial_support", {})), "loss": record, "best_loss": best_loss}, run_root / "best.pt")
-            if step % int(config.get("training", {}).get("save_every", 500)) == 0 or step == int(max_steps):
-                torch.save({"schema_version": 1, "artifact": "psmr_v7_checkpoint", "step": step, "seed": int(seed), "model_state": calibrator.state_dict(), "optimizer_state": optimizer.state_dict(), "config_hash": config_hash, "input_hash": input_hash, "partial_support_config": dict(config.get("partial_support", {})), "loss": record, "best_loss": best_loss}, last_path)
+                torch.save({"schema_version": 2, "artifact": "psmr_v8_checkpoint", "algorithm_revision": "per_anchor_v8", "optimizer_steps": optimizer_steps, "step": optimizer_steps, "seed": int(seed), "model_state": calibrator.state_dict(), "optimizer_state": optimizer.state_dict(), "config_hash": config_hash, "input_hash": input_hash, "partial_support_config": dict(config.get("partial_support", {})), "loss": record, "best_loss": best_loss}, run_root / "best.pt")
+            if optimizer_steps % int(config.get("training", {}).get("save_every", 500)) == 0 or optimizer_steps == int(max_steps):
+                torch.save({"schema_version": 2, "artifact": "psmr_v8_checkpoint", "algorithm_revision": "per_anchor_v8", "optimizer_steps": optimizer_steps, "step": optimizer_steps, "seed": int(seed), "model_state": calibrator.state_dict(), "optimizer_state": optimizer.state_dict(), "config_hash": config_hash, "input_hash": input_hash, "partial_support_config": dict(config.get("partial_support", {})), "loss": record, "best_loss": best_loss}, last_path)
     finally:
         handle.close()
-    return {"status": "COMPLETED", "checkpoint": str(last_path), "best_checkpoint": str(run_root / "best.pt"), "step": int(max_steps), "best_loss": best_loss, "device": str(actual_device), "config_hash": config_hash, "input_hash": input_hash}
+    result = {"status": "COMPLETED", "requested_steps": int(max_steps), "optimizer_steps": int(optimizer_steps), "algorithm_revision": "per_anchor_v8", "base_only_supervision": True, "official_validation_used": False, "checkpoint": str(last_path), "best_checkpoint": str(run_root / "best.pt"), "step": int(optimizer_steps), "best_loss": best_loss, "device": str(actual_device), "config_hash": config_hash, "input_hash": input_hash}
+    (run_root / "train_result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    return result
 
 
 __all__ = ["train_psmr"]

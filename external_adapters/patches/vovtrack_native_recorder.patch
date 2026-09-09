@@ -1,0 +1,71 @@
+diff --git a/ovtrack/models/mot/ovtrack.py b/ovtrack/models/mot/ovtrack.py
+index c9ba0c8..e5d57e4 100644
+--- a/ovtrack/models/mot/ovtrack.py
++++ b/ovtrack/models/mot/ovtrack.py
+@@ -172,6 +172,7 @@ class OVTrack(TwoStageDetector):
+                 cls_embeds=cem_feats,
+                 frame_id=frame_id,
+                 method=self.method,
++                filename=img_name,
+             )
+
+         bbox_result = bbox2result(det_bboxes, det_labels, self.roi_head.num_classes)
+@@ -379,6 +380,7 @@ class OVTrackSelfTrain(TwoStageDetector):
+                 cls_embeds=cem_feats,
+                 frame_id=frame_id,
+                 method=self.method,
++                filename=img_name,
+             )
+
+         bbox_result = bbox2result(det_bboxes, det_labels, self.roi_head.num_classes)
+@@ -676,4 +678,3 @@ class HybridSortSelfTrain(TwoStageDetector):
+             backend=backend,
+         )
+         return img
+-
+diff --git a/ovtrack/models/trackers/ovtracker.py b/ovtrack/models/trackers/ovtracker.py
+index 64c3cbb..844b2fc 100644
+--- a/ovtrack/models/trackers/ovtracker.py
++++ b/ovtrack/models/trackers/ovtracker.py
+@@ -14,6 +14,29 @@ from ovtrack.core import cal_similarity
+ from ..builder import TRACKERS
+
+
++def _record_tempotrack_native_call(bboxes, labels, embeds, cls_embeds, ids, frame_id, kwargs):
++    """Optional V8 recorder; no-op unless explicitly enabled by the runner."""
++    dump_dir = os.environ.get("TEMPOTRACK_NATIVE_FEATURE_DUMP")
++    if not dump_dir or embeds is None:
++        return
++    import pathlib
++    import pickle
++    import gzip
++    root = pathlib.Path(dump_dir)
++    root.mkdir(parents=True, exist_ok=True)
++    payload = {
++        "source": os.environ.get("TEMPOTRACK_NATIVE_FEATURE_METHOD", "vovtrack"),
++        "filename": str(kwargs.get("filename", "")),
++        "frame_id": int(frame_id),
++        "bboxes": bboxes.detach().cpu().numpy(),
++        "labels": labels.detach().cpu().numpy(),
++        "embeds": embeds.detach().cpu().numpy(),
++        "cls_embeds": None if cls_embeds is None else cls_embeds.detach().cpu().numpy(),
++        "track_ids": ids.detach().cpu().numpy(),
++    }
++    compressed = os.environ.get("TEMPOTRACK_NATIVE_FEATURE_COMPRESS", "") == "gzip"
++    path = root / (f"match_calls_{os.getpid()}.pkl.gz" if compressed else f"match_calls_{os.getpid()}.pkl")
++    opener = gzip.open if compressed else open
++    with opener(path, "ab") as handle:
++        pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
++
++
+ @TRACKERS.register_module()
+ class OVTracker(object):
+     def __init__(
+@@ -291,6 +314,7 @@ class OVTracker(object):
+         else:
+             raise NotImplementedError
+
++        _record_tempotrack_native_call(bboxes, labels, embeds, cls_embeds, ids, frame_id, kwargs)
+         return bboxes, labels, ids
+
+     def remove_distractor(

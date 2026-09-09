@@ -9,6 +9,8 @@ from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
+from .partial_support import build_memory_anchor
+
 
 @dataclass
 class VideoData:
@@ -76,7 +78,13 @@ def build_base_episodes(
         info = []
         for serial, rows in enumerate(fragments):
             gt = _mode_identity(video, rows)
-            info.append({"serial": serial, "rows": rows, "first": int(video.frames[rows].min()), "last": int(video.frames[rows].max()), "gt": gt, "local_id": int(video.assignments[rows[0]])})
+            anchor = build_memory_anchor(
+                fragment_id=f"{video.video_id}:{int(video.assignments[rows[0]])}:{serial}",
+                root_id=int(video.assignments[rows[0]]), video_id=int(video.video_id), rows=rows,
+                features=video.features, boxes_xyxy=video.boxes_xyxy, scores=video.scores,
+                frames=video.frames, dedup_cos=0.95, capacity=64, max_gap=int(max_gap),
+            )
+            info.append({"serial": serial, "rows": rows, "anchor": anchor, "first": int(video.frames[rows].min()), "last": int(video.frames[rows].max()), "gt": gt, "local_id": int(video.assignments[rows[0]])})
         for target in info:
             if target["gt"] is None or len(target["rows"]) < 2:
                 continue
@@ -93,17 +101,34 @@ def build_base_episodes(
             candidates = []
             for candidate in positives[:1] + negatives:
                 label = 1 if candidate["gt"] == target["gt"] else 0
-                candidates.append({"fragment_serial": int(candidate["serial"]), "rows": [int(item) for item in candidate["rows"]], "label": label, "same_identity": bool(label), "first_frame": int(candidate["first"]), "last_frame": int(candidate["last"])})
+                anchor = candidate["anchor"]
+                anchor_labels = []
+                anchor_label_mask = []
+                for row in anchor.row_indices:
+                    valid = bool(video.supervision_allowed[row] and video.known_identity[row] and not video.ambiguous[row])
+                    anchor_labels.append(int(video.gt_identity[row] == candidate["gt"]) if valid else -1)
+                    anchor_label_mask.append(valid)
+                candidates.append({
+                    "fragment_serial": int(candidate["serial"]),
+                    "rows": [int(item) for item in candidate["rows"]],
+                    "anchor_rows": [int(item) for item in anchor.row_indices],
+                    "label": label,
+                    "same_identity": bool(label),
+                    "first_frame": int(candidate["first"]),
+                    "last_frame": int(candidate["last"]),
+                    "anchor_labels": anchor_labels,
+                    "anchor_label_mask": anchor_label_mask,
+                })
                 stats["positive_pairs" if label else "negative_pairs"] += 1
             rows_out.append({
-                "schema_version": 1,
+                "schema_version": 2,
                 "video_id": int(video.video_id),
                 "query_rows": [int(item) for item in target["rows"][: int(query_observations)]],
                 "target_rows": [int(item) for item in target["rows"]],
                 "target_identity": int(target["gt"]),
                 "target_fragment_serial": int(target["serial"]),
                 "candidates": candidates,
-                "supervision": "base_only_gt_mode_purity_0.60",
+                "supervision": "base_only_gt_mode_purity_0.60_per_anchor_consistency",
             })
             if max_episodes is not None and len(rows_out) >= int(max_episodes):
                 break

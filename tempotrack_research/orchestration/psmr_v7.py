@@ -26,7 +26,7 @@ from ..config import file_hash, load_yaml, object_hash
 from ..models.memory_reliability import MemoryReliabilityCalibrator
 from ..association.paper_emd import PaperEMDConfig, PaperRepresentativeExtractor, paper_ground_cost, paper_sinkhorn_distance
 from ..memory.identity_history import IdentityHistory, _history_observation
-from ..streaming.partial_support import StreamingReactivationEngine
+from ..streaming.partial_support import StreamingReactivationEngine, build_memory_anchor
 from ..streaming.psmr_dataset import VideoData, build_base_episodes, fragment_rows
 
 
@@ -232,7 +232,7 @@ def _pair_score(scorer: PartialSupportScorer, query: np.ndarray, memory: np.ndar
 
 def analyze_partial_support(resolved_path: str | Path, split: str, output: str | Path, *, cache_root: str | Path | None = None, device: str = "cpu", video_limit: int | None = None) -> dict:
     resolved = _resolved(resolved_path); output = Path(output); output.mkdir(parents=True, exist_ok=True)
-    cache = Path(cache_root) if cache_root else Path(resolved["repo"]) / "outputs/tempotrack_v7/cache"
+    cache = Path(cache_root) if cache_root else Path(resolved["repo"]) / "outputs/tempotrack_v8/cache"
     videos = _internal_videos(resolved, split, cache_root=cache, device=device, limit=video_limit)
     pairs: list[dict] = []
     stats = defaultdict(int)
@@ -356,7 +356,7 @@ def _write_text(path: Path, value: str) -> None:
 
 def build_psmr_data(resolved_path: str | Path, config_path: str | Path, output: str | Path, *, cache_root: str | Path | None = None, device: str = "cpu", video_limit: int | None = None) -> dict:
     resolved = _resolved(resolved_path); config = load_yaml(config_path); output = Path(output); output.mkdir(parents=True, exist_ok=True)
-    cache = Path(cache_root) if cache_root else Path(resolved["repo"]) / "outputs/tempotrack_v7/cache"
+    cache = Path(cache_root) if cache_root else Path(resolved["repo"]) / "outputs/tempotrack_v8/cache"
     videos = _internal_videos(resolved, "train_base", cache_root=cache, device=device, limit=video_limit)
     result = build_base_episodes(videos.values(), output / "train_base.jsonl", query_observations=int(config.get("partial_support", {}).get("query_observations", 1)), max_gap=int(config.get("partial_support", {}).get("max_gap", 60)), seed=int(config.get("seed", 0)))
     result.update({"input_manifest": resolved["feature_manifests"]["train_base"], "input_manifest_hash": _sha256(resolved["feature_manifests"]["train_base"]), "config_hash": object_hash(config), "video_cache": str(cache / "b2_assignments/train_base")})
@@ -387,7 +387,7 @@ def calibrate_psmr(resolved_path: str | Path, config_path: str | Path, checkpoin
         # official/novel labels enter this branch.
         import torch
         from ..training.psmr_trainer import _evidence
-        videos = _internal_videos(resolved, split, cache_root=Path(resolved["repo"]) / "outputs/tempotrack_v7/cache", device="cpu")
+        videos = _internal_videos(resolved, split, cache_root=Path(resolved["repo"]) / "outputs/tempotrack_v8/cache", device="cpu")
         state = torch.load(Path(checkpoint), map_location="cpu")
         calibrator = MemoryReliabilityCalibrator(); calibrator.load_state_dict(state["model_state"]); calibrator.eval()
         updated = []
@@ -396,13 +396,18 @@ def calibrate_psmr(resolved_path: str | Path, config_path: str | Path, checkpoin
             video = videos[int(item["video_id"])]
             for q in (1, 4):
                 query = torch.as_tensor(video.features[item["query_rows"][:q]], dtype=torch.float32)
-                memory = torch.as_tensor(video.features[item["candidate_rows"]][-64:], dtype=torch.float32)
-                evidence = _evidence(video, item["candidate_rows"])
-                reliability = calibrator.reliability(evidence).expand(memory.shape[0])
+                anchor = build_memory_anchor(
+                    fragment_id="calibration", root_id=0, video_id=int(video.video_id), rows=item["candidate_rows"],
+                    features=video.features, boxes_xyxy=video.boxes_xyxy, scores=video.scores,
+                    frames=video.frames, dedup_cos=.95, capacity=64, max_gap=int(config.get("partial_support", {}).get("max_gap", 60)),
+                )
+                memory = torch.as_tensor(anchor.features, dtype=torch.float32)
+                evidence = torch.as_tensor(anchor.evidence, dtype=torch.float32)
+                reliability = calibrator.reliability(evidence)
                 for top_r in (1, 3, 5):
                     from ..analysis.partial_support import PartialSupportScorer, PartialSupportConfig
-                    scorer = PartialSupportScorer(PartialSupportConfig(query_observations=q, top_r=top_r, memory_capacity=max(64, len(item["candidate_rows"]))), beta=.25)
-                    with torch.no_grad(): score = scorer(query, memory, memory_reliability=reliability).score
+                    scorer = PartialSupportScorer(PartialSupportConfig(query_observations=q, top_r=top_r, memory_capacity=64), beta=0.0)
+                    with torch.no_grad(): score = scorer(query, memory, memory_reliability=reliability, reliability_scale=calibrator.reliability_scale).score
                     item["scores"][f"q{q}_r{top_r}"] = float(score)
             updated.append(item)
         pairs = updated
@@ -429,16 +434,37 @@ def calibrate_psmr(resolved_path: str | Path, config_path: str | Path, checkpoin
     return result
 
 
-def _native_prediction_records(resolved: dict, checkpoint: Path | None, calibration: Mapping[str, Any], query_observations: int, scheme: str, device: str, *, run_root: Path) -> dict:
-    """Causal official inference over every native V6 shard."""
+def _native_prediction_records_from_frontend(
+    *,
+    manifest_path: Path,
+    annotation: Path,
+    frontend_prediction: Path,
+    checkpoint: Path | None,
+    calibration: Mapping[str, Any],
+    query_observations: int,
+    scheme: str,
+    device: str,
+    run_root: Path,
+    source_label: str,
+    shard_index: int | None = None,
+    shard_count: int = 1,
+) -> dict:
+    """Run the repaired PSMR engine over any immutable native frontend.
+
+    The V6 cache is the only source of boxes, scores, labels, and embeddings.
+    ``frontend_prediction`` contributes only the starting track IDs, which
+    lets the MASA Test lane use the exact official and Dual replays without
+    silently falling back to the V6 validation prediction.
+    """
     import torch
     from ..v6_cli import _annotation_categories, _cache_shards, _frames_for_shard, _load_cache_manifest, _native_uid, _rows_from_frame
     from ..v6_cli import _prediction_list
-    native_path = Path(resolved["v6_native_manifest"]); native = _load_cache_manifest(native_path)
-    annotation = Path(resolved["official_annotation"]); category_by_index, _ = _annotation_categories(annotation)
-    b2_rows = _prediction_list(resolved["prediction_inputs"]["b2"]["path"])
-    b2_by_uid = {str(row["observation_uid"]): int(row["track_id"]) for row in b2_rows}
-    if len(b2_by_uid) != len(b2_rows): raise ValueError("B2 prediction does not have unique observation UIDs")
+    native = _load_cache_manifest(manifest_path)
+    category_by_index, _ = _annotation_categories(annotation)
+    frontend_rows = _prediction_list(frontend_prediction)
+    frontend_by_uid = {str(row["observation_uid"]): int(row["track_id"]) for row in frontend_rows}
+    if len(frontend_by_uid) != len(frontend_rows):
+        raise ValueError(f"{source_label} prediction does not have unique observation UIDs")
     selected = dict(calibration)
     cfg = PartialSupportConfig(query_observations=int(query_observations), top_r=int(selected.get("top_r", 3)), max_gap=int(selected.get("gap", 60)), candidate_top_k=8)
     reliability_model = None
@@ -448,15 +474,27 @@ def _native_prediction_records(resolved: dict, checkpoint: Path | None, calibrat
         reliability_model = MemoryReliabilityCalibrator().to(device)
         reliability_model.load_state_dict(state["model_state"]); reliability_model.eval()
     engine = StreamingReactivationEngine(cfg, query_observations=query_observations, score_threshold=float(selected.get("threshold", .60)), margin_threshold=float(selected.get("margin_threshold", 0.0)), use_reliability=reliability_model is not None, reliability_model=reliability_model, device=device)
+    all_shards = list(_cache_shards(native))
+    if int(shard_count) < 1:
+        raise ValueError("native inference shard_count must be positive")
+    if shard_index is None:
+        shards = all_shards
+    else:
+        if not 0 <= int(shard_index) < int(shard_count):
+            raise ValueError("native inference shard_index must be in [0, shard_count)")
+        # A shard is a complete video.  This preserves all online state and
+        # competition decisions within a video while allowing independent
+        # workers to process disjoint videos.
+        shards = all_shards[int(shard_index)::int(shard_count)]
     output_rows: list[dict] = []; diagnostics = []
-    for shard in _cache_shards(native):
+    for shard in shards:
         frames = _frames_for_shard(shard); records = []; embeddings = []
         for frame in frames:
             for row in range(len(frame.scores)):
                 uid = _native_uid(frame.video_id, frame.frame_id, row)
-                if uid not in b2_by_uid: raise ValueError(f"B2 missing native UID {uid}")
+                if uid not in frontend_by_uid: raise ValueError(f"{source_label} missing native UID {uid}")
                 box = np.asarray(frame.boxes_xyxy[row], dtype=np.float32)
-                records.append({"video_id": int(frame.video_id), "frame_index": int(frame.frame_id), "track_id": int(b2_by_uid[uid]), "score": float(frame.scores[row]), "_box_xyxy": box, "observation_uid": uid})
+                records.append({"video_id": int(frame.video_id), "frame_index": int(frame.frame_id), "track_id": int(frontend_by_uid[uid]), "score": float(frame.scores[row]), "_box_xyxy": box, "observation_uid": uid})
                 embeddings.append(frame.embeddings_raw[row])
         # The scorer is formally unchanged by this launch size.  Each official
         # worker has its own GPU and the 16K padded batch remains well below
@@ -467,20 +505,133 @@ def _native_prediction_records(resolved: dict, checkpoint: Path | None, calibrat
             ids = np.asarray([by_uid[_native_uid(frame.video_id, frame.frame_id, row)] for row in range(len(frame.scores))], dtype=np.int64)
             output_rows.extend(_rows_from_frame(frame, category_by_index, assigned_ids=ids))
         diagnostics.append({"video_id": int(shard["video_id"]), **diag.as_dict()})
-    # Strict immutable-observation contract against the B2 file.
-    b2_payload = {str(row["observation_uid"]): {key: row[key] for key in ("video_id", "image_id", "frame_index", "bbox", "score", "category_id")} for row in b2_rows}
+    # Strict immutable-observation contract against the selected frontend.
+    selected_uids = {str(row["observation_uid"]) for row in output_rows}
+    frontend_payload = {str(row["observation_uid"]): {key: row[key] for key in ("video_id", "image_id", "frame_index", "bbox", "score", "category_id")} for row in frontend_rows if str(row["observation_uid"]) in selected_uids}
     out_payload = {str(row["observation_uid"]): {key: row[key] for key in ("video_id", "image_id", "frame_index", "bbox", "score", "category_id")} for row in output_rows}
-    if b2_payload != out_payload: raise ValueError("PSMR inference attempted to change immutable observation fields")
+    if frontend_payload != out_payload: raise ValueError("PSMR inference attempted to change immutable observation fields")
     prediction = run_root / "prediction.json"; _write_json(prediction, output_rows)
-    meta = {"schema_version": 7, "artifact": "psmr_v7_prediction", "scheme": scheme, "source_b2": resolved["prediction_inputs"]["b2"]["path"], "source_b2_hash": _sha256(resolved["prediction_inputs"]["b2"]["path"]), "prediction_hash": object_hash(output_rows), "record_count": len(output_rows), "diagnostics": {"videos": diagnostics, "aggregate": {key: int(sum(item[key] for item in diagnostics)) for key in ("candidate_pairs", "scorer_calls", "finite_scores", "changed_observation_ids", "accepted", "rejected")}}}
+    meta = {"schema_version": 8, "artifact": "psmr_native_prediction", "scheme": scheme, "source_frontend": str(frontend_prediction.resolve()), "source_frontend_hash": _sha256(frontend_prediction), "source_manifest": str(manifest_path.resolve()), "source_manifest_hash": _sha256(manifest_path), "annotation": str(annotation.resolve()), "annotation_hash": _sha256(annotation), "prediction_hash": object_hash(output_rows), "record_count": len(output_rows), "video_count": len(shards), "total_video_count": len(all_shards), "shard_index": None if shard_index is None else int(shard_index), "shard_count": int(shard_count), "diagnostics": {"videos": diagnostics, "aggregate": {key: int(sum(item[key] for item in diagnostics)) for key in ("candidate_pairs", "scorer_calls", "finite_scores", "changed_observation_ids", "accepted", "rejected")}}}
     _write_json(run_root / "prediction.meta.json", meta)
     return {"status": "COMPLETED", "prediction": str(prediction), "metadata": str(run_root / "prediction.meta.json"), "prediction_hash": meta["prediction_hash"], "diagnostics": meta["diagnostics"]}
+
+
+def _native_prediction_records(resolved: dict, checkpoint: Path | None, calibration: Mapping[str, Any], query_observations: int, scheme: str, device: str, *, run_root: Path) -> dict:
+    """Causal official validation inference over the validated V6 B2 frontend."""
+    return _native_prediction_records_from_frontend(
+        manifest_path=Path(resolved["v6_native_manifest"]),
+        annotation=Path(resolved["official_annotation"]),
+        frontend_prediction=Path(resolved["prediction_inputs"]["b2"]["path"]),
+        checkpoint=checkpoint,
+        calibration=calibration,
+        query_observations=query_observations,
+        scheme=scheme,
+        device=device,
+        run_root=run_root,
+        source_label="B2",
+    )
 
 
 def infer_psmr(resolved_path: str | Path, checkpoint: str | Path | None, calibration: str | Path, split: str, query_observations: int, scheme: str, output: str | Path, device: str = "cpu") -> dict:
     resolved = _resolved(resolved_path); calibration_data = _json(calibration); output = Path(output); output.mkdir(parents=True, exist_ok=True)
     if split != "official_validation": raise ValueError("V7 official inference requires --split official_validation")
     return _native_prediction_records(resolved, None if checkpoint is None or str(checkpoint) == "none" else Path(checkpoint), calibration_data, query_observations, scheme, device, run_root=output)
+
+
+def infer_psmr_native(
+    *,
+    observation_manifest: str | Path,
+    frontend_prediction: str | Path,
+    annotation: str | Path,
+    checkpoint: str | Path | None,
+    calibration: str | Path,
+    query_observations: int,
+    scheme: str,
+    output: str | Path,
+    device: str = "cpu",
+    shard_index: int | None = None,
+    shard_count: int = 1,
+) -> dict:
+    """Apply repaired PSMR to a native cache/frontend pair (e.g. MASA Test)."""
+    output_path = Path(output); output_path.mkdir(parents=True, exist_ok=True)
+    calibration_data = _json(calibration)
+    return _native_prediction_records_from_frontend(
+        manifest_path=Path(observation_manifest),
+        annotation=Path(annotation),
+        frontend_prediction=Path(frontend_prediction),
+        checkpoint=None if checkpoint is None or str(checkpoint) == "none" else Path(checkpoint),
+        calibration=calibration_data,
+        query_observations=query_observations,
+        scheme=scheme,
+        device=device,
+        run_root=output_path,
+        source_label="frontend",
+        shard_index=shard_index,
+        shard_count=shard_count,
+    )
+
+
+def merge_native_predictions(
+    *,
+    manifest: str | Path,
+    frontend_prediction: str | Path,
+    annotation: str | Path,
+    parts: Sequence[str | Path],
+    output: str | Path,
+    scheme: str,
+) -> dict:
+    """Merge video-sharded native predictions with an exact UID contract."""
+    from ..v6_cli import _prediction_list
+
+    manifest_path = Path(manifest).resolve()
+    frontend_path = Path(frontend_prediction).resolve()
+    annotation_path = Path(annotation).resolve()
+    frontend_rows = _prediction_list(frontend_path)
+    frontend_by_uid = {str(row["observation_uid"]): row for row in frontend_rows}
+    if len(frontend_by_uid) != len(frontend_rows):
+        raise ValueError("frontend prediction has duplicate observation_uid values")
+    merged: dict[str, dict] = {}
+    part_meta: list[dict] = []
+    for part in parts:
+        part_path = Path(part).resolve()
+        prediction_path = part_path / "prediction.json" if part_path.is_dir() else part_path
+        meta_path = prediction_path.with_name("prediction.meta.json")
+        if not prediction_path.exists() or not meta_path.exists():
+            raise FileNotFoundError(f"native prediction part is incomplete: {part_path}")
+        meta = _json(meta_path)
+        if meta.get("source_frontend_hash") != _sha256(frontend_path):
+            raise ValueError(f"native prediction part frontend hash mismatch: {prediction_path}")
+        if meta.get("source_manifest_hash") != _sha256(manifest_path):
+            raise ValueError(f"native prediction part manifest hash mismatch: {prediction_path}")
+        if meta.get("annotation_hash") != _sha256(annotation_path):
+            raise ValueError(f"native prediction part annotation hash mismatch: {prediction_path}")
+        rows = _prediction_list(prediction_path)
+        part_hash = meta.get("prediction_hash")
+        if part_hash and part_hash != object_hash(rows):
+            raise ValueError(f"native prediction part content hash mismatch: {prediction_path}")
+        for row in rows:
+            uid = str(row["observation_uid"])
+            if uid not in frontend_by_uid:
+                raise ValueError(f"native prediction part contains unknown UID: {uid}")
+            if uid in merged:
+                raise ValueError(f"native prediction parts overlap at UID: {uid}")
+            merged[uid] = dict(row)
+        part_meta.append(meta)
+    if set(merged) != set(frontend_by_uid):
+        missing = len(set(frontend_by_uid) - set(merged))
+        extra = len(set(merged) - set(frontend_by_uid))
+        raise ValueError(f"native prediction parts do not cover frontend: missing={missing}, extra={extra}")
+    immutable = ("video_id", "image_id", "frame_index", "bbox", "score", "category_id")
+    for uid, row in merged.items():
+        if {key: row[key] for key in immutable} != {key: frontend_by_uid[uid][key] for key in immutable}:
+            raise ValueError(f"native prediction changed immutable fields at UID: {uid}")
+    rows = [merged[str(row["observation_uid"])] for row in frontend_rows]
+    output_path = Path(output).resolve(); output_path.mkdir(parents=True, exist_ok=True)
+    prediction_path = output_path / "prediction.json"; _write_json(prediction_path, rows)
+    diagnostics = {key: int(sum(meta.get("diagnostics", {}).get("aggregate", {}).get(key, 0) for meta in part_meta)) for key in ("candidate_pairs", "scorer_calls", "finite_scores", "changed_observation_ids", "accepted", "rejected")}
+    meta = {"schema_version": 8, "artifact": "psmr_native_prediction_merged", "scheme": scheme, "source_frontend": str(frontend_path), "source_frontend_hash": _sha256(frontend_path), "source_manifest": str(manifest_path), "source_manifest_hash": _sha256(manifest_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "prediction_hash": object_hash(rows), "record_count": len(rows), "part_count": len(part_meta), "parts": [str(Path(part).resolve()) for part in parts], "diagnostics": {"aggregate": diagnostics}}
+    _write_json(output_path / "prediction.meta.json", meta)
+    return {"status": "COMPLETED", "prediction": str(prediction_path), "metadata": str(output_path / "prediction.meta.json"), "prediction_hash": meta["prediction_hash"], "record_count": len(rows), "part_count": len(part_meta), "diagnostics": meta["diagnostics"]}
 
 
 def evaluate_psmr(repo: str | Path, resolved_path: str | Path, prediction: str | Path, output: str | Path, name: str, cores: int = 8) -> dict:
@@ -502,7 +653,7 @@ def audit_transport(resolved_path: str | Path, split: str, output: str | Path, d
     from ..streaming.transport import streaming_ground_cost, unbalanced_sinkhorn
 
     resolved = _resolved(resolved_path)
-    cache = Path(resolved["repo"]) / "outputs/tempotrack_v7/cache"
+    cache = Path(resolved["repo"]) / "outputs/tempotrack_v8/cache"
     videos = _internal_videos(resolved, split, cache_root=cache, device="cpu")
     device_value = torch.device(device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu")
     c10_checkpoint = Path(resolved["repo"]) / "outputs/tempotrack_v7/training/seed0/last.pt"
@@ -578,7 +729,12 @@ def audit_transport(resolved_path: str | Path, split: str, output: str | Path, d
             # produces hard negatives rather than arbitrary random negatives.
             for candidate in sorted(legal, key=lambda item: (-_pref(item), int(item["serial"])))[:8]:
                 qobs = [_obs(video, int(row), birth=(index == 0)) for index, row in enumerate(qrows)]
-                mrows = candidate["rows"][-64:]
+                anchor = build_memory_anchor(
+                    fragment_id="audit", root_id=0, video_id=int(video.video_id), rows=candidate["rows"],
+                    features=video.features, boxes_xyxy=video.boxes_xyxy, scores=video.scores,
+                    frames=video.frames, dedup_cos=.95, capacity=64, max_gap=60,
+                )
+                mrows = anchor.row_indices
                 mobs = [_obs(video, int(row), birth=(index == 0)) for index, row in enumerate(mrows)]
                 cost = streaming_ground_cost(qobs, mobs, lambda_app=0.80, lambda_geo=0.20).to(device_value, dtype=torch.float32)
                 result = unbalanced_sinkhorn(
@@ -604,21 +760,22 @@ def audit_transport(resolved_path: str | Path, split: str, output: str | Path, d
                     # Internal C11 comparison: retain the trained C10
                     # reliability model, use it as UOT target mass, and
                     # compare the resulting causal score on the same pair.
-                    evidence = _evidence(video, mrows).to(device_value)
+                    evidence = torch.as_tensor(anchor.evidence, dtype=torch.float32, device=device_value)
                     with torch.no_grad():
                         reliability = c10_calibrator.reliability(evidence).reshape(-1)
-                    memory_tensor = torch.as_tensor(video.features[mrows], dtype=torch.float32, device=device_value)
+                    memory_tensor = torch.as_tensor(anchor.features, dtype=torch.float32, device=device_value)
                     c10_values: dict[str, float] = {}
                     c11_values: dict[str, float] = {}
                     for query_count in (1, 4):
                         query_rows = qrows[:query_count]
                         query_tensor = torch.as_tensor(video.features[query_rows], dtype=torch.float32, device=device_value)
-                        rel_vector = reliability.expand(memory_tensor.shape[0])
+                        rel_vector = reliability
                         with torch.no_grad():
                             c10_evidence = c10_scorers[query_count](
                                 query_tensor,
                                 memory_tensor,
                                 memory_reliability=rel_vector,
+                                reliability_scale=c10_calibrator.reliability_scale,
                             )
                         c10_values[f"b{query_count}"] = float(c10_evidence.score.detach().cpu())
                         c11_result = unbalanced_sinkhorn(
@@ -919,18 +1076,66 @@ def dispatch_psmr_v7(args) -> int:
     repo = Path(getattr(args, "repo", ".")).resolve()
     if action == "resolve-inputs":
         result = resolve_psmr_inputs(repo, args.v6_root, args.output)
+    elif action == "build-external-native":
+        from .v8_crossbaseline import build_external_native_cache
+        result = build_external_native_cache(
+            calls_root=args.calls_root,
+            annotation=args.annotation,
+            output=args.output,
+            method=args.method,
+            source_commit=args.source_commit,
+            config=args.external_config,
+            checkpoint=args.external_checkpoint,
+        )
+    elif action == "analyze-external-native":
+        from .v8_crossbaseline import analyze_external_native
+        result = analyze_external_native(manifest=args.manifest, annotation=args.annotation, internal_manifest=args.internal_manifest, output=args.output)
+    elif action == "calibrate-external-c9":
+        from .v8_crossbaseline import calibrate_external_c9
+        result = calibrate_external_c9(analysis=args.analysis, output=args.output, method=args.method)
     elif action == "analyze":
         result = analyze_partial_support(args.resolved_inputs, args.split, args.output, device=args.device)
     elif action == "build-data":
         result = build_psmr_data(args.resolved_inputs, args.config, args.output, device=args.device)
     elif action == "train":
         from ..training.psmr_trainer import train_psmr
-        resolved = _resolved(args.resolved_inputs); cfg = load_yaml(args.config); videos = _internal_videos(resolved, "train_base", cache_root=repo / "outputs/tempotrack_v7/cache", device=args.device)
-        result = train_psmr(episodes_path=args.episodes, videos=videos, run_root=args.run_root, config=cfg, seed=args.seed, device=args.device, max_steps=args.max_steps, resume=args.resume, input_hash=resolved["feature_manifests"]["train_base"])
+        resolved = _resolved(args.resolved_inputs); cfg = load_yaml(args.config); videos = _internal_videos(resolved, "train_base", cache_root=repo / "outputs/tempotrack_v8/cache", device=args.device)
+        result = train_psmr(episodes_path=args.episodes, videos=videos, run_root=args.run_root, config=cfg, seed=args.seed, device=args.device, max_steps=args.max_steps, resume=args.resume, input_hash=object_hash({"algorithm_revision": "per_anchor_v8", "feature_manifest": resolved["feature_manifests"]["train_base"], "episodes": _sha256(args.episodes), "config": object_hash(cfg)}))
     elif action == "calibrate":
-        result = calibrate_psmr(args.resolved_inputs, args.config, args.checkpoint, args.split, [int(value) for value in str(args.query_observations).split(",") if value], args.output)
+        result = calibrate_psmr(
+            args.resolved_inputs,
+            args.config,
+            args.checkpoint,
+            args.split,
+            [int(value) for value in str(args.query_observations).split(",") if value],
+            args.output,
+            analysis_path=args.analysis_path,
+        )
     elif action == "infer":
         result = infer_psmr(args.resolved_inputs, args.checkpoint, args.calibration, args.split, args.query_observations, args.scheme, args.output, args.device)
+    elif action == "infer-native":
+        result = infer_psmr_native(
+            observation_manifest=args.observation_manifest,
+            frontend_prediction=args.frontend_prediction,
+            annotation=args.annotation,
+            checkpoint=args.checkpoint,
+            calibration=args.calibration,
+            query_observations=args.query_observations,
+            scheme=args.scheme,
+            output=args.output,
+            device=args.device,
+            shard_index=args.shard_index,
+            shard_count=args.shard_count,
+        )
+    elif action == "merge-native":
+        result = merge_native_predictions(
+            manifest=args.observation_manifest,
+            frontend_prediction=args.frontend_prediction,
+            annotation=args.annotation,
+            parts=args.part,
+            output=args.output,
+            scheme=args.scheme,
+        )
     elif action == "evaluate":
         result = evaluate_psmr(repo, args.resolved_inputs, args.prediction, args.output, args.name, args.cores)
     elif action == "audit-transport":
@@ -943,4 +1148,4 @@ def dispatch_psmr_v7(args) -> int:
     return 0
 
 
-__all__ = ["dispatch_psmr_v7", "resolve_psmr_inputs", "analyze_partial_support", "build_psmr_data", "calibrate_psmr", "infer_psmr", "evaluate_psmr", "audit_transport", "report_psmr"]
+__all__ = ["dispatch_psmr_v7", "resolve_psmr_inputs", "analyze_partial_support", "build_psmr_data", "calibrate_psmr", "infer_psmr", "infer_psmr_native", "evaluate_psmr", "audit_transport", "report_psmr"]

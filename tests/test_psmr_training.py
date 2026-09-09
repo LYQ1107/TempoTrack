@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import torch
 
@@ -14,4 +15,6 @@ def test_real_rank_reliability_training_writes_checkpoint(tmp_path):
     assert built["episodes"] > 0
     result = train_psmr(episodes_path=episodes, videos={1: video}, run_root=tmp_path / "run", config={"partial_support": {"top_r": 1, "memory_capacity": 64}, "training": {"save_every": 2, "log_every": 1}}, max_steps=2, device="cpu", resume="never", input_hash="test")
     assert result["status"] == "COMPLETED"
+    assert result["optimizer_steps"] == 2
+    assert json.loads((tmp_path / "run/train_result.json").read_text())["algorithm_revision"] == "per_anchor_v8"
     assert (tmp_path / "run/last.pt").exists()

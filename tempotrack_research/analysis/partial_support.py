@@ -66,7 +66,7 @@ class PartialSupportScorer(nn.Module):
         memory_mask: Optional[Tensor] = None,
         memory_reliability: Optional[Tensor] = None,
         reliability_scale: Optional[Tensor | float] = None,
-        beta: Optional[float] = None,
+        beta: Optional[Tensor | float] = None,
     ) -> PartialSupportEvidence:
         q, m, squeeze = self._canonical(query, memory)
         q = F.normalize(q.float(), dim=-1, eps=self.config.eps)
@@ -76,14 +76,25 @@ class PartialSupportScorer(nn.Module):
         qmask = self._mask(query_mask, bsz, q_count, cosine.device, default=True)
         mmask = self._mask(memory_mask, bsz, mem_count, cosine.device, default=True)
         values = cosine
-        rel_beta = self.beta if beta is None else float(beta)
-        if memory_reliability is not None and rel_beta != 0.0:
+        # Reliability is already the bounded value r=sigmoid(logit).  The
+        # caller may provide the learned positive beta=softplus(log_rel_scale)
+        # explicitly.  Do not softplus or multiply r here: the contract is
+        # exactly S + beta * log(r + eps), applied once.
+        rel_beta: Tensor | float = self.beta if beta is None else beta
+        if reliability_scale is not None:
+            rel_beta = reliability_scale
+        if memory_reliability is not None:
             rel = self._canonical_reliability(memory_reliability, bsz, mem_count, cosine.device)
-            scale = 1.0 if reliability_scale is None else reliability_scale
-            if not isinstance(scale, Tensor):
-                scale = torch.as_tensor(float(scale), device=cosine.device)
-            rel = F.softplus(scale.float()) * rel if scale.numel() == 1 else rel * scale.float()
-            values = values + rel.clamp_min(self.config.eps).log().unsqueeze(1) * rel_beta
+            scale = torch.as_tensor(rel_beta, device=cosine.device, dtype=cosine.dtype)
+            log_rel = rel.clamp_min(self.config.eps).log()
+            if scale.numel() == 1:
+                values = values + log_rel.unsqueeze(1) * scale
+            elif tuple(scale.shape) == (bsz,):
+                values = values + log_rel.unsqueeze(1) * scale.reshape(bsz, 1, 1)
+            elif tuple(scale.shape) == (bsz, 1):
+                values = values + log_rel.unsqueeze(1) * scale.reshape(bsz, 1, 1)
+            else:
+                raise ValueError(f"reliability scale must be scalar or [B], got {tuple(scale.shape)}")
         values = values.masked_fill(~mmask.unsqueeze(1), float("-inf"))
         k = min(int(self.config.top_r), mem_count)
         top_values, top_indices = torch.topk(values, k=k, dim=-1)
@@ -135,4 +146,3 @@ def score_numpy(query, memory, *, config: PartialSupportConfig | None = None, me
     with torch.no_grad():
         evidence = PartialSupportScorer(config)(torch.as_tensor(query), torch.as_tensor(memory), memory_mask=memory_mask)
     return float(evidence.score.detach().cpu()), evidence
-

@@ -1,0 +1,160 @@
+diff --git a/ovtrack/apis/test.py b/ovtrack/apis/test.py
+index b0b5a7c..eeac448 100644
+--- a/ovtrack/apis/test.py
++++ b/ovtrack/apis/test.py
+@@ -1,4 +1,5 @@
+ import mmcv
++import os
+ import os.path as osp
+ import shutil
+ import tempfile
+@@ -7,9 +8,13 @@ import torch
+ import torch.distributed as dist
+ from collections import defaultdict
+ from mmcv.runner import get_dist_info
++import json
++import numpy as np
+
+
+ def single_gpu_test(model, data_loader, show=False, out_dir=None, show_score_thr=0.3, early_stop=False):
++    if os.environ.get("TEMPOTRACK_STREAM_RESULTS_DIR"):
++        return streaming_test(model, data_loader, distributed=False)
+     model.eval()
+     results = defaultdict(list)
+     dataset = data_loader.dataset
+@@ -57,6 +62,8 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
+     Returns:
+         list: The prediction results.
+     """
++    if os.environ.get("TEMPOTRACK_STREAM_RESULTS_DIR"):
++        return streaming_test(model, data_loader, distributed=True)
+     model.eval()
+     results = defaultdict(list)
+     dataset = data_loader.dataset
+@@ -87,6 +94,126 @@ def multi_gpu_test(model, data_loader, tmpdir=None, gpu_collect=False):
+     return results
+
+
++def _stream_frame(dataset, info, result):
++    track_results = result["track_results"]
++    rows = []
++    use_cat_ids = len(track_results) == len(dataset.cat_ids)
++    for label, bboxes in enumerate(track_results):
++        cat_id = int(dataset.cat_ids[label]) if use_cat_ids else int(label + 1)
++        if hasattr(bboxes, "detach"):
++            bboxes = bboxes.detach().cpu().numpy()
++        for bbox in np.asarray(bboxes):
++            if bbox.shape[0] < 6:
++                continue
++            x1, y1, x2, y2 = [float(v) for v in bbox[1:5]]
++            rows.append({
++                "local_track_id": int(bbox[0]),
++                "bbox": [x1, y1, x2 - x1, y2 - y1],
++                "score": float(bbox[-1]),
++                "category_id": cat_id,
++            })
++    return {"video_id": int(info["video_id"]), "image_id": int(info["id"]), "rows": rows}
++
++
++def _write_video(frames, output_handle, max_track_id):
++    if not frames:
++        return max_track_id
++    local_ids = [row["local_track_id"] for frame in frames for row in frame["rows"] if row["local_track_id"] >= 0]
++    by_track = defaultdict(list)
++    for frame in frames:
++        for row in frame["rows"]:
++            if row["local_track_id"] < 0:
++                continue
++            by_track[max_track_id + row["local_track_id"]].append({
++                "image_id": frame["image_id"],
++                "bbox": row["bbox"],
++                "score": row["score"],
++                "category_id": row["category_id"],
++                "video_id": frame["video_id"],
++                "track_id": max_track_id + row["local_track_id"],
++            })
++    for track_id in sorted(by_track):
++        records = by_track[track_id]
++        counts = defaultdict(int)
++        for record in records:
++            counts[record["category_id"]] += 1
++        majority = min(category_id for category_id, count in counts.items() if count == max(counts.values()))
++        for record in records:
++            record["category_id"] = majority
++            json.dump(record, output_handle, separators=(",", ":"))
++            output_handle.write(",\n")
++    if local_ids:
++        max_track_id += max(local_ids) + 1
++    return max_track_id
++
++
++def _merge_stream_parts(root, world_size, output_path):
++    os.makedirs(os.path.dirname(output_path), exist_ok=True)
++    max_track_id = 0
++    with open(output_path, "w+") as output_handle:
++        output_handle.write("[\n")
++        for rank in range(world_size):
++            part_path = os.path.join(root, "parts", "part_%d.jsonl" % rank)
++            if not os.path.exists(part_path):
++                continue
++            current_video = None
++            frames = []
++            with open(part_path) as part_handle:
++                for line in part_handle:
++                    frame = json.loads(line)
++                    if current_video is not None and frame["video_id"] != current_video:
++                        max_track_id = _write_video(frames, output_handle, max_track_id)
++                        frames = []
++                    current_video = frame["video_id"]
++                    frames.append(frame)
++            if frames:
++                max_track_id = _write_video(frames, output_handle, max_track_id)
++        output_handle.seek(0, 2)
++        end = output_handle.tell()
++        if end >= 2:
++            output_handle.seek(end - 2)
++            if output_handle.read(2) == ",\n":
++                output_handle.seek(end - 2)
++                output_handle.truncate()
++        output_handle.write("\n]\n")
++
++
++def streaming_test(model, data_loader, distributed=False):
++    model.eval()
++    dataset = data_loader.dataset
++    rank, world_size = get_dist_info()
++    root = os.environ["TEMPOTRACK_STREAM_RESULTS_DIR"]
++    parts_root = os.path.join(root, "parts")
++    os.makedirs(parts_root, exist_ok=True)
++    part_path = os.path.join(parts_root, "part_%d.jsonl" % rank)
++    progress = mmcv.ProgressBar(len(dataset)) if rank == 0 else None
++    with open(part_path, "w") as part_handle:
++        for local_index, data in enumerate(data_loader):
++            with torch.no_grad():
++                result = model(return_loss=False, rescale=True, **data)
++            sampler = getattr(data_loader, "sampler", None)
++            if distributed and hasattr(sampler, "indices"):
++                global_index = sampler.indices[rank][local_index]
++            else:
++                global_index = local_index
++            info = dataset.data_infos[global_index]
++            part_handle.write(json.dumps(_stream_frame(dataset, info, result), separators=(",", ":")) + "\n")
++            part_handle.flush()
++            if progress is not None:
++                batch_size = data["img"][0].size(0)
++                for _ in range(batch_size * world_size):
++                    progress.update()
++    if distributed:
++        dist.barrier()
++    if rank == 0:
++        _merge_stream_parts(root, world_size, os.path.join(root, "tao_track.json"))
++        with open(os.path.join(root, "stream_manifest.json"), "w") as handle:
++            json.dump({"world_size": world_size, "frames": len(dataset)}, handle, indent=2)
++    if distributed:
++        dist.barrier()
++    return {}
++
++
+ def collect_results_cpu(result_part, size, tmpdir=None):
+     rank, world_size = get_dist_info()
+     # create a tmp dir if it is not specified

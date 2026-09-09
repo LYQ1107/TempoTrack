@@ -1,4 +1,4 @@
-"""The exact V7 reliability calibrator architecture."""
+"""The per-anchor V8 reliability calibrator architecture."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 
 class MemoryReliabilityCalibrator(nn.Module):
-    """7 -> 32 -> 16 -> 1 log-reliability model with a learned scale."""
+    """7 -> 32 -> 16 -> 1 logit model with an independent learned scale."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -25,5 +25,6 @@ class MemoryReliabilityCalibrator(nn.Module):
         return F.softplus(self.log_rel_scale)
 
     def reliability(self, evidence: Tensor) -> Tensor:
-        return torch.sigmoid(self.forward(evidence)) * self.reliability_scale
-
+        # Keep r in (0, 1).  The learned beta is deliberately not folded into
+        # r; PartialSupportScorer applies beta*log(r+eps) exactly once.
+        return torch.sigmoid(self.forward(evidence))
