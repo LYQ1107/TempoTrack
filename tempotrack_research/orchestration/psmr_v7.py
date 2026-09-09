@@ -463,6 +463,10 @@ def _native_prediction_records_from_frontend(
     category_by_index, _ = _annotation_categories(annotation)
     frontend_rows = _prediction_list(frontend_prediction)
     frontend_by_uid = {str(row["observation_uid"]): int(row["track_id"]) for row in frontend_rows}
+    frontend_immutable_by_uid = {
+        str(row["observation_uid"]): {key: row[key] for key in ("video_id", "image_id", "bbox", "score", "category_id")}
+        for row in frontend_rows
+    }
     if len(frontend_by_uid) != len(frontend_rows):
         raise ValueError(f"{source_label} prediction does not have unique observation UIDs")
     selected = dict(calibration)
@@ -505,6 +509,19 @@ def _native_prediction_records_from_frontend(
             ids = np.asarray([by_uid[_native_uid(frame.video_id, frame.frame_id, row)] for row in range(len(frame.scores))], dtype=np.int64)
             output_rows.extend(_rows_from_frame(frame, category_by_index, assigned_ids=ids))
         diagnostics.append({"video_id": int(shard["video_id"]), **diag.as_dict()})
+    # External frontends may apply a deterministic category-consistency
+    # postprocess after the native tracker call. Preserve that exact category
+    # field while still deriving observations from the native cache; an
+    # association-only replay must change no immutable field besides track_id.
+    for row in output_rows:
+        uid = str(row["observation_uid"])
+        source = frontend_immutable_by_uid.get(uid)
+        if source is None:
+            raise ValueError(f"{source_label} frontend missing output UID {uid}")
+        for key in ("video_id", "image_id", "bbox", "score"):
+            if row[key] != source[key]:
+                raise ValueError(f"native/frontend immutable mismatch at UID {uid}: {key}")
+        row["category_id"] = int(source["category_id"])
     # Strict immutable-observation contract against the selected frontend.
     selected_uids = {str(row["observation_uid"]) for row in output_rows}
     frontend_payload = {str(row["observation_uid"]): {key: row[key] for key in ("video_id", "image_id", "frame_index", "bbox", "score", "category_id")} for row in frontend_rows if str(row["observation_uid"]) in selected_uids}
@@ -1087,12 +1104,52 @@ def dispatch_psmr_v7(args) -> int:
             config=args.external_config,
             checkpoint=args.external_checkpoint,
         )
+    elif action == "align-native":
+        from .v8_crossbaseline import align_external_native_frontend
+        result = align_external_native_frontend(
+            native_prediction=args.native_prediction,
+            official_prediction=args.official_prediction,
+            output=args.output,
+        )
     elif action == "analyze-external-native":
         from .v8_crossbaseline import analyze_external_native
         result = analyze_external_native(manifest=args.manifest, annotation=args.annotation, internal_manifest=args.internal_manifest, output=args.output)
     elif action == "calibrate-external-c9":
         from .v8_crossbaseline import calibrate_external_c9
         result = calibrate_external_c9(analysis=args.analysis, output=args.output, method=args.method)
+    elif action == "build-external-data":
+        from .v8_crossbaseline import build_external_base_data
+        result = build_external_base_data(
+            manifest=args.manifest,
+            annotation=args.annotation,
+            config=args.config,
+            output=args.output,
+            seed=args.seed,
+        )
+    elif action == "train-external":
+        from .v8_crossbaseline import train_external_psmr
+        result = train_external_psmr(
+            manifest=args.manifest,
+            annotation=args.annotation,
+            episodes=args.episodes,
+            config=args.config,
+            run_root=args.run_root,
+            seed=args.seed,
+            device=args.device,
+            max_steps=args.max_steps,
+            resume=args.resume,
+        )
+    elif action == "calibrate-external-c10":
+        from .v8_crossbaseline import calibrate_external_c10
+        result = calibrate_external_c10(
+            analysis=args.analysis,
+            manifest=args.manifest,
+            annotation=args.annotation,
+            checkpoint=args.checkpoint,
+            config=args.config,
+            output=args.output,
+            method=args.method,
+        )
     elif action == "analyze":
         result = analyze_partial_support(args.resolved_inputs, args.split, args.output, device=args.device)
     elif action == "build-data":
