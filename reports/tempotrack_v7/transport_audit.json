@@ -1,0 +1,231 @@
+{
+  "status": "INSUFFICIENT_SAMPLE",
+  "split": "val_base_internal",
+  "input_manifest": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/research_v4/prepared/features/val_base_internal/dataset_manifest.json",
+  "input_manifest_hash": "8b23237af379352241a1bf366fb8bedf7197391e4be04c9091b924fae8a66366",
+  "candidate_pairs": 207,
+  "transport_calls": 207,
+  "positive_count": 83,
+  "negative_count": 124,
+  "finite_results": 207,
+  "invalid_results": 0,
+  "mass_min": 0.03140072152018547,
+  "mass_mean": 0.30334630514976485,
+  "mass_max": 1.1069302558898926,
+  "cost_min": 0.07400420308113098,
+  "cost_mean": 0.7797237035732915,
+  "cost_max": 1.6251609325408936,
+  "positive_cost_median": 0.49062201380729675,
+  "negative_cost_median": 0.9946832060813904,
+  "sample_count_pass": false,
+  "gate_score_pass": true,
+  "gate_mass_pass": true,
+  "gate_margin_pass": true,
+  "c11_internal_status": "INSUFFICIENT_SAMPLE",
+  "c11_comparison": {
+    "b1": {
+      "c10": {
+        "positive_count": 83,
+        "negative_count": 124,
+        "positive_mean": -0.4715828076902642,
+        "negative_mean": -0.8764910044208649,
+        "separation_mean": 0.4049081967306007,
+        "positive_median": -0.5373786687850952,
+        "negative_median": -0.9281934797763824,
+        "roc_auc": 0.9163427905169064
+      },
+      "c11_uot_learned_reliability": {
+        "positive_count": 83,
+        "negative_count": 124,
+        "positive_mean": -0.793304266553773,
+        "negative_mean": -1.4914447508426825,
+        "separation_mean": 0.6981404842889095,
+        "positive_median": -0.8613942774184443,
+        "negative_median": -1.5186281685291667,
+        "roc_auc": 0.9046832491255344
+      },
+      "exceeds_c10": false
+    },
+    "b4": {
+      "c10": {
+        "positive_count": 83,
+        "negative_count": 124,
+        "positive_mean": -0.47306430456509074,
+        "negative_mean": -0.8809851523368589,
+        "separation_mean": 0.4079208477717682,
+        "positive_median": -0.47806352376937866,
+        "negative_median": -0.928583949804306,
+        "roc_auc": 0.927710843373494
+      },
+      "c11_uot_learned_reliability": {
+        "positive_count": 83,
+        "negative_count": 124,
+        "positive_mean": -0.7190312360955086,
+        "negative_mean": -1.4471086739179593,
+        "separation_mean": 0.7280774378224507,
+        "positive_median": -0.7452184684746475,
+        "negative_median": -1.458678011931776,
+        "roc_auc": 0.9229498639720171
+      },
+      "exceeds_c10": false
+    }
+  },
+  "accepted_recoveries": 0,
+  "changed_observation_ids": 0,
+  "device": "cpu",
+  "pair_examples": [
+    {
+      "video_id": 79,
+      "target_serial": 582,
+      "candidate_serial": 5,
+      "label": 1,
+      "gap": 60,
+      "normalized_cost": 0.33870962262153625,
+      "transport_mass": 0.7144394516944885,
+      "finite": true,
+      "iterations": 20,
+      "c10_scores": {
+        "b1": -0.35464560985565186,
+        "b4": -0.3504388928413391
+      },
+      "c11_scores": {
+        "b1": -0.5213518225708228,
+        "b4": -0.5059610281031549
+      }
+    },
+    {
+      "video_id": 79,
+      "target_serial": 832,
+      "candidate_serial": 582,
+      "label": 1,
+      "gap": 60,
+      "normalized_cost": 0.6535055637359619,
+      "transport_mass": 0.33826059103012085,
+      "finite": true,
+      "iterations": 20,
+      "c10_scores": {
+        "b1": -0.602057933807373,
+        "b4": -0.5884577035903931
+      },
+      "c11_scores": {
+        "b1": -1.1081284747914197,
+        "b4": -0.9702933039703605
+      }
+    },
+    {
+      "video_id": 239,
+      "target_serial": 113,
+      "candidate_serial": 33,
+      "label": 1,
+      "gap": 50,
+      "normalized_cost": 0.11465173959732056,
+      "transport_mass": 1.014488935470581,
+      "finite": true,
+      "iterations": 15,
+      "c10_scores": {
+        "b1": -0.17187339067459106,
+        "b4": -0.16910463571548462
+      },
+      "c11_scores": {
+        "b1": -0.16871080714592687,
+        "b4": -0.19510807816316444
+      }
+    },
+    {
+      "video_id": 239,
+      "target_serial": 139,
+      "candidate_serial": 113,
+      "label": 1,
+      "gap": 50,
+      "normalized_cost": 0.12187942117452621,
+      "transport_mass": 0.9190555214881897,
+      "finite": true,
+      "iterations": 14,
+      "c10_scores": {
+        "b1": -0.13048052787780762,
+        "b4": -0.138776957988739
+      },
+      "c11_scores": {
+        "b1": -0.23336021638788557,
+        "b4": -0.22209450317567647
+      }
+    },
+    {
+      "video_id": 239,
+      "target_serial": 180,
+      "candidate_serial": 139,
+      "label": 1,
+      "gap": 50,
+      "normalized_cost": 0.08942098915576935,
+      "transport_mass": 1.0741312503814697,
+      "finite": true,
+      "iterations": 18,
+      "c10_scores": {
+        "b1": -0.12295550107955933,
+        "b4": -0.1460714042186737
+      },
+      "c11_scores": {
+        "b1": -0.1537812520399238,
+        "b4": -0.15845188335328364
+      }
+    },
+    {
+      "video_id": 310,
+      "target_serial": 410,
+      "candidate_serial": 352,
+      "label": 1,
+      "gap": 60,
+      "normalized_cost": 0.3890572488307953,
+      "transport_mass": 0.45819056034088135,
+      "finite": true,
+      "iterations": 20,
+      "c10_scores": {
+        "b1": -0.2731812000274658,
+        "b4": -0.37271809577941895
+      },
+      "c11_scores": {
+        "b1": -0.5489199178577249,
+        "b4": -0.6451512709884052
+      }
+    },
+    {
+      "video_id": 310,
+      "target_serial": 410,
+      "candidate_serial": 261,
+      "label": 1,
+      "gap": 60,
+      "normalized_cost": 1.0892291069030762,
+      "transport_mass": 0.11249932646751404,
+      "finite": true,
+      "iterations": 20,
+      "c10_scores": {
+        "b1": -0.837319016456604,
+        "b4": -0.9169952273368835
+      },
+      "c11_scores": {
+        "b1": -1.6450629985288212,
+        "b4": -1.6261907157652793
+      }
+    },
+    {
+      "video_id": 330,
+      "target_serial": 219,
+      "candidate_serial": 0,
+      "label": 1,
+      "gap": 60,
+      "normalized_cost": 0.4840336740016937,
+      "transport_mass": 0.37591660022735596,
+      "finite": true,
+      "iterations": 20,
+      "c10_scores": {
+        "b1": -0.451715350151062,
+        "b4": -0.43801188468933105
+      },
+      "c11_scores": {
+        "b1": -0.8805380249749618,
+        "b4": -0.7797112676219382
+      }
+    }
+  ],
+  "note": "Audit-only UOT; no C11 official prediction is emitted. Positive/negative labels use Base internal GT only."
+}

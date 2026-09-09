@@ -1,0 +1,16 @@
+{
+  "status": "STOPPED_FOR_PRODUCTION_FIX",
+  "time": 1788948335.9970403,
+  "affected_jobs": "V7 official inference workers launched before causal bucket index fix",
+  "root_cause": "per-fragment full prior-history scan made official replay O(N^2) at 664873 B2 fragments",
+  "action": "targeted TERM only for processes whose cwd and argv matched this V7 worktree; no external PID/GPU process was signaled",
+  "checkpoint": "none (inference-only workers had no checkpoint; no final prediction artifact was written)",
+  "preserved": [
+    "outputs/research_v2",
+    "outputs/research_v3",
+    "outputs/research_v4",
+    "outputs/tempotrack_v6",
+    "outputs/tempotrack_v7/analysis",
+    "outputs/tempotrack_v7/training"
+  ]
+}

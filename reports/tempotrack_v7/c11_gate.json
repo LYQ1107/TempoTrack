@@ -1,0 +1,13 @@
+{
+  "status": "NOT_RUN_INSUFFICIENT_INTERNAL_SAMPLE",
+  "reason": "val_base_internal has fewer than 100 positive legal pairs; task-book forbids official UOT/C11 without the 100+100 gate.",
+  "b2_novel_assoc_a": 42.68970857142857,
+  "c10_novel_assoc_a": {
+    "C10_b1": 43.96468,
+    "C10_b4": 43.85308857142857
+  },
+  "c10_gain_over_b2": true,
+  "transport_audit": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v7/reports/tempotrack_v7/transport_audit.json",
+  "transport_audit_hash": "7775204019d2be07c5daf0b5f809b3a3cb05593870f1150b0aa1bb7cb3288568",
+  "c11_internal_status": "INSUFFICIENT_SAMPLE"
+}

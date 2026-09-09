@@ -87,10 +87,14 @@ def unbalanced_sinkhorn(
     iterations: int,
     tolerance: float = 1e-4,
 ) -> TransportResult:
+    # V7 transport sanity requires a float32 log-domain update even when a
+    # caller hands us AMP tensors.  Keeping the normalization in probability
+    # space is what caused the previous UOT underflow at small epsilon.
+    cost = cost.float()
     if cost.numel() == 0 or not torch.isfinite(cost).all():
         return TransportResult(float("inf"), 0.0, np.empty(0), np.empty(0), float("inf"), float("inf"), 0, False, False, {"reason": "nonfinite_or_empty_cost"})
-    a = source_weights.to(cost).clamp_min(1e-12)
-    b = target_weights.to(cost).clamp_min(1e-12)
+    a = source_weights.to(device=cost.device, dtype=torch.float32).clamp_min(1e-12)
+    b = target_weights.to(device=cost.device, dtype=torch.float32).clamp_min(1e-12)
     a, b = a / a.sum(), b / b.sum()
     eta = float(tau) / (float(tau) + float(epsilon))
     log_k = -cost / float(epsilon)
@@ -125,4 +129,3 @@ def observation_reliability(obs: MemoryObservation, *, cfg: Any) -> float:
     else:
         agree = 1.0
     return max(1e-3, det * margin * agree)
-

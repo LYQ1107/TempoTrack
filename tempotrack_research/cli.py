@@ -812,6 +812,11 @@ def _v6_alias(args: argparse.Namespace) -> int:
     return 0
 
 
+def _psmr_v7(args: argparse.Namespace) -> int:
+    from .orchestration.psmr_v7 import dispatch_psmr_v7
+    return dispatch_psmr_v7(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tempotrack-repair")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -857,6 +862,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("evaluate-v6-batch"); p.add_argument("--repo", default="."); p.add_argument("--annotation"); p.add_argument("--prediction", action="append", required=True, help="NAME=prediction.json (repeatable)"); p.add_argument("--output"); p.add_argument("--cores", type=int, default=8); p.set_defaults(func=_v6_evaluate_batch)
     p = sub.add_parser("report-v6"); p.add_argument("--repo", default="."); p.add_argument("--manifest", required=True); p.add_argument("--a0-summary"); p.add_argument("--batch-evaluation"); p.add_argument("--checks"); p.add_argument("--method-root", action="append", default=[], help="NAME=method output directory"); p.add_argument("--resource-snapshot"); p.add_argument("--output"); p.set_defaults(func=_v6_report)
     p = sub.add_parser("alias-prediction"); p.add_argument("--repo", default="."); p.add_argument("--source", required=True); p.add_argument("--output-dir", required=True); p.add_argument("--method", required=True); p.add_argument("--reason", required=True); p.set_defaults(func=_v6_alias)
+    p = sub.add_parser("psmr-v7")
+    v7 = p.add_subparsers(dest="psmr_v7_action", required=True)
+    q = v7.add_parser("resolve-inputs"); q.add_argument("--repo", default="."); q.add_argument("--v6-root"); q.add_argument("--output"); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("analyze"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--split", default="val_base_internal"); q.add_argument("--output", required=True); q.add_argument("--device", default="cpu"); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("build-data"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--resolved-inputs", required=True); q.add_argument("--output", required=True); q.add_argument("--device", default="cpu"); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("train"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--resolved-inputs", required=True); q.add_argument("--episodes", required=True); q.add_argument("--run-root", required=True); q.add_argument("--seed", type=int, default=0); q.add_argument("--device", default="cuda:0"); q.add_argument("--max-steps", type=int, default=20000); q.add_argument("--resume", choices=["auto", "never", "strict"], default="auto"); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("calibrate"); q.add_argument("--repo", default="."); q.add_argument("--config", required=True); q.add_argument("--resolved-inputs", required=True); q.add_argument("--checkpoint", required=True); q.add_argument("--split", default="val_base_internal"); q.add_argument("--query-observations", default="1,4"); q.add_argument("--output", required=True); q.add_argument("--analysis-path"); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("infer"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--checkpoint"); q.add_argument("--calibration", required=True); q.add_argument("--split", required=True); q.add_argument("--query-observations", type=int, default=1); q.add_argument("--scheme", required=True); q.add_argument("--output", required=True); q.add_argument("--device", default="cpu"); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("evaluate"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--prediction", required=True); q.add_argument("--output", required=True); q.add_argument("--name", required=True); q.add_argument("--cores", type=int, default=8); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("audit-transport"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--split", default="val_base_internal"); q.add_argument("--output", required=True); q.add_argument("--device", default="cpu"); q.set_defaults(func=_psmr_v7)
+    q = v7.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v7)
     return parser
 
 

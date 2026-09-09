@@ -1,0 +1,11 @@
+{
+  "status": "RUNTIME_FAILURE",
+  "command": "LD_PRELOAD=/home/lwr/anaconda3/envs/masaenv/lib/libsqlite3.so.3.52.0 /home/lwr/anaconda3/envs/masaenv/bin/python -m tempotrack_research.cli evaluate-v6-batch --repo . --annotation /data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_val_lvis_v1_classes.json --prediction C9_b1=outputs/tempotrack_v7/predictions_final/C9_b1/prediction.json --prediction C9_b4=outputs/tempotrack_v7/predictions_final/C9_b4/prediction.json --prediction C10_b1=outputs/tempotrack_v7/predictions_final/C10_b1/prediction.json --prediction C10_b4=outputs/tempotrack_v7/predictions_final/C10_b4/prediction.json --output outputs/tempotrack_v7/evaluations --cores 8",
+  "tracker": "C9_b1",
+  "sequence": "val-YFCC100M-v_90d3b815a3e7eeef2375c1ec8bd2a0ff",
+  "frame": 14,
+  "duplicate_track_id": 12,
+  "error": "TrackEvalException: Tracker predicts the same ID more than once in a single timestep (seq: val-YFCC100M-v_90d3b815a3e7eeef2375c1ec8bd2a0ff, frame: 14, ids: 12)",
+  "source_predictions_preserved": true,
+  "repair": "causal per-frame occupancy gate; conflicting reactivation is rejected without second-best fallback"
+}
