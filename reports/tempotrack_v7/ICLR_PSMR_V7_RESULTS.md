@@ -6,6 +6,8 @@ This report is generated only from artifacts present at report time. Missing or 
 
 - V7 repository: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v7`
 - run root: `outputs/tempotrack_v7`
+- source branch: `codex/tempotrack-psmr-v7`
+- source commit: `48e5825326dc1534e317cfcb0d18fa3ce1998c1f`
 - resolved inputs: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v7/reports/tempotrack_v7/resolved_inputs.json` (sha256 `131949516bf92b9c680d8b57a6827b63b86c2325098a2f55ffe5c77051875e4f`)
 - V6 native manifest: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/tempotrack_v6/native_cache/manifest.json` (sha256 `c830bf65b4eecaf7d31059e4ef3d4a7a5af83f8a863a2302229fd846b0e32785`)
 - V6 batch evaluation: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/tempotrack_v6/evaluations_batch_final/evaluation_batch.json` (sha256 `05311363f4c18f9deed2bab2a46580a37a916c50732a0f21dbf1982546a9614f`)
