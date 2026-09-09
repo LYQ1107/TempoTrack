@@ -774,6 +774,11 @@ def _run_scheduler(jobs: list[JobSpec], *, executor: JobExecutor, repo: Path, ro
                 target = int(job.requested_steps or 0)
                 if target > int(job.preflight_steps or 32) and observed < target:
                     preflight_seen.add(job.job_id); job.metadata["preflight_complete"] = True; statuses[job.job_id] = "PENDING"
+                    # The first command is a real continuation preflight.  It
+                    # must not be reused after the flag changes, otherwise
+                    # _bind_worker_job can keep rebuilding the old 32-step
+                    # command from stale JobSpec state.
+                    job.command = []
                     executor.mark(job, "PREFLIGHT_PASSED", observed_steps=observed, target_steps=target, continuation_same_run=True, checkpoint=str(Path(job.run_dir) / "last.pt"))
                     continue
             statuses[job_id] = status

@@ -1,0 +1,51 @@
+schema_version: 6
+baseline:
+  config: configs/masa-detic/open_vocabulary_mot_test/masa_detic_swinb_open_vocabulary_test.py
+  checkpoint: saved_models/masa_models/detic_masa.pth
+  annotation: data/tao/annotations/tao_val_lvis_v1_classes.json
+  detector_init_weight: saved_models/pretrain_weights/detic_centernet2_swin-b_fpn_4x_lvis-base_in21k-lvis-ec91245d.pth
+  roi_align:
+    sampling_ratio: 0
+    use_torchvision: false
+    operator: mmcv_compiled_roi_align
+paper_dual:
+  alpha_fast: 0.70
+  alpha_slow: 0.15
+  fast_accept_threshold: 0.60
+  dual_logit_scale: 12.0
+  assignment_mode: official_greedy
+paper_emd:
+  bank_size: 64
+  dedup_cosine: 0.95
+  boundary_k: 3
+  representative_size: 16
+  max_gap: 30
+  min_tracklet_length: 3
+  theta_emd: 0.35
+  sinkhorn_iters: 20
+  sinkhorn_eps: 0.05
+  lambda_app: 0.70
+  lambda_geo: 0.20
+  lambda_time: 0.10
+  beta_area: 0.50
+streaming:
+  candidate_top_k: 8
+  dormant_horizon: 30
+  tentative_observations: 2
+  top_r: 3
+  transport:
+    lambda_app: 0.80
+    lambda_geo: 0.20
+    epsilon: 0.05
+    tau: 0.50
+    iterations: 50
+    reliability_weighted: false
+  reliability:
+    margin_temperature: 0.10
+    agreement_temperature: 0.10
+  acceptance:
+    lambda_mass: 0.20
+    lambda_time: 0.10
+    tau_evidence: 0.0
+    tau_competition: 0.05
+    tau_mass: 0.20

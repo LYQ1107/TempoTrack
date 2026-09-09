@@ -6,11 +6,32 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
 from ..config import file_hash, object_hash
 from ..data.feature_export import load_dataset_manifest, iter_manifest_ledgers
 from ..schemas import AssociationResult
+
+
+@dataclass
+class VideoLocalIdMap:
+    video_id: int
+    child_to_root: dict[int, int] = field(default_factory=dict)
+    # Streaming recovery is fragment-scoped. A frontend integer ID may be
+    # reused after a gap, so a video-wide child_to_root map is not sufficient.
+    observation_to_root: dict[str, int] = field(default_factory=dict)
+
+    def apply(self, track_id: int, observation_uid: str | None = None) -> int:
+        if observation_uid is not None and str(observation_uid) in self.observation_to_root:
+            current = int(self.observation_to_root[str(observation_uid)])
+        else:
+            current = int(track_id)
+        seen: set[int] = set()
+        while current in self.child_to_root and current not in seen:
+            seen.add(current)
+            current = int(self.child_to_root[current])
+        return current
 
 
 def _atomic_json(payload: Mapping[str, Any], path: Path) -> None:
@@ -137,3 +158,56 @@ def materialize_predictions(ledger_manifest: str | Path, id_mapping: str | Path,
         if os.path.exists(name):
             os.unlink(name)
     return {**metadata, "records": predictions}
+
+
+def apply_video_local_id_maps(
+    base_prediction: Iterable[Mapping[str, Any]],
+    id_maps: Mapping[int, VideoLocalIdMap | Mapping[str, Any]] | Iterable[VideoLocalIdMap],
+    *,
+    reject_same_frame_collision: bool = True,
+) -> list[dict[str, Any]]:
+    """Rewrite only local track IDs while preserving every observation field."""
+
+    if isinstance(id_maps, Mapping):
+        maps = {}
+        for video, value in id_maps.items():
+            if isinstance(value, VideoLocalIdMap):
+                maps[int(video)] = value
+            else:
+                mapping = value.get("mapping", value.get("child_to_root", {}))
+                uid_mapping = value.get("observation_to_root", value.get("uid_mapping", {}))
+                maps[int(video)] = VideoLocalIdMap(
+                    int(video),
+                    {int(k): int(v) for k, v in mapping.items()},
+                    {str(k): int(v) for k, v in uid_mapping.items()},
+                )
+    else:
+        maps = {int(value.video_id): value for value in id_maps}
+    output: list[dict[str, Any]] = []
+    collisions: dict[tuple[int, int, int], str] = {}
+    for item in base_prediction:
+        record = dict(item)
+        video_id = int(record.get("video_id", -1))
+        original = int(record["track_id"])
+        mapping = maps.get(video_id)
+        uid = str(record.get("observation_uid", record.get("image_id", len(output))))
+        rewritten = mapping.apply(original, uid) if mapping is not None else original
+        if reject_same_frame_collision:
+            frame = int(record.get("frame_index", record.get("frame_id", record.get("image_id", -1))))
+            key = (video_id, frame, rewritten)
+            previous = collisions.get(key)
+            if previous is not None and previous != uid:
+                raise ValueError(f"same-frame rewritten track collision: video={video_id}, frame={frame}, track_id={rewritten}")
+            collisions[key] = uid
+        record["track_id"] = int(rewritten)
+        output.append(record)
+    return output
+
+
+__all__ = [
+    "VideoLocalIdMap",
+    "write_id_mapping",
+    "serialize_id_only",
+    "materialize_predictions",
+    "apply_video_local_id_maps",
+]

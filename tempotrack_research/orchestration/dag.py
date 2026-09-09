@@ -345,6 +345,27 @@ def artifacts_valid(job: JobSpec) -> tuple[bool, list[str]]:
                     missing.append(str(path))
             except (OSError, ValueError):
                 missing.append(str(path))
+    if job.stage == "train" and not missing:
+        # A checkpoint/progress file alone is not evidence that the requested
+        # budget ran.  This check is intentionally tied to the job's own
+        # run_dir and never searches another method or seed.
+        import json
+        result_path = Path(job.run_dir) / "train_result.json"
+        progress_path = Path(job.run_dir) / "progress.json"
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8")) if result_path.exists() else {}
+            progress = json.loads(progress_path.read_text(encoding="utf-8")) if progress_path.exists() else {}
+        except (OSError, ValueError):
+            result, progress = {}, {}
+        observed_steps = int(result.get("optimizer_steps", progress.get("optimizer_step", 0)) or 0)
+        target_steps = int(job.requested_steps or 0)
+        if target_steps and observed_steps < target_steps:
+            missing.append(f"{result_path}: optimizer_steps={observed_steps} < requested_steps={target_steps}")
+        if job.train_phase == "ppo" or (job.method == "s5_rl_edit" and str(job.train_phase).lower() == "ppo"):
+            target_transitions = int(job.metadata.get("ppo_transitions", job.requested_steps or 0) or 0)
+            observed_transitions = int(result.get("transitions", progress.get("transitions", 0)) or 0)
+            if target_transitions and observed_transitions < target_transitions:
+                missing.append(f"{result_path}: transitions={observed_transitions} < requested_transitions={target_transitions}")
     return not missing, missing
 
 

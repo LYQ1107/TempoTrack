@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+import json
 import pickle
 import shutil
 import tempfile
@@ -62,6 +63,7 @@ class TaoTETAMetric(BaseVideoMetric):
         collect_device: str = "cpu",
         tcc: bool = True,
         open_vocabulary=False,
+        track_id_rewrite_dir: Optional[str] = None,
         prefix: Optional[str] = None,
     ) -> None:
         super().__init__(collect_device=collect_device, prefix=prefix)
@@ -102,6 +104,7 @@ class TaoTETAMetric(BaseVideoMetric):
         self.dataset_type = dataset_type
         self.tcc = tcc
         self.open_vocabulary = open_vocabulary
+        self.track_id_rewrite_dir = track_id_rewrite_dir
 
         # --- Lazy-loaded attributes ---
         self.coco = None
@@ -235,6 +238,7 @@ class TaoTETAMetric(BaseVideoMetric):
             all_seq_pred = dict()
             for _seq_info in gathered_seq_info:
                 all_seq_pred.update(_seq_info)
+            all_seq_pred = self.apply_local_track_id_rewrite(all_seq_pred)
             all_seq_pred = self.compute_global_track_id(all_seq_pred)
 
             all_seq_pred_json = list(chain.from_iterable(all_seq_pred.values()))
@@ -260,6 +264,34 @@ class TaoTETAMetric(BaseVideoMetric):
         self.seq_pred.clear()
 
         return metrics[0]
+
+    def apply_local_track_id_rewrite(self, all_seq_pred: dict) -> dict:
+        """Apply per-video local ID maps before globalization and TCC."""
+
+        if not self.track_id_rewrite_dir:
+            return all_seq_pred
+        root = osp.abspath(self.track_id_rewrite_dir)
+        for video_id, rows in all_seq_pred.items():
+            path = osp.join(root, f"video_{int(video_id)}.json")
+            if not osp.exists(path):
+                continue
+            payload = json.load(open(path, "r", encoding="utf-8"))
+            mapping = payload.get("mapping", payload.get("child_to_root", payload))
+            mapping = {int(key): int(value) for key, value in mapping.items()}
+            seen: set[tuple[int, int]] = set()
+            for row in rows:
+                current = int(row["track_id"])
+                visited = set()
+                while current in mapping and current not in visited:
+                    visited.add(current)
+                    current = mapping[current]
+                frame_key = int(row.get("image_id", -1))
+                collision_key = (frame_key, current)
+                if collision_key in seen:
+                    raise ValueError(f"invalid local ID rewrite collision video={video_id}, frame={frame_key}, id={current}")
+                seen.add(collision_key)
+                row["track_id"] = current
+        return all_seq_pred
 
     def compute_global_track_id(self, all_seq_pred):
         max_track_id = 0

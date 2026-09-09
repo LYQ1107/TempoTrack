@@ -22,3 +22,14 @@ def __getattr__(name: str):
         from .episodes import EpisodeManifest, build_episode_manifests
         return {"EpisodeManifest": EpisodeManifest, "build_episode_manifests": build_episode_manifests}[name]
     raise AttributeError(name)
+from .native_observation_recorder import (
+    NativeFrameObservation,
+    NativeObservationRecorder,
+    load_native_cache_frame,
+)
+
+__all__ = [
+    "NativeFrameObservation",
+    "NativeObservationRecorder",
+    "load_native_cache_frame",
+]

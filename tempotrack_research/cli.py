@@ -653,6 +653,165 @@ def _repair_v4(args: argparse.Namespace) -> int:
     raise ValueError(f"unknown repair-v4 action: {action}")
 
 
+def _v6_native_cache(args: argparse.Namespace) -> int:
+    from .v6_cli import native_cache
+    repo = _repo(args.repo)
+    result = native_cache(
+        repo=repo,
+        config=_path(repo, args.config) or repo / "configs/masa-detic/open_vocabulary_mot_test/masa_detic_swinb_open_vocabulary_test.py",
+        checkpoint=_path(repo, args.checkpoint) or repo / "saved_models/masa_models/detic_masa.pth",
+        annotation=_path(repo, args.annotation) or repo / "data/tao/annotations/tao_val_lvis_v1_classes.json",
+        output=_path(repo, args.output) or repo / "outputs/tempotrack_v6/native_cache",
+        devices=args.devices,
+        port=args.port,
+        work_dir=_path(repo, args.work_dir) if args.work_dir else None,
+        resume=args.resume != "never",
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _v6_official_replay(args: argparse.Namespace) -> int:
+    from .v6_cli import official_replay
+    repo = _repo(args.repo)
+    manifest = _path(repo, args.observation_manifest or args.cache)
+    if manifest is None:
+        raise DataUnavailable("official-replay requires --observation-manifest or --cache")
+    result = official_replay(
+        manifest_path=manifest,
+        output=_path(repo, args.output) or repo / "outputs/tempotrack_v6/A1_official_replay",
+        mode=args.mode,
+        device=args.device,
+        annotation=_path(repo, args.annotation) if args.annotation else None,
+        resume=args.resume != "never",
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _v6_paper_emd(args: argparse.Namespace) -> int:
+    from .association.paper_emd import PaperEMDConfig
+    from .v6_cli import paper_emd
+    repo = _repo(args.repo)
+    manifest = _path(repo, args.observation_manifest)
+    frontend = _path(repo, args.frontend_prediction)
+    if manifest is None or frontend is None:
+        raise DataUnavailable("paper-emd requires --observation-manifest and --frontend-prediction")
+    cfg = PaperEMDConfig(
+        bank_size=args.bank_size,
+        dedup_cosine=args.dedup_cosine,
+        boundary_k=args.boundary_k,
+        representative_size=args.representative_size,
+        max_gap=args.max_gap,
+        min_tracklet_length=args.min_tracklet_length,
+        theta_emd=args.theta_emd,
+        sinkhorn_iters=args.sinkhorn_iters,
+        sinkhorn_eps=args.sinkhorn_eps,
+        lambda_app=args.lambda_app,
+        lambda_geo=args.lambda_geo,
+        lambda_time=args.lambda_time,
+        beta_area=args.beta_area,
+    )
+    result = paper_emd(manifest_path=manifest, frontend_prediction=frontend, output=_path(repo, args.output_dir) or repo / "outputs/tempotrack_v6/B1_paper_emd", cfg=cfg)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _v6_stream_recover(args: argparse.Namespace) -> int:
+    from .streaming.engine import StreamingConfig
+    from .v6_cli import stream_recover
+    repo = _repo(args.repo)
+    manifest = _path(repo, args.observation_manifest)
+    frontend = _path(repo, args.frontend_prediction)
+    if manifest is None or frontend is None:
+        raise DataUnavailable("stream-recover requires --observation-manifest and --frontend-prediction")
+    cfg = StreamingConfig(
+        tentative_observations=args.tentative_observations,
+        dormant_horizon=args.dormant_horizon,
+        candidate_top_k=args.candidate_top_k,
+        epsilon=args.epsilon,
+        tau=args.tau,
+        sinkhorn_iters=args.sinkhorn_iters,
+        lambda_mass=args.lambda_mass,
+        lambda_time=args.lambda_time,
+        tau_evidence=args.tau_evidence,
+        tau_competition=args.tau_competition,
+        tau_mass=args.tau_mass,
+        reliability_weighted=args.reliability_weighted,
+    )
+    result = stream_recover(manifest_path=manifest, frontend_prediction=frontend, frontend_trace=_path(repo, args.frontend_trace) if args.frontend_trace else None, output=_path(repo, args.output_dir) or repo / "outputs/tempotrack_v6/C7_rg_smt_B2", cfg=cfg, mode=args.mode)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _v6_evaluate(args: argparse.Namespace) -> int:
+    from .v6_cli import evaluate_v6
+    repo = _repo(args.repo)
+    result = evaluate_v6(
+        repo=repo,
+        annotation=_path(repo, args.annotation) or repo / "data/tao/annotations/tao_val_lvis_v1_classes.json",
+        prediction=_path(repo, args.prediction),
+        output=_path(repo, args.output) or repo / "outputs/tempotrack_v6/evaluations" / args.name,
+        name=args.name,
+        cores=args.cores,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _v6_checks(args: argparse.Namespace) -> int:
+    from .v6_checks import run_v6_checks
+    repo = _repo(args.repo)
+    result = run_v6_checks(
+        manifest_path=_path(repo, args.observation_manifest),
+        a0_path=_path(repo, args.a0_prediction),
+        a1_path=_path(repo, args.a1_prediction),
+        b0_path=_path(repo, args.b0_prediction),
+        b2_path=_path(repo, args.b2_prediction),
+        merge_plan=_path(repo, args.merge_plan),
+        evaluation_path=_path(repo, args.evaluation) if args.evaluation else None,
+        output=_path(repo, args.output) or repo / "reports/tempotrack_v6/v1-v8.json",
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0 if all(value.get("status") == "PASS" for value in result.values() if isinstance(value, Mapping) and "status" in value) else 3
+
+
+def _v6_evaluate_batch(args: argparse.Namespace) -> int:
+    from .v6_cli import evaluate_v6_batch
+    repo = _repo(args.repo)
+    predictions: dict[str, Path] = {}
+    for item in args.prediction:
+        if "=" not in item:
+            raise ValueError("--prediction entries must be NAME=PATH")
+        name, path = item.split("=", 1)
+        predictions[name] = _path(repo, path)
+    result = evaluate_v6_batch(repo=repo, annotation=_path(repo, args.annotation) or repo / "data/tao/annotations/tao_val_lvis_v1_classes.json", predictions=predictions, output=_path(repo, args.output) or repo / "outputs/tempotrack_v6/evaluations_batch", cores=args.cores)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _v6_report(args: argparse.Namespace) -> int:
+    from .v6_report import write_v6_report
+    repo = _repo(args.repo)
+    roots = {}
+    for item in args.method_root:
+        if "=" not in item:
+            raise ValueError("--method-root entries must be NAME=DIR")
+        name, path = item.split("=", 1)
+        roots[name] = _path(repo, path)
+    result = write_v6_report(repo, _path(repo, args.output) or repo / "reports/tempotrack_v6/FINAL_REPORT.md", manifest=_path(repo, args.manifest), a0_summary=_path(repo, args.a0_summary) if args.a0_summary else None, batch_evaluation=_path(repo, args.batch_evaluation) if args.batch_evaluation else None, checks=_path(repo, args.checks) if args.checks else None, method_roots=roots, resource_snapshot=_path(repo, args.resource_snapshot) if args.resource_snapshot else None)
+    print(json.dumps({"report": str(result)}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _v6_alias(args: argparse.Namespace) -> int:
+    from .v6_cli import alias_prediction
+    repo = _repo(args.repo)
+    result = alias_prediction(source=_path(repo, args.source), output=_path(repo, args.output_dir), method=args.method, reason=args.reason)
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tempotrack-repair")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -689,6 +848,15 @@ def build_parser() -> argparse.ArgumentParser:
     q = v4.add_parser("status"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output"); q.add_argument("--json", action="store_true"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output", required=True); q.add_argument("--final", action="store_true"); q.set_defaults(func=_repair_v4)
     q = v4.add_parser("stop"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--job-id", required=True); q.add_argument("--after-checkpoint", action="store_true"); q.set_defaults(func=_repair_v4)
+    p = sub.add_parser("native-cache"); p.add_argument("--repo", default="."); p.add_argument("--config"); p.add_argument("--checkpoint"); p.add_argument("--annotation"); p.add_argument("--output"); p.add_argument("--devices", default="0"); p.add_argument("--port", type=int, default=29631); p.add_argument("--work-dir"); p.add_argument("--resume", choices=["auto", "never"], default="auto"); p.set_defaults(func=_v6_native_cache)
+    p = sub.add_parser("official-replay"); p.add_argument("--repo", default="."); p.add_argument("--observation-manifest"); p.add_argument("--cache"); p.add_argument("--annotation"); p.add_argument("--output"); p.add_argument("--mode", choices=["official", "dual", "dual_hungarian"], default="official"); p.add_argument("--device", default="cpu"); p.add_argument("--resume", choices=["auto", "never"], default="auto"); p.set_defaults(func=_v6_official_replay)
+    p = sub.add_parser("paper-emd"); p.add_argument("--repo", default="."); p.add_argument("--observation-manifest", required=True); p.add_argument("--frontend-prediction", required=True); p.add_argument("--output-dir", required=True); p.add_argument("--bank-size", type=int, default=64); p.add_argument("--dedup-cosine", type=float, default=0.95); p.add_argument("--boundary-k", type=int, default=3); p.add_argument("--representative-size", type=int, default=16); p.add_argument("--max-gap", type=int, default=30); p.add_argument("--min-tracklet-length", type=int, default=3); p.add_argument("--theta-emd", type=float, default=0.35); p.add_argument("--sinkhorn-iters", type=int, default=20); p.add_argument("--sinkhorn-eps", type=float, default=0.05); p.add_argument("--lambda-app", type=float, default=0.70); p.add_argument("--lambda-geo", type=float, default=0.20); p.add_argument("--lambda-time", type=float, default=0.10); p.add_argument("--beta-area", type=float, default=0.50); p.set_defaults(func=_v6_paper_emd)
+    p = sub.add_parser("stream-recover"); p.add_argument("--repo", default="."); p.add_argument("--observation-manifest", required=True); p.add_argument("--frontend-prediction", required=True); p.add_argument("--frontend-trace"); p.add_argument("--mode", choices=["topk", "balanced", "uot", "rg-smt"], required=True); p.add_argument("--reliability-weighted", action="store_true"); p.add_argument("--tentative-observations", type=int, default=2); p.add_argument("--dormant-horizon", type=int, default=30); p.add_argument("--candidate-top-k", type=int, default=8); p.add_argument("--epsilon", type=float, default=0.05); p.add_argument("--tau", type=float, default=0.5); p.add_argument("--sinkhorn-iters", type=int, default=50); p.add_argument("--lambda-mass", type=float, default=0.2); p.add_argument("--lambda-time", type=float, default=0.1); p.add_argument("--tau-evidence", type=float, default=0.0); p.add_argument("--tau-competition", type=float, default=0.05); p.add_argument("--tau-mass", type=float, default=0.20); p.add_argument("--output-dir", required=True); p.set_defaults(func=_v6_stream_recover)
+    p = sub.add_parser("evaluate-v6"); p.add_argument("--repo", default="."); p.add_argument("--prediction", required=True); p.add_argument("--annotation"); p.add_argument("--output"); p.add_argument("--name", required=True); p.add_argument("--cores", type=int, default=8); p.set_defaults(func=_v6_evaluate)
+    p = sub.add_parser("v6-checks"); p.add_argument("--repo", default="."); p.add_argument("--observation-manifest", required=True); p.add_argument("--a0-prediction", required=True); p.add_argument("--a1-prediction", required=True); p.add_argument("--b0-prediction", required=True); p.add_argument("--b2-prediction", required=True); p.add_argument("--merge-plan", required=True); p.add_argument("--evaluation"); p.add_argument("--output"); p.set_defaults(func=_v6_checks)
+    p = sub.add_parser("evaluate-v6-batch"); p.add_argument("--repo", default="."); p.add_argument("--annotation"); p.add_argument("--prediction", action="append", required=True, help="NAME=prediction.json (repeatable)"); p.add_argument("--output"); p.add_argument("--cores", type=int, default=8); p.set_defaults(func=_v6_evaluate_batch)
+    p = sub.add_parser("report-v6"); p.add_argument("--repo", default="."); p.add_argument("--manifest", required=True); p.add_argument("--a0-summary"); p.add_argument("--batch-evaluation"); p.add_argument("--checks"); p.add_argument("--method-root", action="append", default=[], help="NAME=method output directory"); p.add_argument("--resource-snapshot"); p.add_argument("--output"); p.set_defaults(func=_v6_report)
+    p = sub.add_parser("alias-prediction"); p.add_argument("--repo", default="."); p.add_argument("--source", required=True); p.add_argument("--output-dir", required=True); p.add_argument("--method", required=True); p.add_argument("--reason", required=True); p.set_defaults(func=_v6_alias)
     return parser
 
 

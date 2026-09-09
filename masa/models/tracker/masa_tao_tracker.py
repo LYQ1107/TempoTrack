@@ -3,6 +3,8 @@ Author: Siyuan Li
 Licensed: Apache-2.0 License
 """
 
+import atexit
+import os
 from typing import List, Tuple
 
 import torch
@@ -13,6 +15,8 @@ from mmdet.structures import TrackDataSample
 from mmdet.structures.bbox import bbox_overlaps
 from mmengine.structures import InstanceData
 from torch import Tensor
+
+from .association_types import AssociationTrace
 
 
 @MODELS.register_module()
@@ -52,6 +56,9 @@ class MasaTaoTracker(BaseTracker):
         with_cats: bool = True,
         max_distance: float = -1,
         fps=1,
+        observation_dump_dir: str | None = None,
+        observation_dump_metadata: dict | None = None,
+        debug_association_trace: bool = False,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -73,12 +80,42 @@ class MasaTaoTracker(BaseTracker):
         self.fps = fps
         self.growth_factor = self.fps / 6  # Growth factor for the distance mask
         self.distance_smoothing_factor = 100 / self.fps
+        self.debug_association_trace = bool(debug_association_trace)
+        self.last_association_trace: AssociationTrace | None = None
+        self._embedding_dim = 0
+        self._last_device = torch.device("cpu")
+        self._observation_recorder = None
+        if observation_dump_dir:
+            from tempotrack_research.data.native_observation_recorder import (
+                NativeObservationRecorder,
+            )
+
+            # Distributed validation can execute different videos on different
+            # ranks.  Keep rank shards separate so a shared cfg override never
+            # allows two workers to replace the same video_<id>.npz.
+            rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")))
+            rank_dir = os.path.join(str(observation_dump_dir), f"rank_{rank}")
+            self._observation_recorder = NativeObservationRecorder(
+                rank_dir, rank=rank, metadata=dict(observation_dump_metadata or {})
+            )
+            atexit.register(self._close_observation_recorder)
+
+    def _close_observation_recorder(self) -> None:
+        recorder = self._observation_recorder
+        if recorder is not None:
+            recorder.close()
+
+    def _flush_observation_video(self) -> None:
+        if getattr(self, "_observation_recorder", None) is not None:
+            self._observation_recorder.flush_video()
 
     def reset(self):
         """Reset the buffer of the tracker."""
+        self._flush_observation_video()
         self.num_tracks = 0
         self.tracks = dict()
         self.backdrops = []
+        self.last_association_trace = None
 
     def update(
         self,
@@ -100,6 +137,10 @@ class MasaTaoTracker(BaseTracker):
             frame_id (int): The id of current frame, 0-index.
         """
         tracklet_inds = ids > -1
+
+        if embeds.ndim == 2 and embeds.shape[1] > 0:
+            self._embedding_dim = int(embeds.shape[1])
+            self._last_device = embeds.device
 
         for id, bbox, embed, label, score in zip(
             ids[tracklet_inds],
@@ -134,6 +175,173 @@ class MasaTaoTracker(BaseTracker):
                 invalid_ids.append(k)
         for invalid_id in invalid_ids:
             self.tracks.pop(invalid_id)
+
+    def _ordered_memory(self) -> dict[str, Tensor]:
+        """Return active memory in the exact insertion order of ``tracks``."""
+
+        device = self._last_device
+        dim = self._embedding_dim
+        if not self.tracks:
+            return {
+                "bboxes": torch.empty((0, 4), device=device),
+                "labels": torch.empty((0,), dtype=torch.long, device=device),
+                "embeds": torch.empty((0, dim), device=device),
+                "ids": torch.empty((0,), dtype=torch.long, device=device),
+                "frame_ids": torch.empty((0,), dtype=torch.long, device=device),
+            }
+
+        rows = list(self.tracks.items())
+        return {
+            "bboxes": torch.cat([value["bbox"].reshape(1, -1)[:, :4] for _, value in rows], dim=0),
+            "labels": torch.stack([value["label"].reshape(()) for _, value in rows]).long(),
+            "embeds": torch.cat([value["embed"].reshape(1, -1) for _, value in rows], dim=0),
+            "ids": torch.as_tensor([key for key, _ in rows], dtype=torch.long, device=device),
+            "frame_ids": torch.as_tensor([value["last_frame"] for _, value in rows], dtype=torch.long, device=device),
+        }
+
+    def _compute_match_scores(
+        self,
+        embeds: Tensor,
+        memory: dict[str, Tensor],
+        bboxes: Tensor,
+        frame_id: int,
+    ) -> Tensor:
+        """Compute the unchanged official MASA matching matrix."""
+
+        if memory["ids"].numel() == 0:
+            return embeds.new_empty((embeds.shape[0], 0))
+        raw = torch.mm(embeds, memory["embeds"].t())
+        d2t = raw.softmax(dim=1)
+        t2d = raw.softmax(dim=0)
+        bisoft = (d2t + t2d) / 2
+        cos = torch.mm(
+            F.normalize(embeds, p=2, dim=1),
+            F.normalize(memory["embeds"], p=2, dim=1).t(),
+        )
+        scores = (bisoft + cos) / 2
+        if self.max_distance != -1:
+            current_frame_ids = torch.full(
+                (bboxes.shape[0],), int(frame_id), dtype=torch.long, device=bboxes.device
+            )
+            distance_mask = self.compute_distance_mask(
+                bboxes,
+                memory["bboxes"],
+                current_frame_ids,
+                memory["frame_ids"],
+            )
+            scores = scores * distance_mask
+        return scores
+
+    def _diagnostic_scores(self) -> tuple[Tensor | None, Tensor | None]:
+        return None, None
+
+    def _assign_matches(
+        self, match_scores: Tensor, memo_ids: Tensor, det_scores: Tensor
+    ) -> tuple[Tensor, AssociationTrace]:
+        return self._assign_official_greedy(match_scores, memo_ids, det_scores)
+
+    def _assign_official_greedy(
+        self,
+        match_scores: Tensor,
+        memo_ids: Tensor,
+        det_scores: Tensor,
+    ) -> tuple[Tensor, AssociationTrace]:
+        """Apply the original score-sorted greedy assignment exactly once."""
+
+        count = int(match_scores.shape[0])
+        ids = torch.full((count,), -1, dtype=torch.long, device=det_scores.device)
+        accepted = torch.zeros((count,), dtype=torch.bool, device=det_scores.device)
+        accepted_score = torch.full((count,), float("nan"), dtype=match_scores.dtype, device=det_scores.device)
+        margin = torch.full((count,), float("nan"), dtype=match_scores.dtype, device=det_scores.device)
+        assigned = torch.full((count,), -1, dtype=torch.long, device=det_scores.device)
+        work = match_scores.clone()
+        for i in range(count):
+            if work.shape[1] == 0:
+                continue
+            row = work[i]
+            conf, memo_ind = torch.max(row, dim=0)
+            if row.numel() > 1:
+                top2 = torch.topk(row, k=2, dim=0).values
+                current_margin = top2[0] - top2[1]
+            else:
+                current_margin = row.new_tensor(float("nan"))
+            track_id = memo_ids[memo_ind]
+            if conf > self.match_score_thr and track_id > -1 and det_scores[i] > self.obj_score_thr:
+                ids[i] = track_id
+                accepted[i] = True
+                accepted_score[i] = conf
+                margin[i] = current_margin
+                assigned[i] = memo_ind
+                # This is equivalent to the legacy two-slice zeroing and
+                # preserves its tie behavior for all later detections.
+                work[:, memo_ind] = 0
+        trace = AssociationTrace(
+            frame_id=-1,
+            ids=ids,
+            accepted=accepted,
+            accepted_score=accepted_score,
+            detection_margin=margin,
+            assigned_memo_index=assigned,
+            score_matrix=match_scores.detach().clone() if self.debug_association_trace else None,
+        )
+        return ids, trace
+
+    @torch.no_grad()
+    def associate_precomputed(
+        self,
+        *,
+        bboxes: Tensor,
+        labels: Tensor,
+        scores: Tensor,
+        embeds: Tensor,
+        frame_id: int,
+        mask_inds=None,
+    ) -> InstanceData:
+        """Associate already filtered observations without re-sorting them."""
+
+        self._embedding_dim = int(embeds.shape[1]) if embeds.ndim == 2 and embeds.shape[1] else self._embedding_dim
+        self._last_device = embeds.device
+        ids = torch.full((bboxes.size(0),), -1, dtype=torch.long, device=bboxes.device)
+        memory = self._ordered_memory()
+        trace = AssociationTrace(
+            frame_id=int(frame_id),
+            ids=ids,
+            accepted=torch.zeros_like(ids, dtype=torch.bool),
+            accepted_score=torch.full((ids.numel(),), float("nan"), dtype=embeds.dtype, device=embeds.device),
+            detection_margin=torch.full((ids.numel(),), float("nan"), dtype=embeds.dtype, device=embeds.device),
+            assigned_memo_index=torch.full_like(ids, -1),
+        )
+        if bboxes.numel() and memory["ids"].numel():
+            match_scores = self._compute_match_scores(embeds, memory, bboxes, int(frame_id))
+            ids, trace = self._assign_matches(match_scores, memory["ids"], scores)
+
+        new_inds = (ids == -1) & (scores > self.init_score_thr)
+        num_news = int(new_inds.sum().item())
+        if num_news:
+            ids[new_inds] = torch.arange(
+                self.num_tracks,
+                self.num_tracks + num_news,
+                dtype=torch.long,
+                device=ids.device,
+            )
+            self.num_tracks += num_news
+        trace.frame_id = int(frame_id)
+        trace.ids = ids.clone()
+        fast_score, slow_score = self._diagnostic_scores()
+        trace.fast_score = fast_score.detach().clone() if fast_score is not None else None
+        trace.slow_score = slow_score.detach().clone() if slow_score is not None else None
+        self.last_association_trace = trace
+        self.update(ids, bboxes, embeds, labels, scores, int(frame_id))
+
+        pred_track_instances = InstanceData()
+        tracklet_inds = ids > -1
+        pred_track_instances.bboxes = bboxes[tracklet_inds]
+        pred_track_instances.labels = labels[tracklet_inds]
+        pred_track_instances.scores = scores[tracklet_inds]
+        pred_track_instances.instances_id = ids[tracklet_inds]
+        if mask_inds is not None and len(mask_inds) > 0:
+            pred_track_instances.mask_inds = mask_inds[tracklet_inds]
+        return pred_track_instances
 
     @property
     def memo(self) -> Tuple[Tensor, ...]:
@@ -270,75 +478,31 @@ class MasaTaoTracker(BaseTracker):
             distractor_nms_thr=self.distractor_nms_thr,
         )
 
-        # init ids container
-        ids = torch.full((bboxes.size(0),), -1, dtype=torch.long)
-
-        # match if buffer is not empty
-        if bboxes.size(0) > 0 and not self.empty:
-            (
-                memo_bboxes,
-                memo_labels,
-                memo_embeds,
-                memo_ids,
-                memo_frame_ids,
-            ) = self.memo
-
-            feats = torch.mm(embeds, memo_embeds.t())
-            d2t_scores = feats.softmax(dim=1)
-            t2d_scores = feats.softmax(dim=0)
-            match_scores_bisoftmax = (d2t_scores + t2d_scores) / 2
-
-            match_scores_cosine = torch.mm(
-                F.normalize(embeds, p=2, dim=1),
-                F.normalize(memo_embeds, p=2, dim=1).t(),
-            )
-
-            match_scores = (match_scores_bisoftmax + match_scores_cosine) / 2
-
-            if self.max_distance != -1:
-
-                # Compute the mask based on spatial proximity
-                current_frame_ids = torch.full(
-                    (bboxes.size(0),), frame_id, dtype=torch.long
-                )
-                distance_mask = self.compute_distance_mask(
-                    bboxes, memo_bboxes, current_frame_ids, memo_frame_ids
-                )
-
-                # Apply the mask to the match scores
-                match_scores = match_scores * distance_mask
-
-            # track according to match_scores
-            for i in range(bboxes.size(0)):
-                conf, memo_ind = torch.max(match_scores[i, :], dim=0)
-                id = memo_ids[memo_ind]
-                if conf > self.match_score_thr:
-                    if id > -1:
-                        # keep bboxes with high object score
-                        # and remove background bboxes
-                        if scores[i] > self.obj_score_thr:
-                            ids[i] = id
-                            match_scores[:i, memo_ind] = 0
-                            match_scores[i + 1 :, memo_ind] = 0
-
-        # initialize new tracks
-        new_inds = (ids == -1) & (scores > self.init_score_thr).cpu()
-        num_news = new_inds.sum()
-        ids[new_inds] = torch.arange(
-            self.num_tracks, self.num_tracks + num_news, dtype=torch.long
+        pred_track_instances = self.associate_precomputed(
+            bboxes=bboxes,
+            labels=labels,
+            scores=scores,
+            embeds=embeds,
+            frame_id=frame_id,
+            mask_inds=mask_inds if with_segm else None,
         )
-        self.num_tracks += num_news
-
-        self.update(ids, bboxes, embeds, labels, scores, frame_id)
-        tracklet_inds = ids > -1
-        # update pred_track_instances
-        pred_track_instances.bboxes = bboxes[tracklet_inds]
-        pred_track_instances.labels = labels[tracklet_inds]
-        pred_track_instances.scores = scores[tracklet_inds]
-        pred_track_instances.instances_id = ids[tracklet_inds]
-        if with_segm:
-            pred_track_instances.mask_inds = mask_inds[tracklet_inds]
-
+        if with_segm and hasattr(pred_track_instances, "mask_inds"):
+            pred_track_instances.mask_inds = pred_track_instances.mask_inds
+        if self._observation_recorder is not None:
+            video_id = int(metainfo.get("video_id", metainfo.get("vid_id", -1)))
+            if self._observation_recorder.current_video_id not in (None, video_id):
+                self._flush_observation_video()
+            self._observation_recorder.append(
+                video_id=video_id,
+                frame_id=int(frame_id),
+                image_id=int(metainfo.get("img_id", metainfo.get("image_id", -1))),
+                image_hw=(int(metainfo.get("ori_shape", metainfo.get("img_shape", (0, 0)))[0]), int(metainfo.get("ori_shape", metainfo.get("img_shape", (0, 0)))[1])),
+                bboxes=bboxes,
+                labels=labels,
+                scores=scores,
+                embeds=embeds,
+                trace=self.last_association_trace,
+            )
         return pred_track_instances
 
     def remove_distractor(
