@@ -342,6 +342,12 @@ def _official_subset_assocA(
     output: Path,
 ) -> dict[str, Any]:
     """Run real official association-only TETA for the pairwise Top12."""
+    if len(video_ids) != 128:
+        return {
+            "status": "BLOCKED_INVALID_SELECTION_SUBSET",
+            "error": f"official selection requires exactly 128 videos, got {len(video_ids)}",
+            "selection_video_count": len(video_ids),
+        }
     subset_annotation = _write_subset_annotation(annotation, video_ids, output / "official_subset_gt.json")
     prediction_root = output / "official_subset_predictions"
     predictions: dict[str, Path] = {}
@@ -491,22 +497,37 @@ def _equivalence(replay_rows: list[dict[str, Any]], baseline_path: Path, images:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--frontend", choices=("vovtrack", "covtrack"), required=True)
-    parser.add_argument("--calls-root", required=True); parser.add_argument("--annotation", required=True); parser.add_argument("--output", required=True); parser.add_argument("--external-root", required=True); parser.add_argument("--model-config", required=True); parser.add_argument("--model-checkpoint", required=True); parser.add_argument("--baseline-prediction", required=True); parser.add_argument("--device", default="cpu"); parser.add_argument("--materialize-best", action="store_true"); parser.add_argument("--equivalence-only", action="store_true")
+    parser.add_argument("--calls-root", required=True); parser.add_argument("--annotation", required=True); parser.add_argument("--selection-annotation"); parser.add_argument("--selection-split", default="test"); parser.add_argument("--selection-protocol", default="TEST_BASE_ADAPTED"); parser.add_argument("--output", required=True); parser.add_argument("--external-root", required=True); parser.add_argument("--model-config", required=True); parser.add_argument("--model-checkpoint", required=True); parser.add_argument("--baseline-prediction", required=True); parser.add_argument("--device", default="cpu"); parser.add_argument("--materialize-best", action="store_true"); parser.add_argument("--equivalence-only", action="store_true")
     args = parser.parse_args()
     external_root = Path(args.external_root).resolve(); sys.path.insert(0, str(external_root)); calls_root = Path(args.calls_root).resolve(); annotation = Path(args.annotation).resolve(); output = Path(args.output).resolve(); output.mkdir(parents=True, exist_ok=True)
-    images, _, _, _ = _image_index(annotation); video_ids = _subset_video_ids(annotation, 10)
+    selection_annotation = Path(args.selection_annotation).resolve() if args.selection_annotation else annotation
+    if not selection_annotation.exists():
+        raise FileNotFoundError(f"selection annotation does not exist: {selection_annotation}")
+    selection_split = str(args.selection_split).strip().lower()
+    selection_protocol = str(args.selection_protocol).strip().upper().replace("-", "_")
+    if selection_split != "test":
+        raise ValueError(f"active V9.1 selection requires split=test, got {args.selection_split!r}")
+    if selection_protocol not in {"TEST_BASE_ADAPTED", "TEST_FULL_ORACLE"}:
+        raise ValueError(f"active V9.1 selection requires a Test protocol, got {args.selection_protocol!r}")
+    images, _, _, _ = _image_index(annotation)
+    equivalence_video_ids = _subset_video_ids(annotation, 10)
+    selection_video_ids = _subset_video_ids(selection_annotation, 128)
+    if not args.equivalence_only and len(selection_video_ids) != 128:
+        raise ValueError(
+            f"active Top12 official selection requires exactly 128 videos, got {len(selection_video_ids)} from {selection_annotation}"
+        )
     components = _load_released_components(args.frontend, Path(args.model_config).resolve(), Path(args.model_checkpoint).resolve(), args.device)
     released = _configs(args.frontend)[0]
-    equivalence_metrics, equivalence_rows = _replay(args.frontend, calls_root, annotation, released, args.device, components, video_ids=video_ids)
-    equivalence = _equivalence(equivalence_rows, Path(args.baseline_prediction).resolve(), images, video_ids)
+    equivalence_metrics, equivalence_rows = _replay(args.frontend, calls_root, annotation, released, args.device, components, video_ids=equivalence_video_ids)
+    equivalence = _equivalence(equivalence_rows, Path(args.baseline_prediction).resolve(), images, equivalence_video_ids)
     _write = _write_json
-    _write(output / "released_equivalence.json", {"frontend": args.frontend, "videos": sorted(video_ids), "metrics": equivalence_metrics, "equivalence": equivalence, "cov_components": {"confused_features": bool(getattr(_tracker(args.frontend, released, components), "confused_features", False)) if args.frontend == "covtrack" else None, "fusion_head": components["fusion_head"] is not None if args.frontend == "covtrack" else None, "loss_cyc": components["loss_cyc"] is not None if args.frontend == "covtrack" else None}})
+    _write(output / "released_equivalence.json", {"frontend": args.frontend, "videos": sorted(equivalence_video_ids), "video_count": len(equivalence_video_ids), "metrics": equivalence_metrics, "equivalence": equivalence, "selection_annotation": str(selection_annotation), "selection_annotation_sha256": _sha256(selection_annotation), "selection_video_count": len(selection_video_ids), "cov_components": {"confused_features": bool(getattr(_tracker(args.frontend, released, components), "confused_features", False)) if args.frontend == "covtrack" else None, "fusion_head": components["fusion_head"] is not None if args.frontend == "covtrack" else None, "loss_cyc": components["loss_cyc"] is not None if args.frontend == "covtrack" else None}})
     if args.equivalence_only:
         print(json.dumps({"status": "EQUIVALENCE_PASS", "output": str(output / "released_equivalence.json")}, ensure_ascii=False, indent=2))
         return 0
     result_rows: list[dict[str, Any]] = []; best = None
     for index, config in enumerate(_configs(args.frontend)):
-        metrics, _ = _replay(args.frontend, calls_root, annotation, config, args.device, components)
+        metrics, _ = _replay(args.frontend, calls_root, selection_annotation, config, args.device, components, video_ids=selection_video_ids)
         row = {"config_index": int(index), "config": config, **metrics, "production_entrypoint": "released external OVTracker.match", "input_calls": str(calls_root), "selection_metric": "base_pair_f1"}; result_rows.append(row)
         score = (float(metrics["base_pair_f1"]), float(metrics["base_pair_precision"]), -int(index))
         if best is None or score > best["_score"]:
@@ -517,7 +538,7 @@ def main() -> int:
     if best is not None:
         top12 = sorted(result_rows, key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))[:12]
         _write(output / "top12_pairwise.json", {"selection_metric": "base_pair_f1", "rows": top12, "official_subset_assocA_required": True})
-        official_subset = _official_subset_assocA(frontend=args.frontend, top12=top12, calls_root=calls_root, annotation=annotation, video_ids=video_ids, device=args.device, components=components, output=output / "official_subset")
+        official_subset = _official_subset_assocA(frontend=args.frontend, top12=top12, calls_root=calls_root, annotation=selection_annotation, video_ids=selection_video_ids, device=args.device, components=components, output=output / "official_subset")
         if official_subset.get("status") == "COMPLETED":
             official_by_index = {int(item["config_index"]): item for item in official_subset["rows"]}
             for row in result_rows:
@@ -532,8 +553,8 @@ def main() -> int:
             # did not produce Base AssocA.
             _write(output / "selected.json", {"status": "NOT_SELECTED", "reason": official_subset})
         if args.materialize_best and selected is not None:
-            selected_calls = output / "selected_calls" / "match_calls_0.pkl"; material_metrics, material_rows = _replay(args.frontend, calls_root, annotation, dict(selected["config"]), args.device, components, selected_calls); _write(output / "selected_prediction.json", material_rows); selected["materialized"] = {"calls": str(selected_calls), "prediction": str(output / "selected_prediction.json"), **material_metrics}
-    result = {"schema_version": 10, "artifact": "v9_1_active_tracker_operating_point_sweep", "frontend": args.frontend, "calls_root": str(calls_root), "annotation": str(annotation), "annotation_sha256": _sha256(annotation), "model_config": str(Path(args.model_config).resolve()), "model_checkpoint": str(Path(args.model_checkpoint).resolve()), "baseline_prediction": str(Path(args.baseline_prediction).resolve()), "equivalence": {"status": "PASS", "video_count": len(video_ids), **equivalence}, "configs": len(result_rows), "selection": "Base pairwise association F1 pre-screen -> official subset association-only TETA Base AssocA", "deterministic_subset": "sha256(video_id) first 128", "official_subset": official_subset, "rows": result_rows, "best_baseline": selected}
+            selected_calls = output / "selected_calls" / "match_calls_0.pkl"; material_metrics, material_rows = _replay(args.frontend, calls_root, selection_annotation, dict(selected["config"]), args.device, components, selected_calls, video_ids=selection_video_ids); _write(output / "selected_prediction.json", material_rows); selected["materialized"] = {"calls": str(selected_calls), "prediction": str(output / "selected_prediction.json"), **material_metrics}
+    result = {"schema_version": 10, "artifact": "v9_1_active_tracker_operating_point_sweep", "frontend": args.frontend, "calls_root": str(calls_root), "equivalence_annotation": str(annotation), "equivalence_annotation_sha256": _sha256(annotation), "selection_annotation": str(selection_annotation), "selection_annotation_sha256": _sha256(selection_annotation), "selection_split": selection_split, "selection_protocol": selection_protocol, "model_config": str(Path(args.model_config).resolve()), "model_checkpoint": str(Path(args.model_checkpoint).resolve()), "baseline_prediction": str(Path(args.baseline_prediction).resolve()), "equivalence": {"status": "PASS", "video_count": len(equivalence_video_ids), **equivalence}, "configs": len(result_rows), "selection_video_count": len(selection_video_ids), "selection": "Base pairwise association F1 pre-screen -> official 128-video subset association-only TETA Base AssocA", "deterministic_subset": "sha256(video_id) first 128", "official_subset": official_subset, "rows": result_rows, "best_baseline": selected}
     _write(output / "active_sweep.json", result); print(json.dumps({"status": "COMPLETED", "output": str(output / "active_sweep.json"), "best": selected}, ensure_ascii=False, indent=2)); return 0
 
 

@@ -55,6 +55,24 @@ def _normalize_v91_protocol(value: str) -> str:
     return aliases[key]
 
 
+def _validate_v91_protocol_split(protocol: str, split: str) -> tuple[str, str]:
+    """Validate the protocol/split pairing before GT-backed selection."""
+    normalized = _normalize_v91_protocol(protocol)
+    split_key = str(split).strip().lower()
+    if split_key not in {"val", "test"}:
+        raise ValueError(f"V9.1 split must be val or test, got {split!r}")
+    expected = {
+        "VAL_BASE_ADAPTED": "val",
+        "TEST_BASE_ADAPTED": "test",
+        "TEST_FULL_ORACLE": "test",
+    }.get(normalized)
+    if expected is not None and split_key != expected:
+        raise ValueError(
+            f"V9.1 protocol/split mismatch: {normalized} requires split={expected}, got {split_key}"
+        )
+    return normalized, split_key
+
+
 def _sha256(path: str | Path) -> str:
     value = Path(path)
     digest = hashlib.sha256()
@@ -829,13 +847,35 @@ def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.nda
                 torch.as_tensor(evidence.reshape(-1, 7), dtype=torch.float32)
             ).reshape(evidence.shape[0], evidence.shape[1]).numpy()
     qcount = max(1, min(qcount, cosine.shape[1]))
-    width = min(memory_capacity, cosine.shape[2])
+    cache_width = int(cosine.shape[2])
+    width = min(memory_capacity, cache_width)
+    if width < 1:
+        raise ValueError("memory_capacity must be positive")
     rank = max(1, min(top_r, width))
-    values = np.asarray(cosine[:, :qcount, :width], dtype=np.float32).copy()
-    valid_memory = np.arange(width, dtype=np.int64)[None, :] < np.minimum(mem_len, width)[:, None]
+    # The cache stores each anchor bank oldest-to-newest.  The production
+    # builder retains the *last* N rows for capacity N, so a capacity ablation
+    # must gather a right-aligned window instead of taking the oldest [:N].
+    available = np.minimum(np.maximum(mem_len, 0), cache_width)
+    starts = np.maximum(available - width, 0)
+    offsets = np.arange(width, dtype=np.int64)
+    column_indices = starts[:, None] + offsets[None, :]
+    broadcast_indices = np.broadcast_to(
+        column_indices[:, None, :], (cosine.shape[0], qcount, width)
+    )
+    values = np.take_along_axis(
+        np.asarray(cosine[:, :qcount, :], dtype=np.float32),
+        broadcast_indices,
+        axis=2,
+    ).copy()
+    valid_memory = offsets[None, :] < np.minimum(available, width)[:, None]
     values = np.where(valid_memory[:, None, :], values, -np.inf)
     if reliability is not None and multiplier > 0:
-        values += float(calibrator_beta) * float(multiplier) * np.log(np.maximum(reliability[:, None, :width], 1e-6))
+        selected_reliability = np.take_along_axis(
+            np.asarray(reliability[:, :cache_width], dtype=np.float32),
+            column_indices,
+            axis=1,
+        )
+        values += float(calibrator_beta) * float(multiplier) * np.log(np.maximum(selected_reliability[:, None, :], 1e-6))
         values = np.where(valid_memory[:, None, :], values, -np.inf)
     # ``partition`` is equivalent to the formal top-r support but operates on
     # all events in one NumPy kernel.  Invalid/padded memory slots contribute
@@ -843,7 +883,7 @@ def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.nda
     top = np.partition(values, width - rank, axis=2)[:, :, -rank:]
     finite = np.isfinite(top)
     numer = np.where(finite, top, 0.0).sum(axis=2)
-    denom = np.minimum(np.minimum(mem_len, width), rank).astype(np.float32)
+    denom = np.minimum(np.minimum(available, width), rank).astype(np.float32)
     denom = np.maximum(denom, 1.0)[:, None]
     support = (numer / denom).mean(axis=1).astype(np.float32)
     if row_arrays is None:
@@ -1012,8 +1052,8 @@ def sweep_psmr(
 ) -> dict[str, Any]:
     if int(structural_shard_count) < 1 or not 0 <= int(structural_shard_index) < int(structural_shard_count):
         raise ValueError("structural shard must satisfy 0 <= index < count and count >= 1")
-    protocol = _normalize_v91_protocol(protocol)
     metadata, arrays, rows = _load_event_cache(event_cache)
+    protocol, cache_split = _validate_v91_protocol_split(protocol, metadata.get("split", ""))
     config = load_yaml(search_space)
     search = dict(config.get("search", {}))
     frontend_name = str(metadata.get("frontend", "masa_detic"))
@@ -1066,7 +1106,7 @@ def sweep_psmr(
     output_path = Path(output).resolve(); output_path.parent.mkdir(parents=True, exist_ok=True)
     rows_jsonl = output_path.with_suffix(output_path.suffix + ".jsonl")
     rows_jsonl.unlink(missing_ok=True)
-    is_test_cache = str(metadata.get("split", "")).lower() == "test"
+    is_test_cache = cache_split == "test"
     frozen_test_invalid = protocol == "FROZEN_DEV" and is_test_cache
     frozen_dev_selection_invalid = protocol == "FROZEN_DEV"
     structural_ordinal = 0
@@ -1285,6 +1325,12 @@ def _official_subset_assocA_for_rows(
     *, annotation: Path, video_ids: set[int], rows_by_name: Mapping[str, Sequence[Mapping[str, Any]]], output: Path,
 ) -> dict[str, Any]:
     """Evaluate candidate prediction rows with the installed official TETA."""
+    if len(video_ids) != 128:
+        return {
+            "status": "BLOCKED_INVALID_SELECTION_SUBSET",
+            "error": f"official selection requires exactly 128 videos, got {len(video_ids)}",
+            "selection_video_count": len(video_ids),
+        }
     subset_annotation = _write_official_subset_annotation(annotation, video_ids, output / "gt_subset.json")
     prediction_paths: dict[str, Path] = {}
     for name, rows in rows_by_name.items():
@@ -1357,7 +1403,7 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
     returned Top12 must still be materialized and judged by official subset
     AssocA before a parent enters a paper selection.
     """
-    protocol = _normalize_v91_protocol(protocol)
+    protocol, split = _validate_v91_protocol_split(protocol, split)
     output_path = Path(output).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path = _require(manifest, "native manifest")
@@ -1369,6 +1415,10 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
     shards = sorted(shards_all, key=lambda item: hashlib.sha256(str(int(item["video_id"])).encode()).hexdigest())
     if video_limit is not None:
         shards = shards[:int(video_limit)]
+    if len(shards) != 128:
+        raise ValueError(
+            f"Dual official Top12 selection requires exactly 128 videos, got {len(shards)}"
+        )
     video_ids = {int(shard["video_id"]) for shard in shards}
     device_list = [str(item).strip() for item in (devices.split(",") if isinstance(devices, str) else (devices or [device])) if str(item).strip()]
     if not device_list:
@@ -1496,7 +1546,89 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
     d2_rows = screen_config(d2, "D2", start_index=len(d1_rows))
     rows = d1_rows + d2_rows
     rows.sort(key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))
-    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_dual_sweep", "status": "COMPLETED", "split": split, "protocol": protocol, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "video_count": len(shards), "screen_video_selection": "sha256(video_id) first 128", "d1_configs": len(d1_rows), "d2_configs": len(d2_rows), "evaluated_configs": len(rows), "selection_metric": "base_pair_f1_pre_screen_then_official_subset_AssocA", "official_subset_top12_required": True, "d1_pre_top12": d1_pre_top12, "d1_official_subset": d1_official, "best": rows[:8], "d1_top12": d1_top12, "d1_parents": parents, "d1_parent_selection": "official subset association-only TETA Base AssocA top3", "rows": rows}
+    # D2 has its own official Top12 gate.  D1 official parents are only a
+    # source of D2 configurations; a D2 pairwise winner must never become the
+    # final operating point without the same 128-video association-only TETA.
+    d2_pre_top12 = sorted(
+        d2_rows,
+        key=lambda item: (
+            -float(item["base_pair_f1"]),
+            -float(item["base_pair_precision"]),
+            int(item["config_index"]),
+        ),
+    )[:12]
+    d2_prediction_rows = {
+        f"config_{int(item['config_index']):04d}": _native_prediction_rows(
+            manifest_path,
+            annotation_path,
+            mode="dual",
+            device=device_list[index % len(device_list)],
+            tracker_config={
+                key: value
+                for key, value in item["config"].items()
+                if key in {"alpha_fast", "alpha_slow", "dual_logit_scale", "fast_accept_threshold", "assignment_mode"}
+            },
+            video_ids=video_ids,
+        )
+        for index, item in enumerate(d2_pre_top12)
+    }
+    d2_official = _official_subset_assocA_for_rows(
+        annotation=annotation_path,
+        video_ids=video_ids,
+        rows_by_name=d2_prediction_rows,
+        output=output_path.with_name(output_path.stem + "_d2_official_subset"),
+    )
+    if d2_official.get("status") != "COMPLETED":
+        result = {
+            "schema_version": V91_SCHEMA,
+            "artifact": "v9_1_dual_sweep",
+            "status": d2_official.get("status"),
+            "split": split,
+            "protocol": protocol,
+            "manifest": str(manifest_path),
+            "manifest_hash": _sha256(manifest_path),
+            "annotation": str(annotation_path),
+            "annotation_hash": _sha256(annotation_path),
+            "video_count": len(shards),
+            "d1_configs": len(d1_rows),
+            "d2_configs": len(d2_rows),
+            "evaluated_configs": len(rows),
+            "selection_metric": "D1 official Base AssocA parents -> D2 pairwise Top12 -> official 128-video Base AssocA",
+            "official_subset_top12_required": True,
+            "d1_pre_top12": d1_pre_top12,
+            "d1_official_subset": d1_official,
+            "d1_top12": d1_top12,
+            "d1_parents": parents,
+            "d2_pre_top12": d2_pre_top12,
+            "d2_official_subset": d2_official,
+            "final_selected": None,
+            "best": None,
+            "rows": rows,
+        }
+        _write_json(output_path, result)
+        return {"status": result["status"], "output": str(output_path), **result}
+    d2_official_by_index = {
+        int(str(item["name"]).split("config_", 1)[1]): item
+        for item in d2_official["rows"]
+    }
+    d2_top12 = []
+    for item in d2_pre_top12:
+        official = d2_official_by_index[int(item["config_index"])]
+        enriched = dict(item)
+        enriched["official_subset_assoc_only"] = official["official_assoc_only"]
+        enriched["official_subset_prediction"] = official["prediction"]
+        enriched["official_subset_prediction_hash"] = official["prediction_hash"]
+        d2_top12.append(enriched)
+    final_selected = max(
+        d2_top12,
+        key=lambda item: (
+            float(item["official_subset_assoc_only"]["base"]["AssocA"]),
+            float(item["official_subset_assoc_only"]["base"].get("TETA", -float("inf"))),
+            float(item["base_pair_f1"]),
+            -int(item["config_index"]),
+        ),
+    )
+    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_dual_sweep", "status": "COMPLETED", "split": split, "protocol": protocol, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "video_count": len(shards), "screen_video_selection": "sha256(video_id) first 128", "d1_configs": len(d1_rows), "d2_configs": len(d2_rows), "evaluated_configs": len(rows), "selection_metric": "D1 official Base AssocA parents -> D2 pairwise Top12 -> official 128-video Base AssocA", "official_subset_top12_required": True, "d1_pre_top12": d1_pre_top12, "d1_official_subset": d1_official, "best": final_selected, "final_selected": final_selected, "d1_top12": d1_top12, "d1_parents": parents, "d1_parent_selection": "official subset association-only TETA Base AssocA top3", "d2_pre_top12": d2_pre_top12, "d2_official_subset": d2_official, "d2_top12": d2_top12, "d2_final_selection": "official subset association-only TETA Base AssocA", "rows": rows}
     _write_json(output_path, result)
     return {"status": "COMPLETED", "output": str(output_path), **result}
 

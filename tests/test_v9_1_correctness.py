@@ -13,6 +13,7 @@ from tempotrack_research.orchestration.v9_parameter_search import (
     _make_event_rows,
     _prepare_group_arrays,
     _resolve_materialize_checkpoint,
+    _validate_v91_protocol_split,
 )
 from tempotrack_research.streaming.psmr_dataset import VideoData
 
@@ -96,9 +97,18 @@ def test_candidate_k_and_memory_capacity_are_independent_in_scoring():
         row_arrays=row_arrays,
     )
     assert np.isfinite(score_k2_m1[0]) and np.isfinite(score_k2_m3[0])
-    assert float(score_k2_m1[0]) == pytest.approx(0.90)
+    # Capacity one must keep the newest retained anchor (0.10), not the
+    # oldest cache column (0.90).
+    assert float(score_k2_m1[0]) == pytest.approx(0.10)
     assert float(score_k2_m3[0]) == pytest.approx(0.90)
     assert not np.isfinite(score_k1_m3[0])
+
+
+def test_protocol_split_validation_rejects_cross_split_selection():
+    assert _validate_v91_protocol_split("TEST_BASE_ADAPTED", "test") == ("TEST_BASE_ADAPTED", "test")
+    assert _validate_v91_protocol_split("VAL_BASE_ADAPTED", "val") == ("VAL_BASE_ADAPTED", "val")
+    with pytest.raises(ValueError, match="protocol/split mismatch"):
+        _validate_v91_protocol_split("TEST_BASE_ADAPTED", "val")
 
 
 def test_mmap_cache_loader_rejects_legacy_schema(tmp_path):
