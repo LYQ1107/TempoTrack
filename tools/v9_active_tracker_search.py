@@ -498,7 +498,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--frontend", choices=("vovtrack", "covtrack"), required=True)
     parser.add_argument("--calls-root", required=True); parser.add_argument("--annotation", required=True); parser.add_argument("--selection-annotation"); parser.add_argument("--selection-split", default="test"); parser.add_argument("--selection-protocol", default="TEST_BASE_ADAPTED"); parser.add_argument("--output", required=True); parser.add_argument("--external-root", required=True); parser.add_argument("--model-config", required=True); parser.add_argument("--model-checkpoint", required=True); parser.add_argument("--baseline-prediction", required=True); parser.add_argument("--device", default="cpu"); parser.add_argument("--materialize-best", action="store_true"); parser.add_argument("--equivalence-only", action="store_true")
+    parser.add_argument("--config-shard-count", type=int, default=1, help="Run a disjoint config shard; merge all shards before official selection")
+    parser.add_argument("--config-shard-index", type=int, default=0)
     args = parser.parse_args()
+    if int(args.config_shard_count) < 1 or not 0 <= int(args.config_shard_index) < int(args.config_shard_count):
+        raise ValueError("config shard must satisfy 0 <= index < count and count >= 1")
     external_root = Path(args.external_root).resolve(); sys.path.insert(0, str(external_root)); calls_root = Path(args.calls_root).resolve(); annotation = Path(args.annotation).resolve(); output = Path(args.output).resolve(); output.mkdir(parents=True, exist_ok=True)
     selection_annotation = Path(args.selection_annotation).resolve() if args.selection_annotation else annotation
     if not selection_annotation.exists():
@@ -529,14 +533,44 @@ def main() -> int:
     if args.equivalence_only:
         print(json.dumps({"status": "EQUIVALENCE_PASS", "output": str(output / "released_equivalence.json")}, ensure_ascii=False, indent=2))
         return 0
+    all_configs = _configs(args.frontend)
+    config_pairs = [(index, config) for index, config in enumerate(all_configs) if index % int(args.config_shard_count) == int(args.config_shard_index)]
     result_rows: list[dict[str, Any]] = []; best = None
-    for index, config in enumerate(_configs(args.frontend)):
+    for index, config in config_pairs:
         metrics, _ = _replay(args.frontend, calls_root, selection_annotation, config, args.device, components, video_ids=selection_video_ids)
         row = {"config_index": int(index), "config": config, **metrics, "production_entrypoint": "released external OVTracker.match", "input_calls": str(calls_root), "selection_metric": "base_pair_f1"}; result_rows.append(row)
         score = (float(metrics["base_pair_f1"]), float(metrics["base_pair_precision"]), -int(index))
         if best is None or score > best["_score"]:
             best = {**row, "_score": score}
         print(json.dumps({"config_index": index, **config, **metrics}, ensure_ascii=False), flush=True)
+    if int(args.config_shard_count) > 1:
+        result = {
+            "schema_version": 10,
+            "artifact": "v9_1_active_tracker_operating_point_sweep_shard",
+            "status": "SHARD_COMPLETE",
+            "frontend": args.frontend,
+            "calls_root": str(calls_root),
+            "equivalence_annotation": str(annotation),
+            "equivalence_annotation_sha256": _sha256(annotation),
+            "selection_annotation": str(selection_annotation),
+            "selection_annotation_sha256": _sha256(selection_annotation),
+            "selection_split": selection_split,
+            "selection_protocol": selection_protocol,
+            "model_config": str(Path(args.model_config).resolve()),
+            "model_checkpoint": str(Path(args.model_checkpoint).resolve()),
+            "baseline_prediction": str(Path(args.baseline_prediction).resolve()),
+            "equivalence": {"status": "PASS", "video_count": len(equivalence_video_ids), **equivalence},
+            "config_shard_index": int(args.config_shard_index),
+            "config_shard_count": int(args.config_shard_count),
+            "configs_total": len(all_configs),
+            "configs": len(result_rows),
+            "selection_video_count": len(selection_video_ids),
+            "selection": "Shard only; merge all config shards, pre-screen by pairwise F1, then official 128-video subset association-only TETA Base AssocA",
+            "rows": result_rows,
+        }
+        _write(output / "active_shard.json", result)
+        print(json.dumps({"status": "SHARD_COMPLETE", "output": str(output / "active_shard.json"), "config_shard_index": args.config_shard_index, "configs": len(result_rows)}, ensure_ascii=False, indent=2))
+        return 0
     selected = None
     official_subset = None
     if best is not None:
