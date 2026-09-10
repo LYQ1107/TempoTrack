@@ -1,0 +1,98 @@
+{
+  "status": "COMPLETED",
+  "output": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/outputs/tempotrack_v9/smoke/cache_vov_val",
+  "metadata": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/outputs/tempotrack_v9/smoke/cache_vov_val/metadata.json",
+  "events": 3029,
+  "arrays": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/outputs/tempotrack_v9/smoke/cache_vov_val/events.npz",
+  "arrays_hash": "2b89573a91423fd524763f4a27233985bb78615e11d502f4732a64bdd1b43167",
+  "audit": {
+    "min_gap": 0,
+    "max_gap": 240,
+    "candidate_k": 64,
+    "query_observations": [
+      1,
+      2,
+      4
+    ],
+    "videos": 4,
+    "fragments": 4435,
+    "eligible_targets": 53,
+    "events_with_correct_identity": 29,
+    "legal_pairs": 10530,
+    "known_pairs": 108,
+    "positive_pairs": 38,
+    "unknown_pairs": 2921,
+    "excluded_by_min_gap": 0,
+    "excluded_by_max_gap": 14307,
+    "recall": {
+      "1": {
+        "positive": 29,
+        "recalled": 22,
+        "value": 0.7586206896551724
+      },
+      "8": {
+        "positive": 29,
+        "recalled": 25,
+        "value": 0.8620689655172413
+      },
+      "16": {
+        "positive": 29,
+        "recalled": 26,
+        "value": 0.896551724137931
+      },
+      "32": {
+        "positive": 29,
+        "recalled": 27,
+        "value": 0.9310344827586207
+      },
+      "64": {
+        "positive": 29,
+        "recalled": 27,
+        "value": 0.9310344827586207
+      }
+    },
+    "gap_bins": {
+      "0-10": {
+        "legal": 0,
+        "positive": 0,
+        "recalled_at_64": 0
+      },
+      "10-30": {
+        "legal": 581,
+        "positive": 0,
+        "recalled_at_64": 0
+      },
+      "30-60": {
+        "legal": 482,
+        "positive": 13,
+        "recalled_at_64": 13
+      },
+      "60-90": {
+        "legal": 379,
+        "positive": 4,
+        "recalled_at_64": 4
+      },
+      "90-120": {
+        "legal": 391,
+        "positive": 4,
+        "recalled_at_64": 4
+      },
+      "120-180": {
+        "legal": 666,
+        "positive": 10,
+        "recalled_at_64": 10
+      },
+      "180-240": {
+        "legal": 530,
+        "positive": 7,
+        "recalled_at_64": 7
+      },
+      "240-360": {
+        "legal": 0,
+        "positive": 0,
+        "recalled_at_64": 0
+      }
+    },
+    "status": "COMPLETED"
+  }
+}

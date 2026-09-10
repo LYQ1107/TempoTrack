@@ -155,6 +155,7 @@ def native_cache(
     port: int = 29631,
     work_dir: Path | None = None,
     resume: bool = True,
+    extra_cfg_options: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Run the official native model path and collect immutable observations."""
 
@@ -177,12 +178,32 @@ def native_cache(
     shard_dir.mkdir(parents=True, exist_ok=True)
     log_path = output / "native_cache.log"
     work = work_dir or output / "work"
+    # The official MASA-R50 public-detection config has no detector branch:
+    # its ResNet-50 is the association backbone and detections are loaded from
+    # public pickle files.  The historical cache wrapper unconditionally
+    # injected model.detector.* options, which caused mmengine to synthesize a
+    # partial detector mapping and fail at MODELS.build().  Inspect the merged
+    # config before adding detector-only compatibility options.
+    try:
+        from mmengine import Config
+        merged_cfg = Config.fromfile(str(config))
+        has_detector = bool(merged_cfg.get("model", {}).get("detector"))
+    except Exception:
+        # Preserve the old path for environments without mmengine; official
+        # configs that need the compatibility overrides still receive them.
+        has_detector = True
+    cfg_options = []
+    if has_detector:
+        cfg_options.extend([
+            "model.detector.init_cfg=None",
+            "model.detector.roi_head.bbox_roi_extractor.roi_layer.use_torchvision=False",
+        ])
+    cfg_options.extend(list(extra_cfg_options or []))
     command = [
         "bash", str(repo / "tools" / "dist_test.sh"), str(config), str(checkpoint), str(len(selected)),
         "--work-dir", str(work),
         "--cfg-options",
-        "model.detector.init_cfg=None",
-        "model.detector.roi_head.bbox_roi_extractor.roi_layer.use_torchvision=False",
+        *cfg_options,
         f"model.tracker.observation_dump_dir={shard_dir}",
         "model.tracker.debug_association_trace=True",
         "test_evaluator.format_only=True",

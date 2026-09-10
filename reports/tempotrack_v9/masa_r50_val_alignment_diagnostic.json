@@ -1,0 +1,12 @@
+{
+  "status": "RECORDED_AMBIGUITY",
+  "native_manifest": "outputs/tempotrack_v9/masa_r50_detic/val/native_cache/manifest.json",
+  "native_manifest_sha256": "8e86544ccc8e8fd10309ec2797bf18a9fabe845776a6e7d73369f79f3a4c22aa",
+  "native_prediction": "outputs/tempotrack_v9/masa_r50_detic/val/native_cache/official_prediction.json",
+  "native_prediction_sha256": "e570291904d7d856efc624bb81cd2469a5016d658b78f206186a9318a0767843",
+  "official_prediction": "outputs/tempotrack_v9/masa_r50_detic/val/native_cache/official_format/tao_track.json",
+  "official_prediction_sha256": "73b4d91eaa77a2c78d53b27de8d831528483b7f2ce0f0ef836e255c7d499592c",
+  "command": "python -m tempotrack_research.cli psmr-v7 align-native --native-prediction official_prediction.json --official-prediction official_format/tao_track.json",
+  "error": "ValueError: official prediction has ambiguous geometry/score keys: 68",
+  "interpretation": "The official formatted stream contains 68 duplicate geometry/score keys across categories. The native cache assigned_track_ids and official formatter output are retained; no best-effort join or category/box mutation was used."
+}

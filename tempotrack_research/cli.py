@@ -817,6 +817,19 @@ def _psmr_v7(args: argparse.Namespace) -> int:
     return dispatch_psmr_v7(args)
 
 
+def _psmr_v9(args: argparse.Namespace) -> int:
+    from .orchestration.v9_parameter_search import dispatch_psmr_v9
+    return dispatch_psmr_v9(args)
+
+
+def _csv_ints(value: str) -> list[int]:
+    return [int(item.strip()) for item in str(value).split(",") if item.strip()]
+
+
+def _csv_floats(value: str) -> list[float]:
+    return [float(item.strip()) for item in str(value).split(",") if item.strip()]
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tempotrack-repair")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -882,6 +895,24 @@ def build_parser() -> argparse.ArgumentParser:
     q = v7.add_parser("evaluate"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--prediction", required=True); q.add_argument("--output", required=True); q.add_argument("--name", required=True); q.add_argument("--cores", type=int, default=8); q.set_defaults(func=_psmr_v7)
     q = v7.add_parser("audit-transport"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--split", default="val_base_internal"); q.add_argument("--output", required=True); q.add_argument("--device", default="cpu"); q.set_defaults(func=_psmr_v7)
     q = v7.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v7)
+    p = sub.add_parser("psmr-v9")
+    v9 = p.add_subparsers(dest="psmr_v9_action", required=True)
+    q = v9.add_parser("resolve"); q.add_argument("--repo", default="."); q.add_argument("--v8-root", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("audit-candidates"); q.add_argument("--repo", default="."); q.add_argument("--frontend", required=True, choices=["masa_detic", "vovtrack", "covtrack", "masa_r50"]); q.add_argument("--split", required=True, choices=["val", "test"]); q.add_argument("--manifest", required=True); q.add_argument("--frontend-prediction", required=True); q.add_argument("--annotation", required=True); q.add_argument("--max-gap", type=int, default=360); q.add_argument("--candidate-k", type=int, default=64); q.add_argument("--query-observations", type=_csv_ints, default=[1, 2, 4]); q.add_argument("--video-limit", type=int); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("build-event-cache"); q.add_argument("--repo", default="."); q.add_argument("--frontend", required=True, choices=["masa_detic", "vovtrack", "covtrack", "masa_r50"]); q.add_argument("--split", required=True, choices=["val", "test"]); q.add_argument("--manifest", required=True); q.add_argument("--frontend-prediction", required=True); q.add_argument("--annotation", required=True); q.add_argument("--checkpoint"); q.add_argument("--min-gap", type=int, default=0); q.add_argument("--max-gap", type=int, default=360); q.add_argument("--candidate-k", type=int, default=64); q.add_argument("--query-observations", type=_csv_ints, default=[1, 2, 4]); q.add_argument("--top-r", type=_csv_ints, default=[1, 3, 5]); q.add_argument("--video-limit", type=int); q.add_argument("--output", required=True); q.add_argument("--device", default="cpu"); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("sweep-psmr"); q.add_argument("--repo", default="."); q.add_argument("--event-cache", required=True); q.add_argument("--protocol", required=True, choices=["frozen", "test-base-adapted", "test-full-oracle"]); q.add_argument("--search-space", required=True); q.add_argument("--checkpoint"); q.add_argument("--structural-limit", type=int); q.add_argument("--structural-shard-index", type=int, default=0); q.add_argument("--structural-shard-count", type=int, default=1); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("merge-sweep"); q.add_argument("--repo", default="."); q.add_argument("--part", action="append", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("sweep-dual"); q.add_argument("--repo", default="."); q.add_argument("--manifest", required=True); q.add_argument("--annotation", required=True); q.add_argument("--split", required=True); q.add_argument("--protocol", required=True); q.add_argument("--output", required=True); q.add_argument("--device", default="cuda:0"); q.add_argument("--devices"); q.add_argument("--video-limit", type=int, default=128); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("materialize"); q.add_argument("--repo", default="."); q.add_argument("--frontend", required=True); q.add_argument("--manifest", required=True); q.add_argument("--frontend-prediction", required=True); q.add_argument("--annotation", required=True); q.add_argument("--checkpoint"); q.add_argument("--selected-config", required=True); q.add_argument("--output", required=True); q.add_argument("--device", default="cuda:0"); q.add_argument("--shard-index", type=int); q.add_argument("--shard-count", type=int, default=1); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("evaluate"); q.add_argument("--repo", default="."); q.add_argument("--annotation", required=True); q.add_argument("--prediction", required=True); q.add_argument("--output", required=True); q.add_argument("--name", required=True); q.add_argument("--cores", type=int, default=8); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("train-external"); q.add_argument("--repo", default="."); q.add_argument("--frontend", required=True, choices=["vovtrack", "covtrack", "masa_r50"]); q.add_argument("--split", default="val"); q.add_argument("--manifest", required=True); q.add_argument("--annotation", required=True); q.add_argument("--episodes"); q.add_argument("--config", required=True); q.add_argument("--output", required=True); q.add_argument("--seed", type=int, default=0); q.add_argument("--device", default="cuda:0"); q.add_argument("--max-steps", type=int, default=20000); q.add_argument("--save-steps", type=_csv_ints, default=None); q.add_argument("--resume", choices=["auto", "never", "strict"], default="auto"); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("prepare-masa-r50"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("convert-public-dets"); q.add_argument("--repo", default="."); q.add_argument("--source-manifest", required=True); q.add_argument("--annotation", required=True); q.add_argument("--frame-root"); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("format-native"); q.add_argument("--repo", default="."); q.add_argument("--manifest", required=True); q.add_argument("--annotation", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("convert-vov-detector"); q.add_argument("--repo", default="."); q.add_argument("--detector-root", required=True); q.add_argument("--annotation", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("complete-annotation-partition"); q.add_argument("--repo", default="."); q.add_argument("--source", required=True); q.add_argument("--anchor", required=True); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("r50-native-cache"); q.add_argument("--repo", default="."); q.add_argument("--resolved-inputs", required=True); q.add_argument("--annotation", required=True); q.add_argument("--output", required=True); q.add_argument("--devices", default="0"); q.add_argument("--config"); q.add_argument("--checkpoint"); q.add_argument("--public-det-path"); q.add_argument("--port", type=int, default=29636); q.set_defaults(func=_psmr_v9)
+    q = v9.add_parser("report"); q.add_argument("--repo", default="."); q.add_argument("--run-root", required=True); q.add_argument("--resolved-inputs"); q.add_argument("--output", required=True); q.set_defaults(func=_psmr_v9)
     return parser
 
 

@@ -15,7 +15,7 @@ import pickle
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -92,6 +92,37 @@ def _read_calls(calls_root: Path) -> list[dict[str, Any]]:
     return calls
 
 
+def _iter_calls(calls_root: Path):
+    """Yield recorder payloads without retaining a whole Test split in RAM.
+
+    The external recorder writes one pickle object per image.  The previous
+    adapter collected all objects before materializing the native cache; that
+    is unnecessary for the single-rank TAO stream and made a full COV Test
+    conversion compete with the parameter sweeps for host RAM.
+    """
+    paths = sorted(calls_root.glob("match_calls_*.pkl")) + sorted(calls_root.glob("match_calls_*.pkl.gz"))
+    if not paths:
+        raise FileNotFoundError(f"no OVTracker recorder files under {calls_root}")
+    yielded = False
+    for path in paths:
+        import gzip
+        handle_context = gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb")
+        with handle_context as handle:
+            while True:
+                try:
+                    item = pickle.load(handle)
+                except EOFError:
+                    break
+                if not isinstance(item, dict):
+                    raise ValueError(f"invalid recorder payload in {path}")
+                yielded = True
+                item = dict(item)
+                item["_source_file"] = str(path.resolve())
+                yield item
+    if not yielded:
+        raise ValueError(f"recorder files are empty: {calls_root}")
+
+
 def build_external_native_cache(
     *,
     calls_root: str | Path,
@@ -110,17 +141,26 @@ def build_external_native_cache(
     checkpoint = Path(checkpoint).resolve()
     images = _image_index(annotation)
     category_by_index, _ = _annotation_categories(annotation)
-    calls = _read_calls(calls_root)
-    bound: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
+    bound_count = 0
+    recorder_files: set[str] = set()
     seen: set[int] = set()
-    for call in calls:
+    previous_order: tuple[int, int, int] | None = None
+    for call in _iter_calls(calls_root):
         image = dict(_resolve_image(str(call.get("filename", "")), images))
         image_id = int(image["id"])
         if image_id in seen:
             raise ValueError(f"duplicate native recorder call for image_id={image_id}")
         seen.add(image_id)
-        bound.append((image, call))
-    bound.sort(key=lambda pair: (int(pair[0]["video_id"]), int(pair[0].get("frame_index", 0)), int(pair[0]["id"])))
+        recorder_files.add(str(call["_source_file"]))
+        order = (int(image["video_id"]), int(image.get("frame_index", call.get("frame_id", 0))), image_id)
+        if previous_order is not None and order < previous_order:
+            raise ValueError(
+                "external recorder is not video/frame ordered; refusing an unbounded sort "
+                f"after {previous_order} -> {order}"
+            )
+        previous_order = order
+        bound_count += 1
+        call["_bound_image"] = image
     output.mkdir(parents=True, exist_ok=True)
     shard_dir = output / "shards"
     recorder = NativeObservationRecorder(
@@ -137,7 +177,11 @@ def build_external_native_cache(
             "observation_source": "external_native_association_feature",
         },
     )
-    for image, call in bound:
+    for call in _iter_calls(calls_root):
+        # The stream is read a second time so payloads are never retained
+        # between frames.  The order/duplicate validation above is repeated
+        # through the same deterministic iterator while materializing.
+        image = dict(_resolve_image(str(call.get("filename", "")), images))
         boxes = np.asarray(call["bboxes"], dtype=np.float32)
         labels = np.asarray(call["labels"], dtype=np.int64).reshape(-1)
         embeds = np.asarray(call["embeds"], dtype=np.float32)
@@ -202,7 +246,8 @@ def build_external_native_cache(
         "row_count": sum(item["row_count"] for item in shards),
         "content_hash": object_hash(shards),
         "external_method": method,
-        "recorder_files": sorted({item["_source_file"] for item in calls}),
+        "recorder_files": sorted(recorder_files),
+        "recorded_image_count": int(bound_count),
     }
     manifest_path = output / "manifest.json"
     _atomic_json(manifest_path, manifest)
@@ -439,6 +484,7 @@ def train_external_psmr(
     device: str = "cuda:0",
     max_steps: int = 20_000,
     resume: str = "auto",
+    checkpoint_steps: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Run the existing per-anchor trainer on an external native cache."""
     manifest_path = Path(manifest).resolve()
@@ -446,11 +492,17 @@ def train_external_psmr(
     episodes_path = Path(episodes).resolve()
     config_path = Path(config).resolve()
     cfg = load_yaml(config_path)
+    if checkpoint_steps is not None:
+        cfg = dict(cfg)
+        cfg["training"] = dict(cfg.get("training", {}))
+        cfg["training"]["checkpoint_steps"] = [int(value) for value in checkpoint_steps]
     videos = _external_videos(manifest_path, annotation_path, _manifest_video_ids(manifest_path))
     from ..training.psmr_trainer import train_psmr
 
+    training_cfg = dict(cfg.get("training", {}))
     input_hash = object_hash({
-        "algorithm_revision": "per_anchor_v8",
+        "algorithm_revision": str(training_cfg.get("algorithm_revision", "per_anchor_v8")),
+        "checkpoint_artifact": str(training_cfg.get("checkpoint_artifact", "psmr_v8_checkpoint")),
         "native_manifest": file_hash(manifest_path),
         "annotation": file_hash(annotation_path),
         "episodes": file_hash(episodes_path),

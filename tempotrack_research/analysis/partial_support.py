@@ -21,8 +21,10 @@ class PartialSupportConfig:
     top_r: int = 3
     memory_capacity: int = 64
     dedup_cos: float = 0.95
+    min_dormant_gap: int = 0
     max_gap: int = 60
     candidate_top_k: int = 8
+    reliability_multiplier: float = 1.0
     eps: float = 1e-6
 
     def __post_init__(self) -> None:
@@ -30,6 +32,12 @@ class PartialSupportConfig:
             raise ValueError("query_observations and top_r must be positive")
         if self.memory_capacity < self.top_r:
             raise ValueError("memory_capacity must be at least top_r")
+        if self.min_dormant_gap < 0:
+            raise ValueError("min_dormant_gap must be non-negative")
+        if self.max_gap <= self.min_dormant_gap:
+            raise ValueError("max_gap must be greater than min_dormant_gap")
+        if self.reliability_multiplier < 0:
+            raise ValueError("reliability_multiplier must be non-negative")
 
 
 @dataclass
@@ -86,6 +94,7 @@ class PartialSupportScorer(nn.Module):
         if memory_reliability is not None:
             rel = self._canonical_reliability(memory_reliability, bsz, mem_count, cosine.device)
             scale = torch.as_tensor(rel_beta, device=cosine.device, dtype=cosine.dtype)
+            scale = scale * float(self.config.reliability_multiplier)
             log_rel = rel.clamp_min(self.config.eps).log()
             if scale.numel() == 1:
                 values = values + log_rel.unsqueeze(1) * scale

@@ -60,6 +60,15 @@ class ReactivationDiagnostics:
     accepted: int = 0
     rejected: int = 0
     scorer_batches: int = 0
+    fragments_total: int = 0
+    fragments_with_legal_dormant: int = 0
+    candidate_pairs_before_topk: int = 0
+    candidate_pairs_after_topk: int = 0
+    score_gate_pass: int = 0
+    margin_gate_pass: int = 0
+    competition_loser: int = 0
+    frame_collision: int = 0
+    gap_bins: dict[str, int] = field(default_factory=dict)
     decisions: list[ReactivationDecision] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -71,6 +80,15 @@ class ReactivationDiagnostics:
             "accepted": int(self.accepted),
             "rejected": int(self.rejected),
             "scorer_batches": int(self.scorer_batches),
+            "fragments_total": int(self.fragments_total),
+            "fragments_with_legal_dormant": int(self.fragments_with_legal_dormant),
+            "candidate_pairs_before_topk": int(self.candidate_pairs_before_topk),
+            "candidate_pairs_after_topk": int(self.candidate_pairs_after_topk),
+            "score_gate_pass": int(self.score_gate_pass),
+            "margin_gate_pass": int(self.margin_gate_pass),
+            "competition_loser": int(self.competition_loser),
+            "frame_collision": int(self.frame_collision),
+            "gap_bins": dict(self.gap_bins),
             "decisions": [item.__dict__ for item in self.decisions],
         }
 
@@ -244,11 +262,24 @@ def _split_fragments(records: Sequence[Mapping[str, Any]], embeddings: np.ndarra
     return sorted(output, key=lambda item: (item.video_id, item.first_frame, item.fragment_id))
 
 
-def _causal_candidates(buckets: dict[int, list[MemoryAnchor]], fragment: MemoryAnchor, max_gap: int) -> list[MemoryAnchor]:
+def _causal_candidates(
+    buckets: dict[int, list[MemoryAnchor]],
+    fragment: MemoryAnchor,
+    max_gap: int,
+    min_gap: int = 0,
+) -> list[MemoryAnchor]:
     """Retrieve exactly the legal past anchors without an O(N²) scan."""
     first = int(fragment.first_frame)
     lower = first - int(max_gap)
-    return [item for frame in range(lower, first) for item in buckets.get(frame, []) if item.last_frame < first]
+    upper = first - int(min_gap)
+    if upper < lower:
+        return []
+    return [
+        item
+        for frame in range(lower, upper + 1)
+        for item in buckets.get(frame, [])
+        if item.last_frame < first and int(min_gap) <= first - int(item.last_frame) <= int(max_gap)
+    ]
 
 
 def _frame_occupancy(records: Sequence[Mapping[str, Any]]) -> dict[tuple[int, int], dict[int, int]]:
@@ -331,96 +362,10 @@ class StreamingReactivationEngine:
             self.reliability_model = self.reliability_model.to(device)
 
     def process_video(self, records: Sequence[Mapping[str, Any]], embeddings: np.ndarray) -> tuple[list[dict[str, Any]], ReactivationDiagnostics]:
-        if not records:
-            return [], ReactivationDiagnostics()
-        fragments = _split_fragments(records, embeddings)
-        result = [dict(row) for row in records]
-        diagnostics = ReactivationDiagnostics()
-        accepted_by_root: dict[tuple[int, int], tuple[float, str]] = {}
-        occupancy = _frame_occupancy(result)
-        prior_buckets: dict[int, dict[int, list[MemoryAnchor]]] = {}
-        root_for_fragment: dict[str, int] = {}
-        for fragment in fragments:
-            same_video = _causal_candidates(prior_buckets.setdefault(fragment.video_id, {}), fragment, self.config.max_gap)
-            if not same_video:
-                root_for_fragment[fragment.fragment_id] = fragment.root_id
-                prior_buckets[fragment.video_id].setdefault(fragment.last_frame, []).append(fragment)
-                continue
-            q_indices = fragment.fragment_rows[: self.config.query_observations]
-            query = torch.as_tensor(embeddings[q_indices], dtype=torch.float32, device=self.device)
-            # top-k is only a prefilter.  Scoring calls are made on the actual
-            # candidate memory, and no candidate is replaced by a GT row.
-            query_features = np.asarray(embeddings[q_indices], dtype=np.float32)
-            query_features = query_features / np.maximum(np.linalg.norm(query_features, axis=1, keepdims=True), self.config.eps)
-            last_features = np.asarray([item.features[-1] for item in same_video], dtype=np.float32)
-            last_features = last_features / np.maximum(np.linalg.norm(last_features, axis=1, keepdims=True), self.config.eps)
-            pre_values = (query_features @ last_features.T).mean(axis=0)
-            pre_scores = [(float(value), item) for value, item in zip(pre_values.tolist(), same_video)]
-            candidates = [item for _, item in sorted(pre_scores, key=lambda pair: (-pair[0], pair[1].fragment_id))[: self.config.candidate_top_k]]
-            diagnostics.candidate_pairs += len(candidates)
-            # Batch the actual formal scorer calls for this fragment.  The
-            # memory banks remain individual padded rows with a mask; this is
-            # only a launch/CPU-overhead optimization and does not average a
-            # bank before its per-query top-r operation.
-            max_memory = max(len(candidate.features) for candidate in candidates)
-            dim = int(query.shape[-1])
-            memory_batch = torch.zeros((len(candidates), max_memory, dim), dtype=torch.float32, device=self.device)
-            memory_mask = torch.zeros((len(candidates), max_memory), dtype=torch.bool, device=self.device)
-            reliability_batch = None
-            if self.use_reliability and self.reliability_model is not None:
-                reliability_batch = torch.zeros((len(candidates), max_memory), dtype=torch.float32, device=self.device)
-            for candidate_index, candidate in enumerate(candidates):
-                count = len(candidate.features)
-                memory_batch[candidate_index, :count] = torch.as_tensor(candidate.features, dtype=torch.float32, device=self.device)
-                memory_mask[candidate_index, :count] = True
-                if reliability_batch is not None:
-                    with torch.no_grad():
-                        values = self.reliability_model.reliability(torch.as_tensor(candidate.evidence, dtype=torch.float32, device=self.device)).reshape(-1)
-                    reliability_batch[candidate_index, :count] = values
-            with torch.no_grad():
-                beta = self.reliability_model.reliability_scale if self.use_reliability and self.reliability_model is not None else None
-                evidence = self.scorer(query.unsqueeze(0).expand(len(candidates), -1, -1), memory_batch, memory_mask=memory_mask, memory_reliability=reliability_batch, reliability_scale=beta)
-            diagnostics.scorer_calls += len(candidates)
-            scored: list[tuple[float, MemoryAnchor]] = []
-            values = evidence.score.detach().cpu().numpy().reshape(-1)
-            for value, candidate in zip(values.tolist(), candidates):
-                if np.isfinite(value):
-                    diagnostics.finite_scores += 1
-                    scored.append((float(value), candidate))
-            scored.sort(key=lambda pair: (-pair[0], pair[1].fragment_id))
-            best = scored[0] if scored else (float("-inf"), None)
-            second = scored[1][0] if len(scored) > 1 else float("-inf")
-            margin = best[0] - second if np.isfinite(best[0]) and np.isfinite(second) else (float("inf") if np.isfinite(best[0]) else float("-inf"))
-            accept = best[1] is not None and best[0] >= self.score_threshold and margin >= self.margin_threshold
-            reason = "accepted" if accept else ("no_candidate" if best[1] is None else "threshold_or_margin")
-            decision = ReactivationDecision(fragment.fragment_id, None if best[1] is None else best[1].fragment_id, float(best[0]), float(margin), bool(accept), reason)
-            diagnostics.decisions.append(decision)
-            target = fragment.root_id
-            if accept and best[1] is not None:
-                candidate = best[1]
-                root = root_for_fragment.get(candidate.fragment_id, candidate.root_id)
-                key = (fragment.video_id, root)
-                old = accepted_by_root.get(key)
-                # A losing fragment is rejected, not sent to its second best.
-                if old is not None and (best[0], fragment.fragment_id) <= (old[0], old[1]):
-                    accept = False
-                    decision.accepted = False
-                    decision.reason = "competition_loser"
-                elif root != fragment.root_id and _has_frame_collision(occupancy, result, fragment, root):
-                    accept = False
-                    decision.accepted = False
-                    decision.reason = "frame_collision"
-                else:
-                    accepted_by_root[key] = (best[0], fragment.fragment_id)
-                    target = root
-            root_for_fragment[fragment.fragment_id] = target
-            if target != fragment.root_id:
-                diagnostics.accepted += 1
-                diagnostics.changed_observation_ids += _apply_fragment_target(occupancy, result, fragment, fragment.root_id, target)
-            else:
-                diagnostics.rejected += 1 if best[1] is not None else 0
-            prior_buckets[fragment.video_id].setdefault(fragment.last_frame, []).append(fragment)
-        return result, diagnostics
+        # Keep one implementation of candidate timing, scoring and event
+        # competition.  The old scalar path had a separate persistent root
+        # table and could disagree with batched replay after a reappearance.
+        return self.process_video_batched(records, embeddings, pair_batch_size=max(1, len(records)))
 
     def process_video_batched(self, records: Sequence[Mapping[str, Any]], embeddings: np.ndarray, *, pair_batch_size: int = 2048) -> tuple[list[dict[str, Any]], ReactivationDiagnostics]:
         """Causal replay with globally batched formal scorer calls.
@@ -437,12 +382,21 @@ class StreamingReactivationEngine:
         fragments = _split_fragments(records, embeddings)
         result = [dict(row) for row in records]
         diagnostics = ReactivationDiagnostics()
+        diagnostics.fragments_total = len(fragments)
         occupancy = _frame_occupancy(result)
         prior_buckets: dict[int, dict[int, list[MemoryAnchor]]] = {}
         candidate_lists: list[list[MemoryAnchor]] = []
         pair_refs: list[tuple[int, MemoryAnchor]] = []
         for fragment_index, fragment in enumerate(fragments):
-            same_video = _causal_candidates(prior_buckets.setdefault(fragment.video_id, {}), fragment, self.config.max_gap)
+            same_video = _causal_candidates(
+                prior_buckets.setdefault(fragment.video_id, {}),
+                fragment,
+                self.config.max_gap,
+                self.config.min_dormant_gap,
+            )
+            if same_video:
+                diagnostics.fragments_with_legal_dormant += 1
+            diagnostics.candidate_pairs_before_topk += len(same_video)
             if same_video:
                 q_indices = fragment.fragment_rows[: self.config.query_observations]
                 query_features = np.asarray(embeddings[q_indices], dtype=np.float32)
@@ -455,7 +409,27 @@ class StreamingReactivationEngine:
             else:
                 candidates = []
             candidate_lists.append(candidates)
+            diagnostics.candidate_pairs_after_topk += len(candidates)
             diagnostics.candidate_pairs += len(candidates)
+            for candidate in candidates:
+                gap = int(fragment.first_frame) - int(candidate.last_frame)
+                if gap <= 10:
+                    bucket = "0-10"
+                elif gap <= 30:
+                    bucket = "10-30"
+                elif gap <= 60:
+                    bucket = "30-60"
+                elif gap <= 90:
+                    bucket = "60-90"
+                elif gap <= 120:
+                    bucket = "90-120"
+                elif gap <= 180:
+                    bucket = "120-180"
+                elif gap <= 240:
+                    bucket = "180-240"
+                else:
+                    bucket = "240-360"
+                diagnostics.gap_bins[bucket] = diagnostics.gap_bins.get(bucket, 0) + 1
             pair_refs.extend((fragment_index, candidate) for candidate in candidates)
             prior_buckets[fragment.video_id].setdefault(fragment.last_frame, []).append(fragment)
 
@@ -504,35 +478,92 @@ class StreamingReactivationEngine:
                     diagnostics.finite_scores += 1
                     scored_by_fragment[fragment_index].append((float(value), candidate))
 
-        accepted_by_root: dict[tuple[int, int], tuple[float, str]] = {}
         root_for_fragment: dict[str, int] = {}
-        # Apply only after all formal score batches.  The iteration is still
-        # chronological and therefore preserves one-winner competition.
+        # Competition is local to one decision frame.  In particular, a root
+        # that won an event is not reserved for the rest of the video; a later
+        # disappearance may reactivate it again.  We still apply the official
+        # frame-collision check against the evolving output.
+        event_groups: dict[tuple[int, int], list[int]] = defaultdict(list)
         for fragment_index, fragment in enumerate(fragments):
-            scored = sorted(scored_by_fragment.get(fragment_index, []), key=lambda pair: (-pair[0], pair[1].fragment_id))
-            best = scored[0] if scored else (float("-inf"), None)
-            second = scored[1][0] if len(scored) > 1 else float("-inf")
-            margin = best[0] - second if np.isfinite(best[0]) and np.isfinite(second) else (float("inf") if np.isfinite(best[0]) else float("-inf"))
-            accept = best[1] is not None and best[0] >= self.score_threshold and margin >= self.margin_threshold
-            reason = "accepted" if accept else ("no_candidate" if best[1] is None else "threshold_or_margin")
-            decision = ReactivationDecision(fragment.fragment_id, None if best[1] is None else best[1].fragment_id, float(best[0]), float(margin), bool(accept), reason)
-            diagnostics.decisions.append(decision)
-            target = fragment.root_id
-            if accept and best[1] is not None:
-                candidate = best[1]; root = root_for_fragment.get(candidate.fragment_id, candidate.root_id); key = (fragment.video_id, root)
-                old = accepted_by_root.get(key)
-                if old is not None and (best[0], fragment.fragment_id) <= (old[0], old[1]):
-                    accept = False; decision.accepted = False; decision.reason = "competition_loser"
-                elif root != fragment.root_id and _has_frame_collision(occupancy, result, fragment, root):
-                    accept = False; decision.accepted = False; decision.reason = "frame_collision"
-                else:
-                    accepted_by_root[key] = (best[0], fragment.fragment_id); target = root
-            root_for_fragment[fragment.fragment_id] = target
-            if target != fragment.root_id:
-                diagnostics.accepted += 1
-                diagnostics.changed_observation_ids += _apply_fragment_target(occupancy, result, fragment, fragment.root_id, target)
-            else:
-                diagnostics.rejected += 1 if best[1] is not None else 0
+            query_count = min(max(1, int(self.config.query_observations)), len(fragment.fragment_rows))
+            decision_frame = int(records[fragment.fragment_rows[query_count - 1]]["frame_index"])
+            event_groups[(int(fragment.video_id), decision_frame)].append(fragment_index)
+
+        for event_key in sorted(event_groups):
+            proposals: list[dict[str, Any]] = []
+            for fragment_index in sorted(event_groups[event_key]):
+                fragment = fragments[fragment_index]
+                scored = sorted(scored_by_fragment.get(fragment_index, []), key=lambda pair: (-pair[0], pair[1].fragment_id))
+                best = scored[0] if scored else (float("-inf"), None)
+                second = scored[1][0] if len(scored) > 1 else float("-inf")
+                margin = best[0] - second if np.isfinite(best[0]) and np.isfinite(second) else (float("inf") if np.isfinite(best[0]) else float("-inf"))
+                score_pass = best[1] is not None and best[0] >= self.score_threshold
+                margin_pass = best[1] is not None and margin >= self.margin_threshold
+                if score_pass:
+                    diagnostics.score_gate_pass += 1
+                if margin_pass:
+                    diagnostics.margin_gate_pass += 1
+                accept = bool(score_pass and margin_pass)
+                reason = "accepted" if accept else ("no_candidate" if best[1] is None else "threshold_or_margin")
+                decision = ReactivationDecision(
+                    fragment.fragment_id,
+                    None if best[1] is None else best[1].fragment_id,
+                    float(best[0]),
+                    float(margin),
+                    accept,
+                    reason,
+                )
+                diagnostics.decisions.append(decision)
+                root = None
+                if accept and best[1] is not None:
+                    root = root_for_fragment.get(best[1].fragment_id, best[1].root_id)
+                proposals.append({
+                    "fragment_index": fragment_index,
+                    "fragment": fragment,
+                    "best": best,
+                    "margin": float(margin),
+                    "decision": decision,
+                    "root": root,
+                    "accept": accept,
+                })
+
+            winners: dict[int, dict[str, Any]] = {}
+            for proposal in proposals:
+                if not proposal["accept"] or proposal["root"] is None:
+                    continue
+                root = int(proposal["root"])
+                current = winners.get(root)
+                candidate_key = (-float(proposal["best"][0]), -float(proposal["margin"]), str(proposal["fragment"].fragment_id))
+                current_key = None if current is None else (-float(current["best"][0]), -float(current["margin"]), str(current["fragment"].fragment_id))
+                if current is None or candidate_key < current_key:
+                    winners[root] = proposal
+
+            for proposal in proposals:
+                fragment = proposal["fragment"]
+                decision = proposal["decision"]
+                target = int(fragment.root_id)
+                if proposal["accept"] and proposal["root"] is not None:
+                    root = int(proposal["root"])
+                    if winners.get(root) is not proposal:
+                        proposal["accept"] = False
+                        decision.accepted = False
+                        decision.reason = "competition_loser"
+                        diagnostics.competition_loser += 1
+                    elif root != fragment.root_id and _has_frame_collision(occupancy, result, fragment, root):
+                        proposal["accept"] = False
+                        decision.accepted = False
+                        decision.reason = "frame_collision"
+                        diagnostics.frame_collision += 1
+                    else:
+                        target = root
+                root_for_fragment[fragment.fragment_id] = target
+                if target != fragment.root_id:
+                    diagnostics.accepted += 1
+                    diagnostics.changed_observation_ids += _apply_fragment_target(
+                        occupancy, result, fragment, fragment.root_id, target
+                    )
+                elif proposal["best"][1] is not None:
+                    diagnostics.rejected += 1
         return result, diagnostics
 
 

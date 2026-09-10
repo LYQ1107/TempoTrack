@@ -1,0 +1,29 @@
+TempoTrack V9 resource snapshot
+Timestamp: 2026-09-10 15:33:38 CST
+Worktree: /data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9
+Requested project GPUs: physical 0-7
+
+nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu
+0, GPU-d3a949d3-b3ef-04b0-92c5-594a63857898, NVIDIA A100-SXM4-40GB, 40960, 10037, 30301, 58
+1, GPU-5de9a1c2-0cc1-4fda-7d25-493f86f52424, NVIDIA A100-SXM4-40GB, 40960, 2385, 37953, 25
+2, GPU-a4095968-9191-50eb-d56c-ed633b31e2c0, NVIDIA A100-SXM4-40GB, 40960, 7313, 33025, 87
+3, GPU-f931e51b-55b2-c2c2-6506-b6f986864d54, NVIDIA A100-SXM4-40GB, 40960, 2385, 37953, 18
+4, GPU-daa9b388-4540-242c-83d7-3261bb232a7c, NVIDIA A100-SXM4-40GB, 40960, 1365, 38973, 23
+5, GPU-f07a0798-7ddc-ec7c-a27c-d47124bbfe81, NVIDIA A100-SXM4-40GB, 40960, 7313, 33025, 52
+6, GPU-c2902ddf-62f4-cc2f-5d9f-d33c74555847, NVIDIA A100-SXM4-40GB, 40960, 7313, 33025, 27
+7, GPU-995c9557-d84e-1a76-f02f-b1ddea34e56b, NVIDIA A100-SXM4-40GB, 40960, 2385, 37953, 17
+8, GPU-cd127bcd-08c4-fe6a-78ca-fc41123d7119, NVIDIA A100-SXM4-40GB, 40960, 2385, 37953, 28
+9, GPU-e947d8da-fc7a-4c0b-7d91-e9e67d34f4a6, NVIDIA A100-SXM4-40GB, 40960, 7629, 32709, 76
+
+Compute processes observed (all retained):
+- GPUs 0,2,5,6: external ByteTrack workers (PIDs 30542-30545)
+- GPUs 1,3,7,8: external OVTrack workers (PIDs 20948-20951)
+- GPU 4: external LocateMOT process (PID 1988)
+- GPU 9: unrelated python process (PID 16392)
+
+RAM: 125G total, 40G used, 3.1G free, 83G available; swap 0B
+CPU: 40 logical cores
+Uptime: 155 days, 17:12; load average 11.04, 8.72, 6.92
+
+No process was killed, stopped, reset, reniced, or modified. GPU admission will
+use the taskbook safety reserve max(6 GiB, 15% of total) and measured free VRAM.

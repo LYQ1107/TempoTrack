@@ -1,0 +1,167 @@
+{
+  "status": "COMPLETED",
+  "resolved_inputs": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/reports/tempotrack_v9/RESOLVED_INPUTS.json",
+  "schema_version": 9,
+  "artifact": "tempotrack_v9_resolved_inputs",
+  "resolved_at": 1789026825.8173418,
+  "repo": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9",
+  "v8_root": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v8",
+  "source_head": "edc8127fd8e4308bf9284c025787b738750c247c",
+  "lanes": {
+    "masa_detic": {
+      "val": {
+        "manifest": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/outputs/tempotrack_v6/native_cache/manifest.json",
+          "exists": true,
+          "sha256": "c830bf65b4eecaf7d31059e4ef3d4a7a5af83f8a863a2302229fd846b0e32785",
+          "label": "masa_detic val manifest"
+        },
+        "frontend_prediction": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/outputs/tempotrack_v6/B2_dual_official_assign_no_offline/prediction.json",
+          "exists": false,
+          "sha256": null,
+          "label": "masa_detic val frontend_prediction"
+        },
+        "annotation": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_val_lvis_v1_classes.json",
+          "exists": true,
+          "sha256": "6372076018b7a2158106e90e6d5de8800fa50263b3af25c1a907ce49e5a5123a",
+          "label": "masa_detic val annotation"
+        }
+      },
+      "test": {
+        "manifest": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/masa_detic_test_v8_final/native_cache_4gpu/manifest.json",
+          "exists": true,
+          "sha256": "a2cbf23a7cab404189efaa17a2c14f2a60b184891820739cacca0d9725a1ad03",
+          "label": "masa_detic test manifest"
+        },
+        "frontend_prediction": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/masa_detic_test_v8_final/dual/prediction.json",
+          "exists": true,
+          "sha256": "8b50e139c15555fa046a38005d43024947e91904af0367c3abff5ea27ed944c3",
+          "label": "masa_detic test frontend_prediction"
+        },
+        "annotation": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/tao/annotations/tao_test_lvis_v1_classes.json",
+          "exists": true,
+          "sha256": "0892a2ec8591f41912c5aa2562462162875b15cc6686ce7e508e1d989192c37e",
+          "label": "masa_detic test annotation"
+        }
+      }
+    },
+    "vovtrack": {
+      "val": {
+        "manifest": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/vov_val_native_v8/manifest.json",
+          "exists": true,
+          "sha256": "f352e4fa4a4b984567534a8c4ea3438d267c904a972d7804958883bbdf24813a",
+          "label": "vovtrack val manifest"
+        },
+        "frontend_prediction": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/vov_val_native_frontend_aligned/prediction.json",
+          "exists": true,
+          "sha256": "38c6c1ca4ad932e8e1c77dafcfd3466524e89b11912f3d5aedd31fdbf9de202f",
+          "label": "vovtrack val frontend_prediction"
+        },
+        "annotation": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/validation_ours_v1.json",
+          "exists": true,
+          "sha256": "1347fdc4e3eb6880f957e81014fa505080b55d895f27afcc3d6343cff4dc6fe7",
+          "label": "vovtrack val annotation"
+        }
+      },
+      "test": {
+        "manifest": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/vov_test_native_postfilter_official_v8/cache_v1/manifest.json",
+          "exists": true,
+          "sha256": "5fba554ba382d44206a77d17f01a5b6c17a29969f07fa5bef257ad09713e3b19",
+          "label": "vovtrack test manifest"
+        },
+        "frontend_prediction": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/vov_test_native_postfilter_official_v8/frontend_aligned/prediction.json",
+          "exists": true,
+          "sha256": "9f56a4889a6c02e2c21e280b04e0898dd30594581f37249ec9011207b1269449",
+          "label": "vovtrack test frontend_prediction"
+        },
+        "annotation": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json",
+          "exists": true,
+          "sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+          "label": "vovtrack test annotation"
+        }
+      }
+    },
+    "covtrack": {
+      "val": {
+        "manifest": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/cov_val_native/manifest.json",
+          "exists": true,
+          "sha256": "7ae3f945591b857e55d0b08747e604e98e87ff075303b283de60c7769bff2c9c",
+          "label": "covtrack val manifest"
+        },
+        "frontend_prediction": {
+          "path": "/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/cov_val_native_frontend_aligned/prediction.json",
+          "exists": true,
+          "sha256": "adfb123a566f62279d7ff0f55e94ce1eaa5068d3de127f570f0c4166cd33db78",
+          "label": "covtrack val frontend_prediction"
+        },
+        "annotation": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/validation_ours_v1.json",
+          "exists": true,
+          "sha256": "1347fdc4e3eb6880f957e81014fa505080b55d895f27afcc3d6343cff4dc6fe7",
+          "label": "covtrack val annotation"
+        }
+      },
+      "test": {
+        "manifest": null,
+        "frontend_prediction": null,
+        "annotation": {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json",
+          "exists": true,
+          "sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+          "label": "covtrack test annotation"
+        }
+      }
+    },
+    "masa_r50": {
+      "config": {
+        "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/configs/masa-one/open_vocabulary_mot_test/masa_r50_open_vocabulary_test.py",
+        "exists": true,
+        "sha256": "2a31c985a90861326cc28eebb3f4d04f68e7d523dae9f2b2d5951855c0cfc7e3",
+        "label": "masa_r50 config"
+      },
+      "checkpoint": {
+        "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models/masa_models/masa_r50.pth",
+        "exists": true,
+        "sha256": "082670efc6e8820eff8257f78ea14dfb52d6cdbe2910ecccf0901a74f4a0fd76",
+        "label": "masa_r50 checkpoint"
+      },
+      "checkpoint_candidates": [
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/saved_models/masa_models/masa_r50.pth",
+          "exists": false,
+          "sha256": null,
+          "label": "MASA R50 checkpoint"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models/masa_models/masa_r50.pth",
+          "exists": true,
+          "sha256": "082670efc6e8820eff8257f78ea14dfb52d6cdbe2910ecccf0901a74f4a0fd76",
+          "label": "MASA R50 checkpoint"
+        },
+        {
+          "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models/masa_models/masa_r50.pth",
+          "exists": true,
+          "sha256": "082670efc6e8820eff8257f78ea14dfb52d6cdbe2910ecccf0901a74f4a0fd76",
+          "label": "MASA R50 checkpoint"
+        }
+      ]
+    }
+  },
+  "requirements": {
+    "observation_contract": "fixed detector boxes/scores/labels/appearance; association-only track_id mutation",
+    "official_validation_not_for_training": true,
+    "novel_gt_not_for_optimizer": true
+  }
+}

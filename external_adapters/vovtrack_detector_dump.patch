@@ -1,0 +1,38 @@
+V9 external adapter patch
+
+Target repository: VOVTrack at commit ac8264274cd843b4810be8331a8aaa3c8cace8dc.
+Target file: ovtrack/models/mot/ovtrack.py, OVTrack.simple_test.
+
+Insert immediately after det_bboxes/det_labels are returned by
+roi_head.simple_test and before OVTracker.match:
+
+    dump_root = os.environ.get("TEMPOTRACK_V9_VOV_R50_DETECTOR_DUMP", "")
+    if dump_root and img_name is not None:
+        marker = "data/tao/frames/"
+        if marker not in str(img_name):
+            raise ValueError(f"V9 detector dump requires TAO frame path, got {img_name!r}")
+        relative = str(img_name).split(marker, 1)[1]
+        dump_path = os.path.join(dump_root, relative.replace(".jpg", ".pth"))
+        os.makedirs(os.path.dirname(dump_path), exist_ok=True)
+        with open(dump_path, "wb") as handle:
+            pickle.dump({
+                "filename": str(img_name),
+                "det_labels": det_labels.detach().cpu().numpy(),
+                "det_bboxes": det_bboxes.detach().cpu().numpy(),
+            }, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+The patch is opt-in through TEMPOTRACK_V9_VOV_R50_DETECTOR_DUMP and does not
+alter detector output, tracker inputs, or association IDs when unset.
+
+Environment compatibility needed by the released ovtr environment:
+replace `np.int` with builtin `int` in
+`ovtrack/datasets/parsers/coco_video_parser.py`; NumPy 1.24 removed the alias.
+
+The V9 Val detector dump also uses an opt-in low-memory stream mode.  In
+`ovtrack/apis/test.py`, when `TEMPOTRACK_V9_STREAM_ONLY=1`, do not append model
+results to the process-wide `results` defaultdict in either
+`single_gpu_test` or `multi_gpu_test`.  In the standard branch of
+`tools/test.py`, return immediately after the test loop for the same flag,
+before `format_results`/evaluation.  The model-side per-image detector dump
+above is still written before `OVTracker.match`, so this changes only result
+retention and cannot change the detector observation stream.

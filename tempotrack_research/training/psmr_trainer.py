@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import random
+from dataclasses import fields
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -79,17 +80,28 @@ def train_psmr(
     torch.manual_seed(int(seed)); np.random.seed(int(seed)); random.seed(int(seed))
     requested_device = str(device)
     actual_device = torch.device(requested_device if requested_device.startswith("cuda") and torch.cuda.is_available() else "cpu")
-    pconfig = PartialSupportConfig(**dict(config.get("partial_support", {})))
+    # The V9 YAML keeps frontend lifecycle knobs next to scorer knobs.  Only
+    # the fields owned by PartialSupportConfig belong in this constructor;
+    # retain the ignored names as provenance instead of silently treating
+    # alpha_fast/alpha_slow as scorer parameters.
+    partial_mapping = dict(config.get("partial_support", {}))
+    scorer_fields = {item.name for item in fields(PartialSupportConfig)}
+    ignored_partial_keys = sorted(set(partial_mapping) - scorer_fields)
+    pconfig = PartialSupportConfig(**{key: value for key, value in partial_mapping.items() if key in scorer_fields})
     scorer = PartialSupportScorer(pconfig, beta=0.0).to(actual_device)
     calibrator = MemoryReliabilityCalibrator().to(actual_device)
-    optimizer = torch.optim.AdamW(calibrator.parameters(), lr=float(config.get("training", {}).get("lr", 1e-3)), weight_decay=float(config.get("training", {}).get("weight_decay", 1e-4)))
+    training_config = dict(config.get("training", {}))
+    algorithm_revision = str(training_config.get("algorithm_revision", "per_anchor_v8"))
+    checkpoint_artifact = str(training_config.get("checkpoint_artifact", "psmr_v8_checkpoint"))
+    checkpoint_steps = {int(value) for value in training_config.get("checkpoint_steps", [])}
+    optimizer = torch.optim.AdamW(calibrator.parameters(), lr=float(training_config.get("lr", 1e-3)), weight_decay=float(training_config.get("weight_decay", 1e-4)))
     config_hash = _sha(config)
     start_step = 0; best_loss = float("inf")
     last_path = run_root / "last.pt"
     if resume in {"auto", "strict"} and last_path.exists():
         checkpoint = torch.load(last_path, map_location=actual_device)
-        if checkpoint.get("algorithm_revision") != "per_anchor_v8" or checkpoint.get("artifact") != "psmr_v8_checkpoint":
-            raise ValueError("refusing to resume a pre-V8 candidate-level PSMR checkpoint")
+        if checkpoint.get("algorithm_revision") != algorithm_revision or checkpoint.get("artifact") != checkpoint_artifact:
+            raise ValueError(f"refusing to resume an incompatible PSMR checkpoint; expected {algorithm_revision}/{checkpoint_artifact}")
         if checkpoint.get("config_hash") != config_hash or checkpoint.get("input_hash", input_hash) != input_hash:
             if resume == "strict":
                 raise ValueError("existing PSMR checkpoint is incompatible with config/input hash")
@@ -97,7 +109,7 @@ def train_psmr(
             calibrator.load_state_dict(checkpoint["model_state"]); optimizer.load_state_dict(checkpoint["optimizer_state"])
             start_step = int(checkpoint.get("optimizer_steps", checkpoint.get("step", 0))); best_loss = float(checkpoint.get("best_loss", best_loss))
             if start_step >= int(max_steps):
-                result = {"status": "COMPLETED", "requested_steps": int(max_steps), "optimizer_steps": start_step, "algorithm_revision": "per_anchor_v8", "base_only_supervision": True, "official_validation_used": False, "checkpoint": str(last_path), "best_checkpoint": str(run_root / "best.pt"), "step": start_step, "device": str(actual_device), "config_hash": config_hash, "input_hash": input_hash}
+                result = {"status": "COMPLETED", "requested_steps": int(max_steps), "optimizer_steps": start_step, "algorithm_revision": algorithm_revision, "base_only_supervision": True, "official_validation_used": False, "checkpoint": str(last_path), "best_checkpoint": str(run_root / "best.pt"), "step_checkpoints": {str(step): str(run_root / f"step_{step}.pt") for step in sorted(checkpoint_steps) if (run_root / f"step_{step}.pt").exists()}, "step": start_step, "device": str(actual_device), "config_hash": config_hash, "input_hash": input_hash, "ignored_partial_support_keys": ignored_partial_keys}
                 (run_root / "train_result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
                 return result
     metrics_path = run_root / "metrics.jsonl"
@@ -147,17 +159,36 @@ def train_psmr(
             optimizer_steps += 1
             record = {"step": optimizer_steps, "loss": float(loss.detach()), "rank_loss": float(rank_loss.detach()), "reliability_loss": float(rel_loss.detach()), "episode_id": int(episode["episode_id"]), "anchor_supervision_count": int(rel_mask.sum())}
             handle.write(json.dumps(record) + "\n")
-            if optimizer_steps % int(config.get("training", {}).get("log_every", 100)) == 0:
+            if optimizer_steps % int(training_config.get("log_every", 100)) == 0:
                 handle.flush()
             current = float(loss.detach())
+            checkpoint_payload = {
+                "schema_version": 3 if algorithm_revision.endswith("v9") else 2,
+                "artifact": checkpoint_artifact,
+                "algorithm_revision": algorithm_revision,
+                "optimizer_steps": optimizer_steps,
+                "step": optimizer_steps,
+                "seed": int(seed),
+                "model_state": calibrator.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "config_hash": config_hash,
+                "input_hash": input_hash,
+                "partial_support_config": {key: value for key, value in partial_mapping.items() if key in scorer_fields},
+                "ignored_partial_support_keys": ignored_partial_keys,
+                "loss": record,
+                "best_loss": best_loss,
+            }
             if current < best_loss:
                 best_loss = current
-                torch.save({"schema_version": 2, "artifact": "psmr_v8_checkpoint", "algorithm_revision": "per_anchor_v8", "optimizer_steps": optimizer_steps, "step": optimizer_steps, "seed": int(seed), "model_state": calibrator.state_dict(), "optimizer_state": optimizer.state_dict(), "config_hash": config_hash, "input_hash": input_hash, "partial_support_config": dict(config.get("partial_support", {})), "loss": record, "best_loss": best_loss}, run_root / "best.pt")
-            if optimizer_steps % int(config.get("training", {}).get("save_every", 500)) == 0 or optimizer_steps == int(max_steps):
-                torch.save({"schema_version": 2, "artifact": "psmr_v8_checkpoint", "algorithm_revision": "per_anchor_v8", "optimizer_steps": optimizer_steps, "step": optimizer_steps, "seed": int(seed), "model_state": calibrator.state_dict(), "optimizer_state": optimizer.state_dict(), "config_hash": config_hash, "input_hash": input_hash, "partial_support_config": dict(config.get("partial_support", {})), "loss": record, "best_loss": best_loss}, last_path)
+                checkpoint_payload["best_loss"] = best_loss
+                torch.save(checkpoint_payload, run_root / "best.pt")
+            if optimizer_steps % int(training_config.get("save_every", 500)) == 0 or optimizer_steps == int(max_steps):
+                torch.save(checkpoint_payload, last_path)
+            if optimizer_steps in checkpoint_steps:
+                torch.save(checkpoint_payload, run_root / f"step_{optimizer_steps}.pt")
     finally:
         handle.close()
-    result = {"status": "COMPLETED", "requested_steps": int(max_steps), "optimizer_steps": int(optimizer_steps), "algorithm_revision": "per_anchor_v8", "base_only_supervision": True, "official_validation_used": False, "checkpoint": str(last_path), "best_checkpoint": str(run_root / "best.pt"), "step": int(optimizer_steps), "best_loss": best_loss, "device": str(actual_device), "config_hash": config_hash, "input_hash": input_hash}
+    result = {"status": "COMPLETED", "requested_steps": int(max_steps), "optimizer_steps": int(optimizer_steps), "algorithm_revision": algorithm_revision, "base_only_supervision": True, "official_validation_used": False, "checkpoint": str(last_path), "best_checkpoint": str(run_root / "best.pt"), "step_checkpoints": {str(step): str(run_root / f"step_{step}.pt") for step in sorted(checkpoint_steps) if (run_root / f"step_{step}.pt").exists()}, "step": int(optimizer_steps), "best_loss": best_loss, "device": str(actual_device), "config_hash": config_hash, "input_hash": input_hash, "ignored_partial_support_keys": ignored_partial_keys}
     (run_root / "train_result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result
 

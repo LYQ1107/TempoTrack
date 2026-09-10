@@ -1,0 +1,75 @@
+schema_version: 9
+seed: 0
+
+# V9 is an association-only audit.  Boxes, scores, labels and appearance
+# vectors remain the validated native streams; a method may rewrite track_id.
+observation_protocol: ratio2_frozen_Detic_MASA_or_native_external_feature
+official_validation_not_for_training: true
+novel_gt_not_for_optimizer: true
+mutable_fields:
+  - track_id
+
+partial_support:
+  query_observations: 1
+  top_r: 1
+  memory_capacity: 64
+  dedup_cos: 0.95
+  min_dormant_gap: 0
+  max_gap: 360
+  candidate_top_k: 64
+  reliability_multiplier: 1.0
+  alpha_fast: 0.70
+  alpha_slow: 0.15
+  fast_accept_threshold: 0.60
+
+training:
+  algorithm_revision: per_anchor_v9
+  checkpoint_artifact: psmr_v9_checkpoint
+  lr: 0.001
+  weight_decay: 0.0001
+  temperature: 0.07
+  grad_clip: 1.0
+  log_every: 100
+  save_every: 500
+  checkpoint_steps: [2000, 5000, 10000, 20000]
+
+protocols:
+  - FROZEN
+  - TEST_BASE_ADAPTED
+  - TEST_FULL_ORACLE
+
+search:
+  min_dormant_gap_masa: [0, 5, 10, 15, 20, 30]
+  min_dormant_gap_vov: [0, 15, 20, 30, 40, 45]
+  min_dormant_gap_cov: [0, 25, 40, 50, 60, 75]
+  max_gap_masa: [30, 60, 90, 120, 180]
+  max_gap_vov: [60, 90, 120, 180, 240]
+  max_gap_cov: [90, 120, 180, 240, 360]
+  candidate_top_k: [8, 16, 32, 64]
+  memory_capacity: [8, 16, 32, 64]
+  top_r: [1, 3, 5]
+  query_observations: [1, 2, 4]
+  reliability_multiplier: [0.0, 0.1, 0.25, 0.5, 0.75, 1.0, 1.25]
+  score_margin: [0.0, 0.005, 0.01, 0.02, 0.03, 0.05, 0.075, 0.1, 0.15]
+  score_percentiles: [30, 40, 50, 60, 70, 75, 80, 85, 90, 92.5, 95, 97.5, 99]
+  batch_sizes: [1, 2, 4]
+  checkpoints: [2000, 5000, 10000, 20000]
+  dual_alpha_slow: [0.02, 0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30]
+  dual_alpha_fast: [0.50, 0.60, 0.70, 0.80, 0.90]
+  dual_logit_scale: [6, 8, 10, 12, 14, 16]
+
+candidate_recall:
+  top_k: [1, 8, 16, 32, 64]
+  gap_bins: [0, 10, 30, 60, 90, 120, 180, 240, 360]
+
+resources:
+  workers: 8
+  physical_gpus: [0, 1, 2, 3, 4, 5, 6, 7]
+  sharing: free_vram_budgeted
+  external_processes_veto: false
+  max_project_workers_per_gpu: 1
+
+paths:
+  v8_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v8
+  run_root: outputs/tempotrack_v9
+  report_root: reports/tempotrack_v9

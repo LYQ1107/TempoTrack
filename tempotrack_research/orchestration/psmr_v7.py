@@ -446,6 +446,7 @@ def _native_prediction_records_from_frontend(
     device: str,
     run_root: Path,
     source_label: str,
+    config_overrides: Mapping[str, Any] | None = None,
     shard_index: int | None = None,
     shard_count: int = 1,
 ) -> dict:
@@ -470,7 +471,17 @@ def _native_prediction_records_from_frontend(
     if len(frontend_by_uid) != len(frontend_rows):
         raise ValueError(f"{source_label} prediction does not have unique observation UIDs")
     selected = dict(calibration)
-    cfg = PartialSupportConfig(query_observations=int(query_observations), top_r=int(selected.get("top_r", 3)), max_gap=int(selected.get("gap", 60)), candidate_top_k=8)
+    cfg_values = {
+        "query_observations": int(query_observations),
+        "top_r": int(selected.get("top_r", 3)),
+        "max_gap": int(selected.get("gap", 60)),
+        "min_dormant_gap": int(selected.get("min_dormant_gap", 0)),
+        "candidate_top_k": int(selected.get("candidate_top_k", 8)),
+        "reliability_multiplier": float(selected.get("reliability_multiplier", 1.0)),
+    }
+    if config_overrides:
+        cfg_values.update(dict(config_overrides))
+    cfg = PartialSupportConfig(**cfg_values)
     reliability_model = None
     if scheme.startswith("C10"):
         if checkpoint is None: raise ValueError("C10 inference requires its exact checkpoint")
