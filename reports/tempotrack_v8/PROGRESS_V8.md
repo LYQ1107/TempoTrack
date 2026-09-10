@@ -126,3 +126,109 @@ have since completed.
   is the active replacement.  A prior COV recorder launch also failed only
   because it used the wrong working directory; it was rerun from the external
   repository without changing model/config/checkpoint.
+
+### Execution update (2026-09-10 06:20 CST)
+
+- COV C9 was rerun with the official frontend categories restored while
+  retaining the COV native association scores.  The prediction is complete:
+  combined `38.944 / 57.280 / 41.903 / 17.649`, Base `39.580 / 57.160 /
+  42.034 / 19.545`, Novel `34.202 / 58.176 / 40.923 / 3.507`.  Novel
+  AssocA is `-0.013` versus the reproduced COV baseline, so native COV
+  training/Test PSMR is explicitly skipped by the V8 gate; this is a real
+  measured no-gain branch, not a missing-result placeholder.
+- VOV native Base-only training completed exactly 20,000 optimizer steps in
+  `crossbaseline/vov_train_native/psmr/training/seed0`; `train_result.json`
+  reports `status=COMPLETED`, `official_validation_used=false`, and the
+  selected `best.pt` hash is
+  `f48ca0028aee37bccfd3244296530e6384660096671fc15477037b9d7b2c8955`.
+  C10 calibration then completed on the native VOV Val analysis.  B=1 chose
+  top-r3, threshold `0.7624370813`, margin `0.01`, precision `0.964646`.
+- VOV native Test recording is still a live four-GPU job on GPUs 0--3,
+  sharing only currently available memory with pre-existing external jobs;
+  its last observed progress is `38,860/52,155` frames.  The VOV Val C10-B1
+  replay is also live on GPU9 and has not yet emitted its final prediction or
+  evaluator summary.  These two branches remain `RUNNING`, not counted as
+  complete.
+
+## Execution update (2026-09-10 06:52 CST)
+
+- The corrected VOV Test native recorder remains healthy in its separate
+  `vov_test_native_testcats` root.  It has processed `18,744/52,155` frames
+  (four per-rank JSONL streams) and every worker is using the Test operating
+  point with 357 classes.  The first 296-class recorder and its failed
+  alignment are retained and are not reused.
+- VOV Val native C10-B1 replay remains alive as PID 26884 on GPU9; no final
+  prediction file has been atomically published yet.  It is CPU-active rather
+  than stalled and is not counted as evaluated.
+- At this update GPU5--8 were free and GPU9 had about 35.6 GiB free.  GPUs0--3
+  had about 34.7 GiB free each while sharing with pre-existing external jobs;
+  no external process was signalled.  RAM had about 67 GiB available and no
+  swap.
+
+## Execution update (2026-09-10 07:05 CST)
+
+- VOV native Val C10-B1 finished replay and official evaluation.  The measured
+  result is Base `39.579/59.047/40.896/18.795`, Novel
+  `35.091/58.851/39.876/6.547` (TETA/LocA/AssocA/ClsA).  Prediction SHA256 is
+  `a45b234e6ec5c44689024f3d08437281b7e0b2aefd7de803ed0dbe82e6621cab`; TETA
+  summary SHA256 is `d889a1a0bdae6b82407e50c3747a580106a152fb88b26877435bb39b1e0a4208`.
+  It is retained despite no incremental gain over C9.
+- VOV corrected Test native recording is at `38,864/52,155` frames.  The
+  recorder remains the only active V8 model job; no Test native replay is
+  started until its 357-class cache passes exact join validation.
+
+## Execution update (2026-09-10 07:34 CST)
+
+- The previous post-filter VOV Test recorder was retained as an invalid
+  provenance attempt because it omitted rows removed by `remove_distractor`.
+  A new opt-in `pre_filter` recorder is now running from the external source
+  tree with source commit `ac8264274cd843b4810be8331a8aaa3c8cace8dc` and the
+  Test annotation/configuration.  It writes to the independent
+  `vov_test_native_raw_testcats` root and does not alter the baseline output.
+- Parent PID `13879` (started `2026-09-10 07:31:07 CST`) has four healthy
+  workers `13925`--`13928`, cwd `/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/VOVTrack`,
+  on logical GPUs 0--3.  Pre-existing GPU processes remain untouched.
+- The live progress is approximately `4,020/52,155` frames at 25.1 frames/s;
+  cache construction and exact native/frontend join validation are still
+  pending.  This branch is `RUNNING`, not counted as complete.
+
+## Execution update (2026-09-10 09:12 CST)
+
+- The VOV Test pre-filter diagnostic completed from the external VOVTrack tree
+  with 52,155 frame records.  Its merged stream is byte-identical to the
+  retained official Test prediction: 2,918,121 rows and SHA256
+  `de1e590d8ec357bc4e77f481458ce881321d3c479874d486c3a1f3506b5533fe`.
+  This is provenance evidence only; its pre-filter recorder is not used as a
+  PSMR cache.
+- A fresh VOV Test `post_filter` native recorder was started at 09:11 CST
+  with parent PID `10531`, PGID `10531`, eight workers on logical GPUs
+  `0,1,2,3,5,6,7,8`, and the exact published-reproduction operating point
+  (`only_test_categories=True`, `match_score_thr=0.33`, `max_per_img=110`,
+  `memo_frames=30`, `momentum_embed=0.4`).  It is attached to
+  `crossbaseline/vov_test_native_postfilter_official_v8` and remains
+  `RUNNING`; the initial rate is about 63 frames/s.
+- The requested pytest command was attempted in both available Python
+  contexts.  `masaenv` has no `pytest`; the system pytest has no `torch`, so
+  collection fails before tests execute.  The exact logs are retained in
+  `v8_high_value_tests.log` and `v8_high_value_tests_system.log`; this is an
+  environment limitation, not a test PASS claim.  The production
+  `build-check --changed-only`, `git diff --check`, and targeted `py_compile`
+  checks pass.
+
+## Execution update (2026-09-10 10:26 CST)
+
+- VOV Test native post-filter cache and four-way disjoint PSMR replay
+  completed.  The exact join retained 2,918,121 rows and the merged PSMR
+  prediction is SHA256
+  `956fb6810b88c9706f5e5d34526e8c187e0dc145820e1216304eecd25679522e`.
+- Official VOV Test association-only evaluation completed from that prediction.
+  Base is `37.799/57.348/41.575/14.476`, Novel is
+  `29.927/51.934/32.075/5.772`, and Combined is
+  `37.072/56.847/40.696/13.671` (TETA/LocA/AssocA/ClsA).  Summary SHA256 is
+  `e01cc80f4ec9d0fc78adeb4530b87207dff9b445fb024986efedf2a0162051b6`.
+- All V8 result-producing branches are now terminal: MASA Val/Test,
+  VOVTrack Val/Test, and COVTrack Val/Test baselines; MASA repaired PSMR,
+  MASA Dual, VOV native C9/C10, and COV native C9.  COV native C10/Test is
+  terminally skipped by the measured Novel AssocA no-gain gate (`-0.013`),
+  not left pending.  The remaining closeout work is report/hash audit and
+  source commit/push; the pytest collection limitation remains recorded.
