@@ -119,6 +119,19 @@ def _lane_paths(repo: Path, v8: Path) -> dict[str, Any]:
     vov_val_pred = v8 / "outputs/tempotrack_v8/crossbaseline/vov_val_native_frontend_aligned/prediction.json"
     vov_test_pred = v8 / "outputs/tempotrack_v8/crossbaseline/vov_test_native_postfilter_official_v8/frontend_aligned/prediction.json"
     cov_val_pred = v8 / "outputs/tempotrack_v8/crossbaseline/cov_val_native_frontend_aligned/prediction.json"
+    # V9 Test recording is intentionally relocated to the verified /data2
+    # volume after the /data1 capacity audit.  Resolve the exact artifact when
+    # it exists instead of leaving the lane permanently indistinguishable
+    # from an unattempted COV Test.
+    cov_test_root = Path("/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/covtrack/test/native_cache_v5")
+    cov_test_manifest = _first_existing([
+        repo / "outputs/tempotrack_v9/covtrack/test/native_cache_v5/manifest.json",
+        cov_test_root / "manifest.json",
+    ], "COV Test native manifest")[0]
+    cov_test_pred = _first_existing([
+        repo / "outputs/tempotrack_v9/covtrack/test/native_cache_v5/prediction.json",
+        cov_test_root / "prediction.json",
+    ], "COV Test frontend prediction")[0]
     masa_val_pred = _first_existing([
         masa_root / "outputs/tempotrack_v6/B2_dual_official_assign_no_offline/prediction.json",
         base / "masa/outputs/tempotrack_v6/B2_dual_official_assign_no_offline/prediction.json",
@@ -151,7 +164,7 @@ def _lane_paths(repo: Path, v8: Path) -> dict[str, Any]:
         },
         "covtrack": {
             "val": {"manifest": cov_val_manifest, "frontend_prediction": cov_val_pred, "annotation": ext_val_annotation},
-            "test": {"manifest": None, "frontend_prediction": None, "annotation": ext_test_annotation},
+            "test": {"manifest": cov_test_manifest, "frontend_prediction": cov_test_pred, "annotation": ext_test_annotation},
             "config": cov_cfg, "checkpoint": cov_ckpt,
         },
         "masa_r50": {"config": r50_cfg, "checkpoint": r50_ckpt, "checkpoint_candidates": r50_checked},
