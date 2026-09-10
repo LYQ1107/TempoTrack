@@ -2,6 +2,7 @@ import numpy as np
 
 from tempotrack_research.analysis.partial_support import PartialSupportConfig
 from tempotrack_research.streaming.partial_support import StreamingReactivationEngine
+from tempotrack_research.streaming.partial_support import build_memory_anchor
 
 
 def test_competition_loser_does_not_fall_back_to_second_candidate():
@@ -29,3 +30,19 @@ def test_reactivation_rejects_same_frame_track_collision():
         out, diag = getattr(engine, method)(records, features)
         assert out[-1]["track_id"] == 2
         assert any(item.reason == "frame_collision" for item in diag.decisions)
+
+
+def test_memory_capacity_keeps_recent_synchronized_anchors():
+    rows = list(range(5))
+    features = np.asarray([[float(index), 1.0] for index in rows], dtype=np.float32)
+    boxes = np.asarray([[index, 0, index + 1, 1] for index in rows], dtype=np.float32)
+    scores = np.ones(5, dtype=np.float32)
+    frames = np.asarray(rows, dtype=np.int64)
+    anchor = build_memory_anchor(
+        fragment_id="f", root_id=1, video_id=1, rows=rows, features=features,
+        boxes_xyxy=boxes, scores=scores, frames=frames, dedup_cos=1.1,
+        capacity=2,
+    )
+    assert anchor.row_indices == [3, 4]
+    np.testing.assert_array_equal(anchor.features, features[[3, 4]])
+    assert anchor.evidence.shape == (2, 7)

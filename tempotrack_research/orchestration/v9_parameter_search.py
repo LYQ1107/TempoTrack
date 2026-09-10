@@ -1265,6 +1265,90 @@ def _native_prediction_rows(
     return all_rows
 
 
+def _write_official_subset_annotation(annotation: Path, video_ids: set[int], output: Path) -> Path:
+    """Create the deterministic GT subset consumed by the official TETA run."""
+    payload = _json(annotation)
+    videos = [item for item in payload.get("videos", []) if int(item.get("id", -1)) in video_ids]
+    images = [item for item in payload.get("images", []) if int(item.get("video_id", -1)) in video_ids]
+    image_ids = {int(item.get("id", -1)) for item in images}
+    subset = dict(payload)
+    subset["videos"] = videos
+    subset["images"] = images
+    subset["annotations"] = [item for item in payload.get("annotations", []) if int(item.get("image_id", -1)) in image_ids]
+    if "tracks" in payload:
+        subset["tracks"] = [item for item in payload.get("tracks", []) if int(item.get("video_id", -1)) in video_ids]
+    _write_json(output, subset)
+    return output
+
+
+def _official_subset_assocA_for_rows(
+    *, annotation: Path, video_ids: set[int], rows_by_name: Mapping[str, Sequence[Mapping[str, Any]]], output: Path,
+) -> dict[str, Any]:
+    """Evaluate candidate prediction rows with the installed official TETA."""
+    subset_annotation = _write_official_subset_annotation(annotation, video_ids, output / "gt_subset.json")
+    prediction_paths: dict[str, Path] = {}
+    for name, rows in rows_by_name.items():
+        prediction = output / "predictions" / f"{name}.json"
+        _write_json(prediction, list(rows))
+        prediction_paths[str(name)] = prediction
+    if not prediction_paths:
+        return {"status": "BLOCKED_NO_CANDIDATES", "subset_annotation": str(subset_annotation)}
+    try:
+        from ..v6_cli import evaluate_v6_batch
+        batch = evaluate_v6_batch(
+            repo=Path(__file__).resolve().parents[2],
+            annotation=subset_annotation,
+            predictions=prediction_paths,
+            output=output / "evaluation",
+            cores=4,
+        )
+        document = _json(batch["evaluation"])
+    except Exception as exc:
+        return {
+            "status": "BLOCKED_OFFICIAL_SUBSET_TETA",
+            "error": f"{type(exc).__name__}: {exc}",
+            "subset_annotation": str(subset_annotation),
+            "subset_annotation_hash": _sha256(subset_annotation),
+            "prediction_paths": {name: str(path) for name, path in prediction_paths.items()},
+        }
+    rows: list[dict[str, Any]] = []
+    protocol_rows = document.get("results", {}).get("association_only", {})
+    for name, path in prediction_paths.items():
+        record = protocol_rows.get(name)
+        parsed = record.get("parsed") if isinstance(record, Mapping) else None
+        base = parsed.get("base") if isinstance(parsed, Mapping) else None
+        if not isinstance(base, Mapping) or base.get("AssocA") is None:
+            return {
+                "status": "BLOCKED_OFFICIAL_SUBSET_TETA_PARSE",
+                "error": f"missing official Base AssocA for {name}",
+                "batch_evaluation": str(batch["evaluation"]),
+                "subset_annotation": str(subset_annotation),
+            }
+        rows.append({
+            "name": name,
+            "prediction": str(path),
+            "prediction_hash": _sha256(path),
+            "official_assoc_only": {
+                "overall": parsed.get("overall"),
+                "base": dict(base),
+                "novel": parsed.get("novel"),
+                "summary": record.get("summary"),
+                "summary_hash": record.get("summary_hash"),
+            },
+        })
+    return {
+        "status": "COMPLETED",
+        "selection_metric": "official_subset_association_only_TETA_Base_AssocA",
+        "subset_video_count": len(video_ids),
+        "subset_video_ids": sorted(video_ids),
+        "subset_annotation": str(subset_annotation),
+        "subset_annotation_hash": _sha256(subset_annotation),
+        "batch_evaluation": str(batch["evaluation"]),
+        "batch_evaluation_hash": _sha256(Path(batch["evaluation"])),
+        "rows": rows,
+    }
+
+
 def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, protocol: str, output: str | Path, device: str = "cuda:0", devices: str | Sequence[str] | None = None, video_limit: int | None = 128) -> dict[str, Any]:
     """Run the real Dual tracker on deterministic cached video shards.
 
@@ -1274,6 +1358,8 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
     AssocA before a parent enters a paper selection.
     """
     protocol = _normalize_v91_protocol(protocol)
+    output_path = Path(output).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path = _require(manifest, "native manifest")
     annotation_path = _require(annotation, "annotation")
     from ..v6_cli import _cache_shards, _frames_for_shard, _load_cache_manifest
@@ -1355,8 +1441,52 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
         return screen_rows
 
     d1_rows = screen_config(d1, "D1")
-    d1_top12 = sorted(d1_rows, key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))[:12]
-    parents = d1_top12[:3]
+    d1_pre_top12 = sorted(d1_rows, key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))[:12]
+    d1_prediction_rows = {
+        f"config_{int(item['config_index']):04d}": _native_prediction_rows(
+            manifest_path, annotation_path, mode="dual", device=device_list[index % len(device_list)],
+            tracker_config={key: value for key, value in item["config"].items() if key in {"alpha_fast", "alpha_slow", "dual_logit_scale", "fast_accept_threshold", "assignment_mode"}},
+            video_ids=video_ids,
+        )
+        for index, item in enumerate(d1_pre_top12)
+    }
+    d1_official = _official_subset_assocA_for_rows(
+        annotation=annotation_path, video_ids=video_ids, rows_by_name=d1_prediction_rows,
+        output=output_path.with_name(output_path.stem + "_d1_official_subset"),
+    )
+    if d1_official.get("status") != "COMPLETED":
+        result = {
+            "schema_version": V91_SCHEMA, "artifact": "v9_1_dual_sweep", "status": d1_official.get("status"),
+            "split": split, "protocol": protocol, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path),
+            "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "video_count": len(shards),
+            "d1_configs": len(d1_rows), "d2_configs": 0, "evaluated_configs": len(d1_rows),
+            "selection_metric": "Base pairwise F1 pre-screen -> official subset Base AssocA (required before D2)",
+            "d1_pre_top12": d1_pre_top12, "d1_official_subset": d1_official, "d1_parents": [], "rows": d1_rows,
+        }
+        _write_json(output_path, result)
+        return {"status": result["status"], "output": str(output_path), **result}
+    official_by_index = {
+        int(Path(str(item["prediction"])).stem.replace("config_", "")): item
+        for item in d1_official["rows"]
+    }
+    d1_top12 = []
+    for item in d1_pre_top12:
+        official = official_by_index[int(item["config_index"])]
+        enriched = dict(item)
+        enriched["official_subset_assoc_only"] = official["official_assoc_only"]
+        enriched["official_subset_prediction"] = official["prediction"]
+        enriched["official_subset_prediction_hash"] = official["prediction_hash"]
+        d1_top12.append(enriched)
+    parents = sorted(
+        d1_top12,
+        key=lambda item: (
+            float(item["official_subset_assoc_only"]["base"]["AssocA"]),
+            float(item["official_subset_assoc_only"]["base"].get("TETA", -float("inf"))),
+            float(item["base_pair_f1"]),
+            -int(item["config_index"]),
+        ),
+        reverse=True,
+    )[:3]
     d2 = []
     for parent_index, parent in enumerate(parents):
         parent_cfg = dict(parent["config"])
@@ -1366,8 +1496,8 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
     d2_rows = screen_config(d2, "D2", start_index=len(d1_rows))
     rows = d1_rows + d2_rows
     rows.sort(key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))
-    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_dual_sweep", "split": split, "protocol": protocol, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "video_count": len(shards), "screen_video_selection": "sha256(video_id) first 128", "d1_configs": len(d1_rows), "d2_configs": len(d2_rows), "evaluated_configs": len(rows), "selection_metric": "base_pair_f1_pre_screen_then_official_subset_AssocA", "official_subset_top12_required": True, "best": rows[:8], "d1_top12": d1_top12, "d1_parents": parents, "rows": rows}
-    output_path = Path(output).resolve(); _write_json(output_path, result)
+    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_dual_sweep", "status": "COMPLETED", "split": split, "protocol": protocol, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "video_count": len(shards), "screen_video_selection": "sha256(video_id) first 128", "d1_configs": len(d1_rows), "d2_configs": len(d2_rows), "evaluated_configs": len(rows), "selection_metric": "base_pair_f1_pre_screen_then_official_subset_AssocA", "official_subset_top12_required": True, "d1_pre_top12": d1_pre_top12, "d1_official_subset": d1_official, "best": rows[:8], "d1_top12": d1_top12, "d1_parents": parents, "d1_parent_selection": "official subset association-only TETA Base AssocA top3", "rows": rows}
+    _write_json(output_path, result)
     return {"status": "COMPLETED", "output": str(output_path), **result}
 
 

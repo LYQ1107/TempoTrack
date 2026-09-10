@@ -2,9 +2,11 @@
 """V9.1 exact active operating-point replay.
 
 The detector/ROI recorder is run once.  This tool replays the released
-tracker implementation, including COVTrack's checkpoint-loaded fusion head,
-and selects only with merge-sensitive pairwise association F1.  Dominant-ID
-purity and transition rate remain diagnostics, never selection criteria.
+tracker implementation, including COVTrack's checkpoint-loaded fusion head.
+Pairwise association F1 is only the deterministic pre-screen; the final
+Top12 operating point is selected by official subset association-only TETA.
+Dominant-ID purity and transition rate remain diagnostics, never selection
+criteria.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import hashlib
 import json
 import pickle
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -119,6 +121,17 @@ def _load_released_components(frontend: str, config_path: Path, checkpoint_path:
 
     cfg = Config.fromfile(str(config_path))
     cfg.model.pretrained = None
+    # The official runner changes cwd to the external repository before
+    # building the model.  Replay is launched from TempoTrack, so preserve
+    # the same relative prompt resolution instead of silently recomputing 74
+    # CLIP templates from scratch.
+    prompt_path = cfg.model.roi_head.get("prompt_path")
+    if prompt_path and not Path(str(prompt_path)).is_absolute():
+        for parent in (config_path.parent, *config_path.parents):
+            resolved_prompt = (parent / str(prompt_path)).resolve()
+            if resolved_prompt.exists():
+                cfg.model.roi_head.prompt_path = str(resolved_prompt)
+                break
     if frontend == "covtrack":
         cfg.model.tracker.confused_features = True
         cfg.model.roi_head.feature_fusion_head.max_fusion_ratio = 2.0
@@ -131,9 +144,18 @@ def _load_released_components(frontend: str, config_path: Path, checkpoint_path:
     fusion_head = getattr(roi_head, "fusion_head", None)
     track_head = getattr(roi_head, "track_head", None)
     loss_cyc = getattr(track_head, "loss_cyc", None)
+    num_classes = int(getattr(roi_head, "num_classes", 0) or 0)
+    official_custom_classes = bool(getattr(roi_head, "custom_classes", False))
+    if official_custom_classes and num_classes > 0:
+        # OVTrack's simple_test sets these on every frame before calling
+        # tracker.match(); carry the exact production values into replay.
+        cfg.model.tracker.init_score_thr = 1.0 / float(num_classes + 1) + 0.1
+        cfg.model.tracker.obj_score_thr = 1.0 / float(num_classes + 1) + 0.05
     if frontend == "covtrack" and (fusion_head is None or loss_cyc is None):
         raise RuntimeError("COVTrack active replay requires checkpoint-loaded fusion_head and loss_cyc")
-    return {"model": model, "tracker_cfg": tracker_cfg, "fusion_head": fusion_head, "loss_cyc": loss_cyc}
+    tracker_cfg = dict(cfg.model.tracker)
+    tracker_cfg.pop("type", None)
+    return {"model": model, "tracker_cfg": tracker_cfg, "fusion_head": fusion_head, "loss_cyc": loss_cyc, "num_classes": num_classes, "custom_classes": official_custom_classes, "prompt_path": None if not prompt_path else str(getattr(cfg.model.roi_head, "prompt_path", prompt_path))}
 
 
 def _tracker(frontend: str, config: dict[str, Any], components: Mapping[str, Any]):
@@ -256,12 +278,17 @@ def _replay(frontend: str, calls_root: Path, annotation: Path, config: dict[str,
             bboxes = torch.as_tensor(np.asarray(call["bboxes"], dtype=np.float32), device=device); labels = torch.as_tensor(np.asarray(call["labels"], dtype=np.int64), device=device); embeds = torch.as_tensor(np.asarray(call["embeds"], dtype=np.float32), device=device)
             cls_raw = call.get("cls_embeds"); cls_embeds = embeds if cls_raw is None else torch.as_tensor(np.asarray(cls_raw, dtype=np.float32), device=device)
             source_indices = _filtered_indices(call, tracker, bboxes, labels, embeds, cls_embeds)
-            filtered_bboxes, filtered_labels, ids = tracker.match(bboxes=bboxes, labels=labels, embeds=embeds, cls_embeds=cls_embeds, frame_id=int(call.get("frame_id", image.get("frame_id", 0))), method="ovtrack-teta", filename=str(call.get("filename", "")))
+            matched_bboxes, matched_labels, ids = tracker.match(bboxes=bboxes, labels=labels, embeds=embeds, cls_embeds=cls_embeds, frame_id=int(call.get("frame_id", image.get("frame_id", 0))), method="ovtrack-teta", filename=str(call.get("filename", "")))
             ids_np = ids.detach().cpu().numpy().astype(np.int64).reshape(-1)
             if len(ids_np) != len(source_indices):
                 raise RuntimeError(f"tracker output/filter mismatch at image={image['id']}: {len(ids_np)} != {len(source_indices)}")
             raw_boxes = np.asarray(call["bboxes"], dtype=np.float32); raw_labels = np.asarray(call["labels"], dtype=np.int64).reshape(-1); raw_embeds = np.asarray(call["embeds"], dtype=np.float32)
-            selected_boxes = raw_boxes[source_indices]; selected_labels = raw_labels[source_indices]; selected_embeds = raw_embeds[source_indices]
+            # ``match`` returns the exact post-filter rows consumed by the
+            # official track formatter.  Use those rows for prediction and
+            # only use source_indices to align the recorded embeddings.
+            selected_boxes = matched_bboxes.detach().cpu().numpy().astype(np.float32)
+            selected_labels = matched_labels.detach().cpu().numpy().astype(np.int64).reshape(-1)
+            selected_embeds = raw_embeds[source_indices]
             selected = dict(call); selected["bboxes"] = selected_boxes; selected["labels"] = selected_labels; selected["embeds"] = selected_embeds; selected["track_ids"] = ids_np; selected["source_indices"] = source_indices
             if call.get("cls_embeds") is not None:
                 selected["cls_embeds"] = np.asarray(call["cls_embeds"], dtype=np.float32)[source_indices]
@@ -269,7 +296,8 @@ def _replay(frontend: str, calls_root: Path, annotation: Path, config: dict[str,
                 pickle.dump(selected, selected_stream, protocol=pickle.HIGHEST_PROTOCOL)
             for index, track_id in enumerate(ids_np):
                 box = selected_boxes[index]; label = int(selected_labels[index])
-                rows.append({"video_id": video_id, "image_id": int(image["id"]), "frame_id": int(image.get("frame_id", call.get("frame_id", 0))), "bbox": [float(box[0]), float(box[1]), float(box[2] - box[0]), float(box[3] - box[1])], "score": float(box[4]), "category_id": int(category_ids[label]), "track_id": int(track_id)})
+                frame_id = int(image.get("frame_id", call.get("frame_id", 0)))
+                rows.append({"video_id": video_id, "image_id": int(image["id"]), "frame_id": frame_id, "bbox": [float(box[0]), float(box[1]), float(box[2] - box[0]), float(box[3] - box[1])], "score": float(box[4]), "category_id": int(category_ids[label]), "track_id": int(track_id), "observation_uid": f"native_v6:{video_id}:{frame_id}:{int(source_indices[index])}"})
     finally:
         if selected_stream is not None:
             selected_stream.close()
@@ -281,29 +309,189 @@ def _subset_video_ids(annotation: Path, limit: int) -> set[int]:
     return set(values[:int(limit)])
 
 
+def _write_json(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_subset_annotation(annotation: Path, video_ids: set[int], output: Path) -> Path:
+    """Write the deterministic official-TETA subset without changing classes."""
+    payload = json.loads(annotation.read_text(encoding="utf-8"))
+    videos = [item for item in payload.get("videos", []) if int(item.get("id", -1)) in video_ids]
+    images = [item for item in payload.get("images", []) if int(item.get("video_id", -1)) in video_ids]
+    image_ids = {int(item.get("id", -1)) for item in images}
+    subset = dict(payload)
+    subset["videos"] = videos
+    subset["images"] = images
+    subset["annotations"] = [item for item in payload.get("annotations", []) if int(item.get("image_id", -1)) in image_ids]
+    if "tracks" in payload:
+        subset["tracks"] = [item for item in payload.get("tracks", []) if int(item.get("video_id", -1)) in video_ids]
+    _write_json(output, subset)
+    return output
+
+
+def _official_subset_assocA(
+    *,
+    frontend: str,
+    top12: list[dict[str, Any]],
+    calls_root: Path,
+    annotation: Path,
+    video_ids: set[int],
+    device: str,
+    components: Mapping[str, Any],
+    output: Path,
+) -> dict[str, Any]:
+    """Run real official association-only TETA for the pairwise Top12."""
+    subset_annotation = _write_subset_annotation(annotation, video_ids, output / "official_subset_gt.json")
+    prediction_root = output / "official_subset_predictions"
+    predictions: dict[str, Path] = {}
+    replay_metrics: dict[str, Any] = {}
+    for item in top12:
+        config_index = int(item["config_index"])
+        name = f"config_{config_index:04d}"
+        metrics, rows = _replay(frontend, calls_root, annotation, dict(item["config"]), device, components, video_ids=video_ids)
+        prediction = prediction_root / f"{name}.json"
+        _write_json(prediction, rows)
+        predictions[name] = prediction
+        replay_metrics[name] = metrics
+    if not predictions:
+        return {"status": "BLOCKED_NO_TOP12", "subset_annotation": str(subset_annotation)}
+    try:
+        from tempotrack_research.v6_cli import evaluate_v6_batch
+        batch = evaluate_v6_batch(
+            repo=Path(__file__).resolve().parents[1],
+            annotation=subset_annotation,
+            predictions=predictions,
+            output=output / "official_subset_teta",
+            cores=4,
+        )
+        batch_doc = json.loads(Path(batch["evaluation"]).read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {
+            "status": "BLOCKED_OFFICIAL_SUBSET_TETA",
+            "error": f"{type(exc).__name__}: {exc}",
+            "subset_annotation": str(subset_annotation),
+            "subset_annotation_sha256": _sha256(subset_annotation),
+            "prediction_paths": {key: str(value) for key, value in predictions.items()},
+        }
+    official_rows: list[dict[str, Any]] = []
+    protocol_rows = batch_doc.get("results", {}).get("association_only", {})
+    for item in top12:
+        name = f"config_{int(item['config_index']):04d}"
+        record = protocol_rows.get(name)
+        parsed = record.get("parsed") if isinstance(record, Mapping) else None
+        base = parsed.get("base") if isinstance(parsed, Mapping) else None
+        if not isinstance(base, Mapping) or base.get("AssocA") is None:
+            return {
+                "status": "BLOCKED_OFFICIAL_SUBSET_TETA_PARSE",
+                "error": f"missing parsed Base AssocA for {name}",
+                "batch_evaluation": str(batch["evaluation"]),
+                "subset_annotation": str(subset_annotation),
+            }
+        official_rows.append({
+            "config_index": int(item["config_index"]),
+            "prediction": str(predictions[name]),
+            "prediction_sha256": _sha256(predictions[name]),
+            "replay_metrics": replay_metrics[name],
+            "official_assoc_only": {
+                "overall": parsed.get("overall"),
+                "base": dict(base),
+                "novel": parsed.get("novel"),
+                "summary": record.get("summary"),
+                "summary_hash": record.get("summary_hash"),
+            },
+        })
+    selected = max(
+        official_rows,
+        key=lambda item: (
+            float(item["official_assoc_only"]["base"]["AssocA"]),
+            float(item["official_assoc_only"]["base"].get("TETA", -float("inf"))),
+            float(item["replay_metrics"].get("base_pair_f1", 0.0)),
+            -int(item["config_index"]),
+        ),
+    )
+    return {
+        "status": "COMPLETED",
+        "selection_metric": "official_subset_association_only_TETA_Base_AssocA",
+        "subset_video_count": len(video_ids),
+        "subset_video_ids": sorted(video_ids),
+        "subset_annotation": str(subset_annotation),
+        "subset_annotation_sha256": _sha256(subset_annotation),
+        "batch_evaluation": str(batch["evaluation"]),
+        "batch_evaluation_sha256": _sha256(Path(batch["evaluation"])),
+        "rows": official_rows,
+        "selected": selected,
+    }
+
+
 def _equivalence(replay_rows: list[dict[str, Any]], baseline_path: Path, images: dict[str, dict[str, Any]], video_ids: set[int]) -> dict[str, Any]:
     baseline = json.loads(baseline_path.read_text(encoding="utf-8")); baseline = baseline.get("data", baseline) if isinstance(baseline, dict) else baseline
     image_video = {int(value["id"]): int(value["video_id"]) for value in images.values() if "id" in value and "video_id" in value}
     expected = [row for row in baseline if int(image_video.get(int(row.get("image_id", -1)), -1)) in video_ids] if isinstance(baseline, list) else []
+    # The official streaming formatter offsets each video's local tracker IDs
+    # by the cumulative max ID of preceding videos.  Replay intentionally
+    # resets the official tracker per video, so compare after applying the
+    # exact formatter offsets inferred from the baseline stream.
+    video_offsets: dict[int, int] = {}
+    for row in expected:
+        video = int(image_video.get(int(row.get("image_id", -1)), row.get("video_id", -1)))
+        track_id = int(row.get("track_id", -1))
+        if video not in video_offsets and track_id >= 0:
+            video_offsets[video] = track_id
+    normalized_replay: list[dict[str, Any]] = []
+    for row in replay_rows:
+        normalized = dict(row)
+        video = int(row.get("video_id", image_video.get(int(row.get("image_id", -1)), -1)))
+        track_id = int(row.get("track_id", -1))
+        if track_id >= 0:
+            if video not in video_offsets:
+                raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL missing formatter offset for video={video}")
+            normalized["track_id"] = track_id + int(video_offsets[video])
+        normalized_replay.append(normalized)
+    # ``_write_video`` replaces every row's category by the majority category
+    # of its (offset) track, using the smallest category on ties.
+    categories_by_track: dict[int, Counter[int]] = defaultdict(Counter)
+    for row in normalized_replay:
+        track_id = int(row.get("track_id", -1))
+        if track_id >= 0:
+            categories_by_track[track_id][int(row["category_id"])] += 1
+    for row in normalized_replay:
+        track_id = int(row.get("track_id", -1))
+        if track_id >= 0 and track_id in categories_by_track:
+            counts = categories_by_track[track_id]
+            row["category_id"] = min(category for category, count in counts.items() if count == max(counts.values()))
     def key(row: Mapping[str, Any]) -> tuple[Any, ...]:
         box = row.get("bbox", [0, 0, 0, 0]); return int(row.get("image_id", -1)), int(row.get("category_id", -1)), tuple(float(value) for value in box), float(row.get("score", 0.0)), int(row.get("track_id", -1))
-    actual_sorted = sorted(replay_rows, key=key); expected_sorted = sorted(expected, key=key)
+    actual_sorted = sorted(normalized_replay, key=key); expected_sorted = sorted(expected, key=key)
     if len(actual_sorted) != len(expected_sorted):
         raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL row_count {len(actual_sorted)} != {len(expected_sorted)}")
-    for actual, expected_row in zip(actual_sorted, expected_sorted):
+    for row_index, (actual, expected_row) in enumerate(zip(actual_sorted, expected_sorted)):
         for field in ("image_id", "category_id", "bbox", "score", "track_id"):
             if field == "bbox":
-                if list(actual[field]) != list(expected_row[field]):
-                    raise RuntimeError("ACTIVE_REPLAY_EQUIVALENCE_FAIL bbox mismatch")
+                # The released formatter serializes detector boxes through
+                # different Python paths.  Compare the underlying detector
+                # float32 values, not decimal JSON spellings (which can
+                # differ by one float32 ulp after float64 arithmetic).
+                actual_box = np.asarray(actual[field], dtype=np.float32)
+                expected_box = np.asarray(expected_row[field], dtype=np.float32)
+                if actual_box.shape != expected_box.shape or not np.array_equal(actual_box, expected_box):
+                    diff = float(np.max(np.abs(actual_box - expected_box))) if actual_box.shape == expected_box.shape else None
+                    raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL bbox mismatch index={row_index} image={actual.get('image_id')} max_abs_diff={diff} actual={actual[field]} expected={expected_row[field]}")
+            elif field == "score":
+                actual_score = np.asarray([actual[field]], dtype=np.float32)
+                expected_score = np.asarray([expected_row[field]], dtype=np.float32)
+                if not np.array_equal(actual_score, expected_score):
+                    diff = float(np.max(np.abs(actual_score - expected_score)))
+                    raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL score mismatch index={row_index} image={actual.get('image_id')} max_abs_diff={diff} actual={actual[field]} expected={expected_row[field]}")
             elif actual[field] != expected_row[field]:
-                raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL {field} mismatch")
-    return {"status": "PASS", "row_count": len(actual_sorted), "bbox_exact": True, "score_exact": True, "category_exact": True, "track_id_mismatch_count": 0}
+                raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL {field} mismatch index={row_index} image={actual.get('image_id')} category={actual.get('category_id')} actual={actual.get(field)} expected={expected_row.get(field)}")
+    return {"status": "PASS", "row_count": len(actual_sorted), "bbox_exact": True, "score_exact": True, "float_comparison": "numpy_float32_exact", "category_exact": True, "track_id_mismatch_count": 0, "formatter_video_offsets": {str(key): int(value) for key, value in sorted(video_offsets.items())}}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--frontend", choices=("vovtrack", "covtrack"), required=True)
-    parser.add_argument("--calls-root", required=True); parser.add_argument("--annotation", required=True); parser.add_argument("--output", required=True); parser.add_argument("--external-root", required=True); parser.add_argument("--model-config", required=True); parser.add_argument("--model-checkpoint", required=True); parser.add_argument("--baseline-prediction", required=True); parser.add_argument("--device", default="cpu"); parser.add_argument("--materialize-best", action="store_true")
+    parser.add_argument("--calls-root", required=True); parser.add_argument("--annotation", required=True); parser.add_argument("--output", required=True); parser.add_argument("--external-root", required=True); parser.add_argument("--model-config", required=True); parser.add_argument("--model-checkpoint", required=True); parser.add_argument("--baseline-prediction", required=True); parser.add_argument("--device", default="cpu"); parser.add_argument("--materialize-best", action="store_true"); parser.add_argument("--equivalence-only", action="store_true")
     args = parser.parse_args()
     external_root = Path(args.external_root).resolve(); sys.path.insert(0, str(external_root)); calls_root = Path(args.calls_root).resolve(); annotation = Path(args.annotation).resolve(); output = Path(args.output).resolve(); output.mkdir(parents=True, exist_ok=True)
     images, _, _, _ = _image_index(annotation); video_ids = _subset_video_ids(annotation, 10)
@@ -311,8 +499,11 @@ def main() -> int:
     released = _configs(args.frontend)[0]
     equivalence_metrics, equivalence_rows = _replay(args.frontend, calls_root, annotation, released, args.device, components, video_ids=video_ids)
     equivalence = _equivalence(equivalence_rows, Path(args.baseline_prediction).resolve(), images, video_ids)
-    _write = lambda path, value: path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write = _write_json
     _write(output / "released_equivalence.json", {"frontend": args.frontend, "videos": sorted(video_ids), "metrics": equivalence_metrics, "equivalence": equivalence, "cov_components": {"confused_features": bool(getattr(_tracker(args.frontend, released, components), "confused_features", False)) if args.frontend == "covtrack" else None, "fusion_head": components["fusion_head"] is not None if args.frontend == "covtrack" else None, "loss_cyc": components["loss_cyc"] is not None if args.frontend == "covtrack" else None}})
+    if args.equivalence_only:
+        print(json.dumps({"status": "EQUIVALENCE_PASS", "output": str(output / "released_equivalence.json")}, ensure_ascii=False, indent=2))
+        return 0
     result_rows: list[dict[str, Any]] = []; best = None
     for index, config in enumerate(_configs(args.frontend)):
         metrics, _ = _replay(args.frontend, calls_root, annotation, config, args.device, components)
@@ -322,14 +513,27 @@ def main() -> int:
             best = {**row, "_score": score}
         print(json.dumps({"config_index": index, **config, **metrics}, ensure_ascii=False), flush=True)
     selected = None
+    official_subset = None
     if best is not None:
         top12 = sorted(result_rows, key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))[:12]
-        selected = {key: value for key, value in best.items() if key != "_score"}
-        _write(output / "selected.json", selected)
         _write(output / "top12_pairwise.json", {"selection_metric": "base_pair_f1", "rows": top12, "official_subset_assocA_required": True})
-        if args.materialize_best:
+        official_subset = _official_subset_assocA(frontend=args.frontend, top12=top12, calls_root=calls_root, annotation=annotation, video_ids=video_ids, device=args.device, components=components, output=output / "official_subset")
+        if official_subset.get("status") == "COMPLETED":
+            official_by_index = {int(item["config_index"]): item for item in official_subset["rows"]}
+            for row in result_rows:
+                if int(row["config_index"]) in official_by_index:
+                    row["official_subset_assoc_only"] = official_by_index[int(row["config_index"])]["official_assoc_only"]
+            chosen = official_subset["selected"]
+            selected = next(row for row in top12 if int(row["config_index"]) == int(chosen["config_index"]))
+            selected = {**selected, "official_subset_assoc_only": chosen["official_assoc_only"], "official_subset_prediction": chosen["prediction"], "official_subset_prediction_sha256": chosen["prediction_sha256"]}
+            _write(output / "selected.json", selected)
+        else:
+            # A pairwise winner is never promoted when official subset TETA
+            # did not produce Base AssocA.
+            _write(output / "selected.json", {"status": "NOT_SELECTED", "reason": official_subset})
+        if args.materialize_best and selected is not None:
             selected_calls = output / "selected_calls" / "match_calls_0.pkl"; material_metrics, material_rows = _replay(args.frontend, calls_root, annotation, dict(selected["config"]), args.device, components, selected_calls); _write(output / "selected_prediction.json", material_rows); selected["materialized"] = {"calls": str(selected_calls), "prediction": str(output / "selected_prediction.json"), **material_metrics}
-    result = {"schema_version": 10, "artifact": "v9_1_active_tracker_operating_point_sweep", "frontend": args.frontend, "calls_root": str(calls_root), "annotation": str(annotation), "annotation_sha256": _sha256(annotation), "model_config": str(Path(args.model_config).resolve()), "model_checkpoint": str(Path(args.model_checkpoint).resolve()), "baseline_prediction": str(Path(args.baseline_prediction).resolve()), "equivalence": {"status": "PASS", "video_count": len(video_ids), **equivalence}, "configs": len(result_rows), "selection": "Base pairwise association F1 pre-screen; official subset Base AssocA must select Top12; Novel is diagnostic only", "deterministic_subset": "sha256(video_id) first 128", "rows": result_rows, "best_baseline": selected}
+    result = {"schema_version": 10, "artifact": "v9_1_active_tracker_operating_point_sweep", "frontend": args.frontend, "calls_root": str(calls_root), "annotation": str(annotation), "annotation_sha256": _sha256(annotation), "model_config": str(Path(args.model_config).resolve()), "model_checkpoint": str(Path(args.model_checkpoint).resolve()), "baseline_prediction": str(Path(args.baseline_prediction).resolve()), "equivalence": {"status": "PASS", "video_count": len(video_ids), **equivalence}, "configs": len(result_rows), "selection": "Base pairwise association F1 pre-screen -> official subset association-only TETA Base AssocA", "deterministic_subset": "sha256(video_id) first 128", "official_subset": official_subset, "rows": result_rows, "best_baseline": selected}
     _write(output / "active_sweep.json", result); print(json.dumps({"status": "COMPLETED", "output": str(output / "active_sweep.json"), "best": selected}, ensure_ascii=False, indent=2)); return 0
 
 

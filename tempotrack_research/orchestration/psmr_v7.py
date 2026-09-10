@@ -483,13 +483,17 @@ def _native_prediction_records_from_frontend(
     if config_overrides:
         cfg_values.update(dict(config_overrides))
     cfg = PartialSupportConfig(**cfg_values)
+    reliability_multiplier = float(cfg_values["reliability_multiplier"])
+    # Reliability is an artifact property, not a scheme-name convention.
+    # V9 materialization deliberately uses ``scheme=V9_PSMR`` and must still
+    # load the selected checkpoint when the selected multiplier is positive.
+    use_reliability = bool(checkpoint is not None and reliability_multiplier > 0.0)
     reliability_model = None
-    if scheme.startswith("C10"):
-        if checkpoint is None: raise ValueError("C10 inference requires its exact checkpoint")
+    if use_reliability:
         state = torch.load(checkpoint, map_location=device)
         reliability_model = MemoryReliabilityCalibrator().to(device)
         reliability_model.load_state_dict(state["model_state"]); reliability_model.eval()
-    engine = StreamingReactivationEngine(cfg, query_observations=query_observations, score_threshold=float(selected.get("threshold", .60)), margin_threshold=float(selected.get("margin_threshold", 0.0)), use_reliability=reliability_model is not None, reliability_model=reliability_model, device=device)
+    engine = StreamingReactivationEngine(cfg, query_observations=query_observations, score_threshold=float(selected.get("threshold", .60)), margin_threshold=float(selected.get("margin_threshold", 0.0)), use_reliability=use_reliability, reliability_model=reliability_model, device=device)
     all_shards = list(_cache_shards(native))
     if int(shard_count) < 1:
         raise ValueError("native inference shard_count must be positive")
@@ -540,7 +544,7 @@ def _native_prediction_records_from_frontend(
     out_payload = {str(row["observation_uid"]): {key: row[key] for key in ("video_id", "image_id", "frame_index", "bbox", "score", "category_id")} for row in output_rows}
     if frontend_payload != out_payload: raise ValueError("PSMR inference attempted to change immutable observation fields")
     prediction = run_root / "prediction.json"; _write_json(prediction, output_rows)
-    meta = {"schema_version": 8, "artifact": "psmr_native_prediction", "scheme": scheme, "source_frontend": str(frontend_prediction.resolve()), "source_frontend_hash": _sha256(frontend_prediction), "source_manifest": str(manifest_path.resolve()), "source_manifest_hash": _sha256(manifest_path), "annotation": str(annotation.resolve()), "annotation_hash": _sha256(annotation), "prediction_hash": object_hash(output_rows), "record_count": len(output_rows), "video_count": len(shards), "total_video_count": len(all_shards), "shard_index": None if shard_index is None else int(shard_index), "shard_count": int(shard_count), "diagnostics": {"videos": diagnostics, "aggregate": {key: int(sum(item[key] for item in diagnostics)) for key in ("candidate_pairs", "scorer_calls", "finite_scores", "changed_observation_ids", "accepted", "rejected")}}}
+    meta = {"schema_version": 8, "artifact": "psmr_native_prediction", "scheme": scheme, "use_reliability": use_reliability, "reliability_multiplier": reliability_multiplier, "checkpoint": None if checkpoint is None else str(checkpoint.resolve()), "source_frontend": str(frontend_prediction.resolve()), "source_frontend_hash": _sha256(frontend_prediction), "source_manifest": str(manifest_path.resolve()), "source_manifest_hash": _sha256(manifest_path), "annotation": str(annotation.resolve()), "annotation_hash": _sha256(annotation), "prediction_hash": object_hash(output_rows), "record_count": len(output_rows), "video_count": len(shards), "total_video_count": len(all_shards), "shard_index": None if shard_index is None else int(shard_index), "shard_count": int(shard_count), "diagnostics": {"videos": diagnostics, "aggregate": {key: int(sum(item[key] for item in diagnostics)) for key in ("candidate_pairs", "scorer_calls", "finite_scores", "changed_observation_ids", "accepted", "rejected")}}}
     _write_json(run_root / "prediction.meta.json", meta)
     return {"status": "COMPLETED", "prediction": str(prediction), "metadata": str(run_root / "prediction.meta.json"), "prediction_hash": meta["prediction_hash"], "diagnostics": meta["diagnostics"]}
 

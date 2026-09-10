@@ -214,9 +214,15 @@ def build_memory_anchor(
             bank_features.append(np.asarray(feature, dtype=np.float32))
             bank_evidence.append(np.asarray(evidence, dtype=np.float32))
             bank_rows.append(int(row))
-    bank_features = bank_features[-int(capacity):]
-    bank_evidence = bank_evidence[-int(capacity):]
-    bank_rows = bank_rows[-int(capacity):]
+    # The bank is chronological after causal deduplication.  Retain the
+    # most recent anchors and slice all three synchronized arrays together;
+    # ``[:capacity]`` would silently keep the oldest observations.
+    retain = max(0, int(capacity))
+    if retain == 0:
+        raise ValueError("memory capacity must be positive")
+    bank_features = bank_features[-retain:]
+    bank_evidence = bank_evidence[-retain:]
+    bank_rows = bank_rows[-retain:]
     return MemoryAnchor(
         fragment_id=str(fragment_id), root_id=int(root_id), video_id=int(video_id),
         first_frame=int(local_frames[0]), last_frame=int(local_frames[-1]),
