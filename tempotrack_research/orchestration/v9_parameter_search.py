@@ -826,7 +826,7 @@ def _load_calibrator(checkpoint: str | Path | None):
     return model, beta
 
 
-def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray], rows: Sequence[Mapping[str, Any]] | None, config: Mapping[str, Any], checkpoint: str | Path | None, calibrator: Any | None = None, calibrator_beta: float = 0.0, row_arrays: Mapping[str, np.ndarray] | None = None) -> np.ndarray:
+def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray], rows: Sequence[Mapping[str, Any]] | None, config: Mapping[str, Any], checkpoint: str | Path | None, calibrator: Any | None = None, calibrator_beta: float = 0.0, row_arrays: Mapping[str, np.ndarray] | None = None, reliability_values: np.ndarray | None = None) -> np.ndarray:
     import torch
     cosine = np.asarray(arrays["cosine"], dtype=np.float32)
     evidence = np.asarray(arrays["evidence"], dtype=np.float32)
@@ -835,10 +835,10 @@ def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.nda
     candidate_top_k = int(config.get("candidate_top_k", 64))
     memory_capacity = int(config.get("memory_capacity", 64))
     multiplier = float(config.get("reliability_multiplier", 0.0))
-    reliability = None
+    reliability = None if reliability_values is None else np.asarray(reliability_values, dtype=np.float32)
     if calibrator is None and checkpoint is not None:
         calibrator, calibrator_beta = _load_calibrator(checkpoint)
-    if calibrator is not None and multiplier > 0:
+    if reliability is None and calibrator is not None and multiplier > 0:
         # The calibrator is deliberately evaluated once per structural sweep,
         # not once per event row.  CPU batches keep the exact trained model
         # semantics while avoiding a Python call for every candidate.
@@ -1100,8 +1100,26 @@ def sweep_psmr(
     prepared_rows = _prepare_row_arrays(arrays)
     prepared_groups = _prepare_group_arrays(arrays)
     calibrators: dict[str, tuple[Any | None, float]] = {}
+    reliability_by_checkpoint: dict[str, np.ndarray | None] = {}
+    score_cache_hits = 0
+    score_cache_misses = 0
     for checkpoint_step, checkpoint_path in checkpoint_variants:
         calibrators[checkpoint_step] = (None, 0.0) if checkpoint_path is None else _load_calibrator(checkpoint_path)
+        calibrator, _ = calibrators[checkpoint_step]
+        if calibrator is None:
+            reliability_by_checkpoint[checkpoint_step] = None
+        else:
+            # Reliability is a property of the immutable event evidence and
+            # checkpoint, not of threshold/candidate/memory structural
+            # settings.  Evaluate it once per checkpoint and reuse it for
+            # every exact structural configuration below.
+            import torch
+            evidence = np.asarray(arrays["evidence"], dtype=np.float32)
+            with torch.no_grad():
+                reliability_by_checkpoint[checkpoint_step] = calibrator.reliability(
+                    torch.as_tensor(evidence.reshape(-1, 7), dtype=torch.float32)
+                ).reshape(evidence.shape[0], evidence.shape[1]).numpy()
+            del evidence
     evaluated_rows = 0
     output_path = Path(output).resolve(); output_path.parent.mkdir(parents=True, exist_ok=True)
     rows_jsonl = output_path.with_suffix(output_path.suffix + ".jsonl")
@@ -1112,6 +1130,8 @@ def sweep_psmr(
     structural_ordinal = 0
     for checkpoint_step, checkpoint_path in checkpoint_variants:
         calibrator, calibrator_beta = calibrators[checkpoint_step]
+        reliability_values = reliability_by_checkpoint[checkpoint_step]
+        score_cache: dict[tuple[int, int, int, float], np.ndarray] = {}
         for min_gap, max_gap, candidate_top_k, memory_capacity, top_r, batch, multiplier in structural_configs():
             if max_gap <= min_gap or candidate_top_k < 1 or memory_capacity < top_r:
                 continue
@@ -1122,7 +1142,24 @@ def sweep_psmr(
             if structural_limit is not None and evaluated_structural >= int(structural_limit):
                 break
             structural_config = {"min_dormant_gap": int(min_gap), "max_gap": int(max_gap), "candidate_top_k": int(candidate_top_k), "memory_capacity": int(memory_capacity), "top_r": int(top_r), "query_observations": int(batch), "reliability_multiplier": float(multiplier)}
-            scores = _event_score_arrays(metadata, arrays, None, structural_config, checkpoint_path, calibrator=calibrator, calibrator_beta=calibrator_beta, row_arrays=prepared_rows)
+            score_key = (int(batch), int(top_r), int(memory_capacity), float(multiplier))
+            scores = score_cache.get(score_key)
+            if scores is None:
+                score_cache_misses += 1
+                scores = _event_score_arrays(
+                    metadata,
+                    arrays,
+                    None,
+                    structural_config,
+                    None,
+                    calibrator=None,
+                    calibrator_beta=calibrator_beta,
+                    row_arrays=prepared_rows,
+                    reliability_values=reliability_values,
+                )
+                score_cache[score_key] = scores
+            else:
+                score_cache_hits += 1
             stats = _group_statistics(scores, None, prepared=prepared_groups)
             if not len(stats["best"]):
                 continue
@@ -1156,7 +1193,7 @@ def sweep_psmr(
                             if best is None or rank > best["_rank"]:
                                 best = {**item, "_rank": rank}
     rows_out.sort(key=lambda item: (float(item["selection_metrics"]["recall"]), float(item["selection_metrics"]["f1"]), float(item["selection_metrics"]["precision"])), reverse=True)
-    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_psmr_sweep", "protocol": protocol, "event_cache": str(Path(event_cache).resolve()), "event_cache_hash": _sha256(Path(event_cache) / "metadata.json" if Path(event_cache).is_dir() else Path(event_cache)), "search_space": str(Path(search_space).resolve()), "search_space_hash": _sha256(search_space), "checkpoint": None if checkpoint is None else str(Path(checkpoint).resolve()), "requested_checkpoint_steps": checkpoint_steps, "evaluated_checkpoint_steps": [step for step, _ in checkpoint_variants], "requested_reliability_multipliers": requested_multipliers, "evaluated_reliability_multipliers": multipliers, "untrained_multiplier_equivalence": not any(path is not None for _, path in checkpoint_variants), "candidate_top_k_independent": True, "memory_capacity_independent": True, "selection_metric": "Base-only internal gate at precision floor 0.95; FROZEN_DEV must use an externally selected config", "structural_shard_index": int(structural_shard_index), "structural_shard_count": int(structural_shard_count), "structural_configs_total": int(structural_ordinal), "evaluated_structural_configs": evaluated_structural, "evaluated_rows": evaluated_rows, "all_rows_jsonl": str(rows_jsonl), "all_rows_hash": _sha256(rows_jsonl), "best": None if best is None else {key: value for key, value in best.items() if key != "_rank"}, "top_rows": rows_out[:200]}
+    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_psmr_sweep", "protocol": protocol, "event_cache": str(Path(event_cache).resolve()), "event_cache_hash": _sha256(Path(event_cache) / "metadata.json" if Path(event_cache).is_dir() else Path(event_cache)), "search_space": str(Path(search_space).resolve()), "search_space_hash": _sha256(search_space), "checkpoint": None if checkpoint is None else str(Path(checkpoint).resolve()), "requested_checkpoint_steps": checkpoint_steps, "evaluated_checkpoint_steps": [step for step, _ in checkpoint_variants], "requested_reliability_multipliers": requested_multipliers, "evaluated_reliability_multipliers": multipliers, "untrained_multiplier_equivalence": not any(path is not None for _, path in checkpoint_variants), "candidate_top_k_independent": True, "memory_capacity_independent": True, "selection_metric": "Base-only internal gate at precision floor 0.95; FROZEN_DEV must use an externally selected config", "structural_shard_index": int(structural_shard_index), "structural_shard_count": int(structural_shard_count), "structural_configs_total": int(structural_ordinal), "evaluated_structural_configs": evaluated_structural, "evaluated_rows": evaluated_rows, "score_cache_hits": score_cache_hits, "score_cache_misses": score_cache_misses, "all_rows_jsonl": str(rows_jsonl), "all_rows_hash": _sha256(rows_jsonl), "best": None if best is None else {key: value for key, value in best.items() if key != "_rank"}, "top_rows": rows_out[:200]}
     _write_json(output_path, result)
     for index, item in enumerate(rows_out[:8], start=1):
         _write_json(output_path.with_name(f"{output_path.stem}_top_{index:02d}.json"), item)
