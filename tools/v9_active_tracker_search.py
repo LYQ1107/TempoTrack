@@ -509,7 +509,11 @@ def main() -> int:
         raise ValueError(f"active V9.1 selection requires split=test, got {args.selection_split!r}")
     if selection_protocol not in {"TEST_BASE_ADAPTED", "TEST_FULL_ORACLE"}:
         raise ValueError(f"active V9.1 selection requires a Test protocol, got {args.selection_protocol!r}")
-    images, _, _, _ = _image_index(annotation)
+    # The recorder stream is the full 128-video selection input.  Use that
+    # complete image index even when the equivalence annotation is the
+    # deterministic 10-video subset; ``equivalence_video_ids`` still limits
+    # the actual replay and comparison to the exactness screen.
+    images, _, _, _ = _image_index(selection_annotation)
     equivalence_video_ids = _subset_video_ids(annotation, 10)
     selection_video_ids = _subset_video_ids(selection_annotation, 128)
     if not args.equivalence_only and len(selection_video_ids) != 128:
@@ -518,7 +522,7 @@ def main() -> int:
         )
     components = _load_released_components(args.frontend, Path(args.model_config).resolve(), Path(args.model_checkpoint).resolve(), args.device)
     released = _configs(args.frontend)[0]
-    equivalence_metrics, equivalence_rows = _replay(args.frontend, calls_root, annotation, released, args.device, components, video_ids=equivalence_video_ids)
+    equivalence_metrics, equivalence_rows = _replay(args.frontend, calls_root, selection_annotation, released, args.device, components, video_ids=equivalence_video_ids)
     equivalence = _equivalence(equivalence_rows, Path(args.baseline_prediction).resolve(), images, equivalence_video_ids)
     _write = _write_json
     _write(output / "released_equivalence.json", {"frontend": args.frontend, "videos": sorted(equivalence_video_ids), "video_count": len(equivalence_video_ids), "metrics": equivalence_metrics, "equivalence": equivalence, "selection_annotation": str(selection_annotation), "selection_annotation_sha256": _sha256(selection_annotation), "selection_video_count": len(selection_video_ids), "cov_components": {"confused_features": bool(getattr(_tracker(args.frontend, released, components), "confused_features", False)) if args.frontend == "covtrack" else None, "fusion_head": components["fusion_head"] is not None if args.frontend == "covtrack" else None, "loss_cyc": components["loss_cyc"] is not None if args.frontend == "covtrack" else None}})
