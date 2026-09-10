@@ -477,6 +477,7 @@ def _native_prediction_records_from_frontend(
         "max_gap": int(selected.get("gap", 60)),
         "min_dormant_gap": int(selected.get("min_dormant_gap", 0)),
         "candidate_top_k": int(selected.get("candidate_top_k", 8)),
+        "memory_capacity": int(selected.get("memory_capacity", 64)),
         "reliability_multiplier": float(selected.get("reliability_multiplier", 1.0)),
     }
     if config_overrides:

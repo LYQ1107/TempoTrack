@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Replay exact external pre-filter tracker calls for V9 active-point search.
+"""V9.1 exact active operating-point replay.
 
-The detector/ROI model is run once with the opt-in pre-filter recorder.  This
-program then invokes the released tracker implementation for every operating
-point, so memo lifetime and matching threshold are not approximated by a
-post-filter cache replay.  It can also emit one selected, post-filter call
-stream for the regular V9 native-cache/PSMR pipeline.
+The detector/ROI recorder is run once.  This tool replays the released
+tracker implementation, including COVTrack's checkpoint-loaded fusion head,
+and selects only with merge-sensitive pairwise association F1.  Dominant-ID
+purity and transition rate remain diagnostics, never selection criteria.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ import pickle
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 import numpy as np
 import torch
@@ -91,201 +90,247 @@ def _iou_xyxy(left: np.ndarray, right: np.ndarray) -> float:
     return inter / max(area_l + area_r - inter, 1e-12)
 
 
-def _tracker(frontend: str, config: dict[str, Any]):
+def _configs(frontend: str) -> list[dict[str, Any]]:
+    if frontend == "vovtrack":
+        released = {"match_score_thr": 0.33, "memo_frames": 30, "momentum_embed": 0.4, "label": "released_reproduced"}
+        thresholds = (.28, .30, .32, .33, .35, .37, .40)
+        memos = (20, 30, 40, 50, 60)
+    else:
+        released = {"match_score_thr": 0.37, "memo_frames": 50, "momentum_embed": 0.4, "label": "released_reproduced"}
+        thresholds = (.30, .33, .35, .37, .39, .41, .45)
+        memos = (30, 40, 50, 60, 70, 90)
+    momenta = (.2, .3, .4, .5, .6)
+    values = [released]
+    for threshold in thresholds:
+        for memo in memos:
+            for momentum in momenta:
+                candidate = {"match_score_thr": float(threshold), "memo_frames": int(memo), "momentum_embed": float(momentum), "label": "v9_grid"}
+                if all(candidate[key] == released[key] for key in ("match_score_thr", "memo_frames", "momentum_embed")):
+                    continue
+                values.append(candidate)
+    return values
+
+
+def _load_released_components(frontend: str, config_path: Path, checkpoint_path: Path, device: str) -> dict[str, Any]:
+    """Load the released model once so COV replay uses fusion/loss modules."""
+    from mmcv import Config
+    from mmcv.runner import load_checkpoint
+    from ovtrack.models import build_model
+
+    cfg = Config.fromfile(str(config_path))
+    cfg.model.pretrained = None
+    if frontend == "covtrack":
+        cfg.model.tracker.confused_features = True
+        cfg.model.roi_head.feature_fusion_head.max_fusion_ratio = 2.0
+    model = build_model(cfg.model, train_cfg=None, test_cfg=None)
+    load_checkpoint(model, str(checkpoint_path), map_location="cpu")
+    model.eval().to(device)
+    tracker_cfg = dict(cfg.model.tracker)
+    tracker_cfg.pop("type", None)
+    roi_head = getattr(model, "roi_head", None)
+    fusion_head = getattr(roi_head, "fusion_head", None)
+    track_head = getattr(roi_head, "track_head", None)
+    loss_cyc = getattr(track_head, "loss_cyc", None)
+    if frontend == "covtrack" and (fusion_head is None or loss_cyc is None):
+        raise RuntimeError("COVTrack active replay requires checkpoint-loaded fusion_head and loss_cyc")
+    return {"model": model, "tracker_cfg": tracker_cfg, "fusion_head": fusion_head, "loss_cyc": loss_cyc}
+
+
+def _tracker(frontend: str, config: dict[str, Any], components: Mapping[str, Any]):
     if frontend == "vovtrack":
         from ovtrack.models.trackers.ovtracker import OVTracker
-        return OVTracker(
-            match_score_thr=float(config["match_score_thr"]),
-            memo_frames=int(config["memo_frames"]),
-            momentum_embed=float(config["momentum_embed"]),
-        )
+        tracker_cfg = dict(components["tracker_cfg"])
+        tracker_cfg.update({"match_score_thr": float(config["match_score_thr"]), "memo_frames": int(config["memo_frames"]), "momentum_embed": float(config["momentum_embed"])})
+        return OVTracker(**tracker_cfg)
     from ovtrack.models.trackers.ovtracker import OVTrackerUncertainty
-    return OVTrackerUncertainty(
-        match_score_thr=float(config["match_score_thr"]),
-        memo_frames=int(config["memo_frames"]),
-        momentum_embed=float(config["momentum_embed"]),
-        vis=False,
-    )
+    tracker_cfg = dict(components["tracker_cfg"])
+    tracker_cfg.update({"match_score_thr": float(config["match_score_thr"]), "memo_frames": int(config["memo_frames"]), "momentum_embed": float(config["momentum_embed"]), "confused_features": True, "vis": False})
+    tracker = OVTrackerUncertainty(**tracker_cfg)
+    tracker.set_fusion_head(components["fusion_head"], components["loss_cyc"])
+    if not bool(getattr(tracker, "confused_features", False)) or not hasattr(tracker, "fusion_head") or not hasattr(tracker, "loss_cyc"):
+        raise RuntimeError("COV active replay component gate failed")
+    return tracker
 
 
-def _filtered_indices(tracker: Any, bboxes: torch.Tensor, labels: torch.Tensor, embeds: torch.Tensor, cls_embeds: torch.Tensor) -> np.ndarray:
+def _row_key(box: np.ndarray, label: int, embed: np.ndarray) -> tuple[Any, ...]:
+    box_key = tuple(np.round(np.asarray(box, dtype=np.float32), 7).tolist())
+    embed_bytes = np.ascontiguousarray(np.asarray(embed, dtype=np.float32)).tobytes()
+    return box_key, int(label), hashlib.sha256(embed_bytes).hexdigest()
+
+
+def _filtered_indices(call: Mapping[str, Any], tracker: Any, bboxes: torch.Tensor, labels: torch.Tensor, embeds: torch.Tensor, cls_embeds: torch.Tensor) -> np.ndarray:
     filtered = tracker.remove_distractor(bboxes, labels, track_feats=embeds, cls_feats=cls_embeds, nms="inter")
-    filtered_embeds = filtered[2].detach().cpu().numpy()
+    filtered_bboxes, filtered_labels, filtered_embeds = filtered[:3]
+    explicit = call.get("post_filter_source_indices")
+    if explicit is None and call.get("source_indices") is not None:
+        candidate_indices = np.asarray(call["source_indices"], dtype=np.int64).reshape(-1)
+        if len(candidate_indices) == int(filtered_bboxes.shape[0]):
+            explicit = candidate_indices
+    if explicit is not None:
+        source_indices = np.asarray(explicit, dtype=np.int64).reshape(-1)
+        if len(source_indices) != int(filtered_bboxes.shape[0]):
+            raise RuntimeError("ACTIVE_REPLAY_SOURCE_INDEX_LENGTH_MISMATCH")
+        if len(np.unique(source_indices)) != len(source_indices) or np.any(source_indices < 0) or np.any(source_indices >= int(bboxes.shape[0])):
+            raise RuntimeError("ACTIVE_REPLAY_SOURCE_INDEX_INVALID")
+        raw_boxes = bboxes.detach().cpu().numpy(); raw_labels = labels.detach().cpu().numpy().astype(np.int64); raw_embeds = embeds.detach().cpu().numpy()
+        f_boxes = filtered_bboxes.detach().cpu().numpy(); f_labels = filtered_labels.detach().cpu().numpy().astype(np.int64); f_embeds = filtered_embeds.detach().cpu().numpy()
+        if all(_row_key(raw_boxes[int(source_indices[i])], int(raw_labels[int(source_indices[i])]), raw_embeds[int(source_indices[i])]) == _row_key(f_boxes[i], int(f_labels[i]), f_embeds[i]) for i in range(len(source_indices))):
+            return source_indices
+        if call.get("post_filter_source_indices") is not None:
+            raise RuntimeError("ACTIVE_REPLAY_SOURCE_INDEX_CONTENT_MISMATCH")
+    raw_boxes = bboxes.detach().cpu().numpy()
+    raw_labels = labels.detach().cpu().numpy().astype(np.int64)
     raw_embeds = embeds.detach().cpu().numpy()
-    used: set[int] = set()
+    key_to_indices: dict[tuple[Any, ...], list[int]] = defaultdict(list)
+    for index in range(len(raw_labels)):
+        key_to_indices[_row_key(raw_boxes[index], int(raw_labels[index]), raw_embeds[index])].append(index)
     selected: list[int] = []
-    for row in filtered_embeds:
-        candidates = np.flatnonzero(np.all(raw_embeds == row[None, :], axis=1))
-        candidates = [int(value) for value in candidates if int(value) not in used]
-        if not candidates:
-            raise RuntimeError("post-filter embedding cannot be mapped to pre-filter row")
+    used: set[int] = set()
+    f_boxes = filtered_bboxes.detach().cpu().numpy()
+    f_labels = filtered_labels.detach().cpu().numpy().astype(np.int64)
+    f_embeds = filtered_embeds.detach().cpu().numpy()
+    for index in range(len(f_labels)):
+        candidates = [value for value in key_to_indices.get(_row_key(f_boxes[index], int(f_labels[index]), f_embeds[index]), []) if value not in used]
+        if len(candidates) != 1:
+            raise RuntimeError("ACTIVE_REPLAY_NONUNIQUE_COMPOSITE_SOURCE_INDEX")
         selected.append(candidates[0]); used.add(candidates[0])
     return np.asarray(selected, dtype=np.int64)
 
 
-def _configs(frontend: str) -> list[dict[str, Any]]:
-    if frontend == "vovtrack":
-        thresholds = (.28, .30, .32, .33, .35, .37, .40)
-        memos = (20, 30, 40, 50, 60)
-    else:
-        thresholds = (.30, .33, .35, .37, .39, .41, .45)
-        memos = (30, 40, 50, 60, 70, 90)
-    momenta = (.2, .3, .4, .5, .6)
-    values = [{"match_score_thr": .5, "memo_frames": 10, "momentum_embed": .8, "label": "released"}]
-    values.extend(
-        {"match_score_thr": float(threshold), "memo_frames": int(memo), "momentum_embed": float(momentum), "label": "v9_grid"}
-        for threshold in thresholds for memo in memos for momentum in momenta
-    )
-    return values
+def _pair_tokens(video: int, values: Iterable[int]) -> list[int]:
+    return [hash((int(video), int(value))) & 0x7FFFFFFF for value in values]
 
 
 def _gt_metrics(rows: list[dict[str, Any]], by_image: dict[int, list[dict[str, Any]]], base_categories: set[int]) -> dict[str, Any]:
+    from tempotrack_research.analysis.association_proxy import pairwise_assoc_f1
+
     identities: dict[tuple[str, int], list[int]] = defaultdict(list)
     groups: dict[tuple[str, int], bool] = defaultdict(bool)
-    transitions = 0
-    observations = 0
-    previous: dict[int, int] = {}
+    base_gt: list[int] = []; base_pred: list[int] = []
+    novel_gt: list[int] = []; novel_pred: list[int] = []
+    transitions = 0; observations = 0; previous: dict[int, int] = {}
     for row in rows:
-        video = int(row["video_id"]); image = int(row["image_id"]); category = int(row["category_id"])
-        track_id = int(row["track_id"])
+        video = int(row["video_id"]); image = int(row["image_id"]); category = int(row["category_id"]); track_id = int(row["track_id"])
         if video in previous:
             transitions += int(previous[video] != track_id)
         previous[video] = track_id; observations += 1
-        box = np.asarray(row["bbox"], dtype=np.float32)
-        box = np.asarray([box[0], box[1], box[0] + box[2], box[1] + box[3]], dtype=np.float32)
+        box = np.asarray(row["bbox"], dtype=np.float32); box = np.asarray([box[0], box[1], box[0] + box[2], box[1] + box[3]], dtype=np.float32)
         matches = []
         for ann in by_image.get(image, []):
             if int(ann.get("category_id", -1)) != category:
                 continue
-            raw = ann.get("bbox", [0, 0, 0, 0])
-            gt_box = np.asarray([raw[0], raw[1], raw[0] + raw[2], raw[1] + raw[3]], dtype=np.float32)
+            raw = ann.get("bbox", [0, 0, 0, 0]); gt_box = np.asarray([raw[0], raw[1], raw[0] + raw[2], raw[1] + raw[3]], dtype=np.float32)
             matches.append((_iou_xyxy(box, gt_box), int(ann.get("track_id", -1))))
         if not matches:
             continue
         matches.sort(reverse=True)
         if matches[0][0] < .5 or matches[0][1] < 0:
             continue
-        gt_id = matches[0][1]
-        key = (str(video), gt_id)
-        identities[key].append(track_id)
-        groups[key] = bool(groups[key] or category in base_categories)
+        gt_id = matches[0][1]; key = (str(video), gt_id); identities[key].append(track_id); groups[key] = bool(groups[key] or category in base_categories)
+        if category in base_categories:
+            base_gt.append(hash((video, gt_id)) & 0x7FFFFFFF); base_pred.append(hash((video, track_id)) & 0x7FFFFFFF)
+        else:
+            novel_gt.append(hash((video, gt_id)) & 0x7FFFFFFF); novel_pred.append(hash((video, track_id)) & 0x7FFFFFFF)
     base_values: list[float] = []; novel_values: list[float] = []
     for key, ids in identities.items():
-        _, counts = np.unique(np.asarray(ids, dtype=np.int64), return_counts=True)
-        purity = float(counts.max() / max(len(ids), 1))
+        _, counts = np.unique(np.asarray(ids, dtype=np.int64), return_counts=True); purity = float(counts.max() / max(len(ids), 1))
         (base_values if groups[key] else novel_values).append(purity)
-    return {
-        "base_assoc_proxy": float(np.mean(base_values)) if base_values else None,
-        "novel_assoc_proxy": float(np.mean(novel_values)) if novel_values else None,
-        "base_identity_count": len(base_values), "novel_identity_count": len(novel_values),
-        "observations": observations, "track_transitions": transitions,
-        "transition_rate": float(transitions / max(observations - len(previous), 1)),
-    }
+    base_pair = pairwise_assoc_f1(base_gt, base_pred); novel_pair = pairwise_assoc_f1(novel_gt, novel_pred)
+    return {"base_assoc_proxy": float(np.mean(base_values)) if base_values else None, "novel_assoc_proxy": float(np.mean(novel_values)) if novel_values else None, "base_identity_count": len(base_values), "novel_identity_count": len(novel_values), "base_pair_precision": base_pair["pair_precision"], "base_pair_recall": base_pair["pair_recall"], "base_pair_f1": base_pair["pair_f1"], "novel_pair_precision": novel_pair["pair_precision"], "novel_pair_recall": novel_pair["pair_recall"], "novel_pair_f1": novel_pair["pair_f1"], "observations": observations, "track_transitions": transitions, "transition_rate": float(transitions / max(observations - len(previous), 1))}
 
 
-def _replay(frontend: str, calls_root: Path, annotation: Path, config: dict[str, Any], device: str, materialize_path: Path | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _replay(frontend: str, calls_root: Path, annotation: Path, config: dict[str, Any], device: str, components: Mapping[str, Any], materialize_path: Path | None = None, video_ids: set[int] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     images, by_image, category_ids, base_categories = _image_index(annotation)
-    tracker = _tracker(frontend, config)
-    rows: list[dict[str, Any]] = []
-    selected_stream = None
+    tracker = _tracker(frontend, config, components)
+    rows: list[dict[str, Any]] = []; selected_stream = None
     if materialize_path is not None:
-        materialize_path.parent.mkdir(parents=True, exist_ok=True)
-        selected_stream = materialize_path.open("wb")
+        materialize_path.parent.mkdir(parents=True, exist_ok=True); selected_stream = materialize_path.open("wb")
     current_video: int | None = None
     try:
         for call in _calls(calls_root):
-            image = _image_for(str(call.get("filename", "")), images)
-            video_id = int(image["video_id"])
+            image = _image_for(str(call.get("filename", "")), images); video_id = int(image["video_id"])
+            if video_ids is not None and video_id not in video_ids:
+                continue
             if current_video != video_id:
                 tracker.reset(); current_video = video_id
-            bboxes = torch.as_tensor(np.asarray(call["bboxes"], dtype=np.float32), device=device)
-            labels = torch.as_tensor(np.asarray(call["labels"], dtype=np.int64), device=device)
-            embeds = torch.as_tensor(np.asarray(call["embeds"], dtype=np.float32), device=device)
-            cls_raw = call.get("cls_embeds")
-            cls_embeds = embeds if cls_raw is None else torch.as_tensor(np.asarray(cls_raw, dtype=np.float32), device=device)
-            source_indices = _filtered_indices(tracker, bboxes, labels, embeds, cls_embeds)
-            filtered_bboxes, filtered_labels, ids = tracker.match(
-                bboxes=bboxes, labels=labels, embeds=embeds, cls_embeds=cls_embeds,
-                frame_id=int(call.get("frame_id", image.get("frame_id", 0))), method="ovtrack-teta",
-                filename=str(call.get("filename", "")),
-            )
+            bboxes = torch.as_tensor(np.asarray(call["bboxes"], dtype=np.float32), device=device); labels = torch.as_tensor(np.asarray(call["labels"], dtype=np.int64), device=device); embeds = torch.as_tensor(np.asarray(call["embeds"], dtype=np.float32), device=device)
+            cls_raw = call.get("cls_embeds"); cls_embeds = embeds if cls_raw is None else torch.as_tensor(np.asarray(cls_raw, dtype=np.float32), device=device)
+            source_indices = _filtered_indices(call, tracker, bboxes, labels, embeds, cls_embeds)
+            filtered_bboxes, filtered_labels, ids = tracker.match(bboxes=bboxes, labels=labels, embeds=embeds, cls_embeds=cls_embeds, frame_id=int(call.get("frame_id", image.get("frame_id", 0))), method="ovtrack-teta", filename=str(call.get("filename", "")))
             ids_np = ids.detach().cpu().numpy().astype(np.int64).reshape(-1)
             if len(ids_np) != len(source_indices):
                 raise RuntimeError(f"tracker output/filter mismatch at image={image['id']}: {len(ids_np)} != {len(source_indices)}")
-            raw_boxes = np.asarray(call["bboxes"], dtype=np.float32)
-            raw_labels = np.asarray(call["labels"], dtype=np.int64).reshape(-1)
-            raw_embeds = np.asarray(call["embeds"], dtype=np.float32)
-            selected_boxes = raw_boxes[source_indices]
-            selected_labels = raw_labels[source_indices]
-            selected_embeds = raw_embeds[source_indices]
-            selected = dict(call)
-            selected["bboxes"] = selected_boxes
-            selected["labels"] = selected_labels
-            selected["embeds"] = selected_embeds
+            raw_boxes = np.asarray(call["bboxes"], dtype=np.float32); raw_labels = np.asarray(call["labels"], dtype=np.int64).reshape(-1); raw_embeds = np.asarray(call["embeds"], dtype=np.float32)
+            selected_boxes = raw_boxes[source_indices]; selected_labels = raw_labels[source_indices]; selected_embeds = raw_embeds[source_indices]
+            selected = dict(call); selected["bboxes"] = selected_boxes; selected["labels"] = selected_labels; selected["embeds"] = selected_embeds; selected["track_ids"] = ids_np; selected["source_indices"] = source_indices
             if call.get("cls_embeds") is not None:
                 selected["cls_embeds"] = np.asarray(call["cls_embeds"], dtype=np.float32)[source_indices]
-            selected["track_ids"] = ids_np
-            selected["source_indices"] = np.arange(len(source_indices), dtype=np.int64)
             if selected_stream is not None:
                 pickle.dump(selected, selected_stream, protocol=pickle.HIGHEST_PROTOCOL)
             for index, track_id in enumerate(ids_np):
-                box = selected_boxes[index]
-                label = int(selected_labels[index])
-                rows.append({
-                    "video_id": video_id, "image_id": int(image["id"]), "frame_id": int(image.get("frame_id", call.get("frame_id", 0))),
-                    "bbox": [float(box[0]), float(box[1]), float(box[2] - box[0]), float(box[3] - box[1])],
-                    "score": float(box[4]), "category_id": int(category_ids[label]), "track_id": int(track_id),
-                })
+                box = selected_boxes[index]; label = int(selected_labels[index])
+                rows.append({"video_id": video_id, "image_id": int(image["id"]), "frame_id": int(image.get("frame_id", call.get("frame_id", 0))), "bbox": [float(box[0]), float(box[1]), float(box[2] - box[0]), float(box[3] - box[1])], "score": float(box[4]), "category_id": int(category_ids[label]), "track_id": int(track_id)})
     finally:
         if selected_stream is not None:
             selected_stream.close()
-    metrics = _gt_metrics(rows, by_image, base_categories)
-    return metrics, rows
+    return _gt_metrics(rows, by_image, base_categories), rows
+
+
+def _subset_video_ids(annotation: Path, limit: int) -> set[int]:
+    data = json.loads(annotation.read_text(encoding="utf-8")); values = sorted({int(item["video_id"]) for item in data.get("images", [])}, key=lambda value: hashlib.sha256(str(value).encode()).hexdigest())
+    return set(values[:int(limit)])
+
+
+def _equivalence(replay_rows: list[dict[str, Any]], baseline_path: Path, images: dict[str, dict[str, Any]], video_ids: set[int]) -> dict[str, Any]:
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8")); baseline = baseline.get("data", baseline) if isinstance(baseline, dict) else baseline
+    image_video = {int(value["id"]): int(value["video_id"]) for value in images.values() if "id" in value and "video_id" in value}
+    expected = [row for row in baseline if int(image_video.get(int(row.get("image_id", -1)), -1)) in video_ids] if isinstance(baseline, list) else []
+    def key(row: Mapping[str, Any]) -> tuple[Any, ...]:
+        box = row.get("bbox", [0, 0, 0, 0]); return int(row.get("image_id", -1)), int(row.get("category_id", -1)), tuple(float(value) for value in box), float(row.get("score", 0.0)), int(row.get("track_id", -1))
+    actual_sorted = sorted(replay_rows, key=key); expected_sorted = sorted(expected, key=key)
+    if len(actual_sorted) != len(expected_sorted):
+        raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL row_count {len(actual_sorted)} != {len(expected_sorted)}")
+    for actual, expected_row in zip(actual_sorted, expected_sorted):
+        for field in ("image_id", "category_id", "bbox", "score", "track_id"):
+            if field == "bbox":
+                if list(actual[field]) != list(expected_row[field]):
+                    raise RuntimeError("ACTIVE_REPLAY_EQUIVALENCE_FAIL bbox mismatch")
+            elif actual[field] != expected_row[field]:
+                raise RuntimeError(f"ACTIVE_REPLAY_EQUIVALENCE_FAIL {field} mismatch")
+    return {"status": "PASS", "row_count": len(actual_sorted), "bbox_exact": True, "score_exact": True, "category_exact": True, "track_id_mismatch_count": 0}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--frontend", choices=("vovtrack", "covtrack"), required=True)
-    parser.add_argument("--calls-root", required=True)
-    parser.add_argument("--annotation", required=True)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--external-root", required=True)
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--materialize-best", action="store_true")
+    parser.add_argument("--calls-root", required=True); parser.add_argument("--annotation", required=True); parser.add_argument("--output", required=True); parser.add_argument("--external-root", required=True); parser.add_argument("--model-config", required=True); parser.add_argument("--model-checkpoint", required=True); parser.add_argument("--baseline-prediction", required=True); parser.add_argument("--device", default="cpu"); parser.add_argument("--materialize-best", action="store_true")
     args = parser.parse_args()
-    external_root = Path(args.external_root).resolve()
-    sys.path.insert(0, str(external_root))
-    calls_root = Path(args.calls_root).resolve(); annotation = Path(args.annotation).resolve(); output = Path(args.output).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    configs = _configs(args.frontend)
-    result_rows: list[dict[str, Any]] = []
-    best = None
-    for index, config in enumerate(configs):
-        metrics, _ = _replay(args.frontend, calls_root, annotation, config, args.device)
-        row = {"config_index": int(index), "config": config, **metrics, "production_entrypoint": "released external OVTracker.match", "input_calls": str(calls_root)}
-        result_rows.append(row)
-        score = (float(metrics["base_assoc_proxy"] if metrics["base_assoc_proxy"] is not None else -1.0), -float(metrics["transition_rate"]))
+    external_root = Path(args.external_root).resolve(); sys.path.insert(0, str(external_root)); calls_root = Path(args.calls_root).resolve(); annotation = Path(args.annotation).resolve(); output = Path(args.output).resolve(); output.mkdir(parents=True, exist_ok=True)
+    images, _, _, _ = _image_index(annotation); video_ids = _subset_video_ids(annotation, 10)
+    components = _load_released_components(args.frontend, Path(args.model_config).resolve(), Path(args.model_checkpoint).resolve(), args.device)
+    released = _configs(args.frontend)[0]
+    equivalence_metrics, equivalence_rows = _replay(args.frontend, calls_root, annotation, released, args.device, components, video_ids=video_ids)
+    equivalence = _equivalence(equivalence_rows, Path(args.baseline_prediction).resolve(), images, video_ids)
+    _write = lambda path, value: path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write(output / "released_equivalence.json", {"frontend": args.frontend, "videos": sorted(video_ids), "metrics": equivalence_metrics, "equivalence": equivalence, "cov_components": {"confused_features": bool(getattr(_tracker(args.frontend, released, components), "confused_features", False)) if args.frontend == "covtrack" else None, "fusion_head": components["fusion_head"] is not None if args.frontend == "covtrack" else None, "loss_cyc": components["loss_cyc"] is not None if args.frontend == "covtrack" else None}})
+    result_rows: list[dict[str, Any]] = []; best = None
+    for index, config in enumerate(_configs(args.frontend)):
+        metrics, _ = _replay(args.frontend, calls_root, annotation, config, args.device, components)
+        row = {"config_index": int(index), "config": config, **metrics, "production_entrypoint": "released external OVTracker.match", "input_calls": str(calls_root), "selection_metric": "base_pair_f1"}; result_rows.append(row)
+        score = (float(metrics["base_pair_f1"]), float(metrics["base_pair_precision"]), -int(index))
         if best is None or score > best["_score"]:
             best = {**row, "_score": score}
         print(json.dumps({"config_index": index, **config, **metrics}, ensure_ascii=False), flush=True)
     selected = None
     if best is not None:
+        top12 = sorted(result_rows, key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))[:12]
         selected = {key: value for key, value in best.items() if key != "_score"}
-        (output / "selected.json").write_text(json.dumps(selected, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _write(output / "selected.json", selected)
+        _write(output / "top12_pairwise.json", {"selection_metric": "base_pair_f1", "rows": top12, "official_subset_assocA_required": True})
         if args.materialize_best:
-            selected_calls = output / "selected_calls" / "match_calls_0.pkl"
-            material_metrics, material_rows = _replay(args.frontend, calls_root, annotation, dict(selected["config"]), args.device, selected_calls)
-            (output / "selected_prediction.json").write_text(json.dumps(material_rows, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
-            selected["materialized"] = {"calls": str(selected_calls), "prediction": str(output / "selected_prediction.json"), **material_metrics}
-    result = {
-        "schema_version": 9, "artifact": "v9_active_tracker_operating_point_sweep", "frontend": args.frontend,
-        "calls_root": str(calls_root), "annotation": str(annotation), "annotation_sha256": _sha256(annotation),
-        "configs": len(result_rows), "selection": "Base association proxy, then transition rate; no Novel selection",
-        "deterministic_subset": "sha256(video_id) first 128", "rows": result_rows, "best_baseline": selected,
-    }
-    (output / "active_sweep.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"status": "COMPLETED", "output": str(output / 'active_sweep.json'), "best": selected}, ensure_ascii=False, indent=2))
-    return 0
+            selected_calls = output / "selected_calls" / "match_calls_0.pkl"; material_metrics, material_rows = _replay(args.frontend, calls_root, annotation, dict(selected["config"]), args.device, components, selected_calls); _write(output / "selected_prediction.json", material_rows); selected["materialized"] = {"calls": str(selected_calls), "prediction": str(output / "selected_prediction.json"), **material_metrics}
+    result = {"schema_version": 10, "artifact": "v9_1_active_tracker_operating_point_sweep", "frontend": args.frontend, "calls_root": str(calls_root), "annotation": str(annotation), "annotation_sha256": _sha256(annotation), "model_config": str(Path(args.model_config).resolve()), "model_checkpoint": str(Path(args.model_checkpoint).resolve()), "baseline_prediction": str(Path(args.baseline_prediction).resolve()), "equivalence": {"status": "PASS", "video_count": len(video_ids), **equivalence}, "configs": len(result_rows), "selection": "Base pairwise association F1 pre-screen; official subset Base AssocA must select Top12; Novel is diagnostic only", "deterministic_subset": "sha256(video_id) first 128", "rows": result_rows, "best_baseline": selected}
+    _write(output / "active_sweep.json", result); print(json.dumps({"status": "COMPLETED", "output": str(output / "active_sweep.json"), "best": selected}, ensure_ascii=False, indent=2)); return 0
 
 
 if __name__ == "__main__":

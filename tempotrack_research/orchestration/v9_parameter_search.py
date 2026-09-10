@@ -31,9 +31,28 @@ from .v8_crossbaseline import _external_videos
 
 
 V9_SCHEMA = 9
+V91_SCHEMA = 10
 GAP_BINS = ((0, 10, "0-10"), (10, 30, "10-30"), (30, 60, "30-60"),
             (60, 90, "60-90"), (90, 120, "90-120"), (120, 180, "120-180"),
             (180, 240, "180-240"), (240, 360, "240-360"))
+
+
+def _normalize_v91_protocol(value: str) -> str:
+    """Normalize the four V9.1 selection protocols at the API boundary."""
+    key = str(value).strip().upper().replace("-", "_")
+    aliases = {
+        "FROZEN": "FROZEN_DEV",
+        "FROZEN_DEV": "FROZEN_DEV",
+        "VAL_BASE_ADAPTED": "VAL_BASE_ADAPTED",
+        "TEST_BASE_ADAPTED": "TEST_BASE_ADAPTED",
+        "TEST_FULL_ORACLE": "TEST_FULL_ORACLE",
+    }
+    if key not in aliases:
+        raise ValueError(
+            "V9.1 protocol must be FROZEN_DEV, VAL_BASE_ADAPTED, "
+            "TEST_BASE_ADAPTED, or TEST_FULL_ORACLE"
+        )
+    return aliases[key]
 
 
 def _sha256(path: str | Path) -> str:
@@ -355,17 +374,33 @@ def _gap_bucket(gap: int) -> str:
     return f">{GAP_BINS[-1][1]}"
 
 
-def _rank_candidates(video: VideoData, target: Mapping[str, Any], legal: Sequence[Mapping[str, Any]], top_k: int) -> list[tuple[int, Mapping[str, Any]]]:
-    qrows = np.asarray(target["rows"][:1], dtype=np.int64)
-    q = video.features[qrows]
+def _rank_candidates(
+    video: VideoData,
+    target: Mapping[str, Any],
+    legal: Sequence[Mapping[str, Any]],
+    *,
+    query_count: int,
+) -> list[tuple[int, Mapping[str, Any]]]:
+    """Rank every legal candidate using the same B-query evidence as deploy.
+
+    The returned list is intentionally not truncated.  The cache builder
+    retains the union of each requested B-specific Top-K list, which makes
+    B1/B2/B4 candidate prefilters independently auditable.
+    """
+    count = min(max(1, int(query_count)), len(target["rows"]))
+    qrows = np.asarray(target["rows"][:count], dtype=np.int64)
+    q = np.asarray(video.features[qrows], dtype=np.float32)
     q = q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-6)
     scored = []
     for candidate in legal:
-        last = video.features[np.asarray(candidate["rows"][-1:], dtype=np.int64)]
+        last = np.asarray(
+            video.features[np.asarray(candidate["rows"][-1:], dtype=np.int64)],
+            dtype=np.float32,
+        )
         last = last / np.maximum(np.linalg.norm(last, axis=1, keepdims=True), 1e-6)
-        scored.append((float(np.mean(q @ last.T)), str(candidate["serial"]), candidate))
+        scored.append((float((q @ last.T).mean()), int(candidate["serial"]), candidate))
     scored.sort(key=lambda item: (-item[0], item[1]))
-    return [(rank, item[2]) for rank, item in enumerate(scored[:int(top_k)], start=1)]
+    return [(rank, item[2]) for rank, item in enumerate(scored, start=1)]
 
 
 def _make_event_rows(
@@ -377,17 +412,34 @@ def _make_event_rows(
     query_observations: Sequence[int],
     max_videos: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    qcounts = sorted({max(1, int(value)) for value in query_observations})
+    if not qcounts:
+        raise ValueError("query_observations must contain at least one positive count")
+    if int(candidate_k) < 1 or int(candidate_k) > 64:
+        raise ValueError("V9.1 event-cache candidate_k must be in [1, 64]")
     rows: list[dict[str, Any]] = []
+    def recall_template() -> dict[str, dict[str, int]]:
+        return {str(k): {"positive": 0, "recalled": 0} for k in (1, 8, 16, 32, 64)}
     audit: dict[str, Any] = {
         "min_gap": int(min_gap), "max_gap": int(max_gap), "candidate_k": int(candidate_k),
-        "query_observations": [int(value) for value in query_observations], "videos": 0,
+        "query_observations": qcounts, "b_specific_prefilter": True, "videos": 0,
         "fragments": 0, "eligible_targets": 0, "events_with_correct_identity": 0,
         "legal_pairs": 0, "known_pairs": 0, "positive_pairs": 0, "unknown_pairs": 0,
-        "excluded_by_min_gap": 0, "excluded_by_max_gap": 0, "recall": {str(k): {"positive": 0, "recalled": 0} for k in (1, 8, 16, 32, 64)},
+        "excluded_by_min_gap": 0, "excluded_by_max_gap": 0, "recall": recall_template(),
         "recall_by_group": {
             group: {str(k): {"positive": 0, "recalled": 0} for k in (1, 8, 16, 32, 64)}
             for group in ("base", "novel")
         },
+        "recall_by_query": {str(q): recall_template() for q in qcounts},
+        "recall_by_query_group": {
+            str(q): {
+                group: {str(k): {"positive": 0, "recalled": 0} for k in (1, 8, 16, 32, 64)}
+                for group in ("base", "novel")
+            }
+            for q in qcounts
+        },
+        "b1_rank_gt64_b2_rank_le64": 0,
+        "b1_rank_gt64_b4_rank_le64": 0,
         "correct_identity_events": 0,
         "correct_identity_in_legal_bank": 0,
         "correct_identity_excluded_by_min_gap": 0,
@@ -420,8 +472,30 @@ def _make_event_rows(
             if not legal:
                 continue
             audit["legal_pairs"] += len(legal)
-            ranked = _rank_candidates(video, target, legal, candidate_k)
-            positives = [item for rank, item in ranked if item.get("gt") is not None and item.get("gt") == target.get("gt")]
+            ranked_by_q = {
+                query_count: _rank_candidates(
+                    video, target, legal, query_count=query_count
+                )
+                for query_count in qcounts
+            }
+            rank_map_by_q = {
+                query_count: {
+                    int(candidate["serial"]): int(rank)
+                    for rank, candidate in ranked
+                }
+                for query_count, ranked in ranked_by_q.items()
+            }
+            retained_serials = set()
+            for ranked in ranked_by_q.values():
+                retained_serials.update(
+                    int(candidate["serial"])
+                    for _, candidate in ranked[:int(candidate_k)]
+                )
+            ranked_b1 = ranked_by_q.get(1, next(iter(ranked_by_q.values())))
+            positives = [
+                item for rank, item in ranked_b1[:int(candidate_k)]
+                if item.get("gt") is not None and item.get("gt") == target.get("gt")
+            ]
             full_positive = [item for item in legal if item.get("gt") is not None and item.get("gt") == target.get("gt")]
             group = "base" if bool(target["base"]) else "novel"
             past_same_identity = [
@@ -435,7 +509,7 @@ def _make_event_rows(
                 if full_positive:
                     audit["correct_identity_in_legal_bank"] += 1
                     audit["correct_identity_in_legal_bank_by_group"][group] += 1
-                    if not positives:
+                    if not any(int(item["serial"]) in retained_serials for item in full_positive):
                         audit["correct_identity_dropped_only_by_top_k"] += 1
                         audit["correct_identity_dropped_only_by_top_k_by_group"][group] += 1
                 else:
@@ -447,12 +521,43 @@ def _make_event_rows(
             if full_positive:
                 audit["events_with_correct_identity"] += 1
                 for k in (1, 8, 16, 32, 64):
-                    if any(item in [candidate for _, candidate in ranked[:k]] for item in full_positive):
-                        audit["recall"][str(k)]["recalled"] += 1
-                        audit["recall_by_group"][group][str(k)]["recalled"] += 1
                     audit["recall"][str(k)]["positive"] += 1
                     audit["recall_by_group"][group][str(k)]["positive"] += 1
-            for rank, candidate in ranked:
+                    for query_count in qcounts:
+                        query_ranks = rank_map_by_q[query_count]
+                        recalled = any(
+                            query_ranks.get(int(item["serial"]), 32767) <= k
+                            for item in full_positive
+                        )
+                        audit["recall_by_query"][str(query_count)][str(k)]["positive"] += 1
+                        audit["recall_by_query_group"][str(query_count)][group][str(k)]["positive"] += 1
+                        if recalled:
+                            audit["recall_by_query"][str(query_count)][str(k)]["recalled"] += 1
+                            audit["recall_by_query_group"][str(query_count)][group][str(k)]["recalled"] += 1
+                    if any(
+                        rank_map_by_q.get(1, {}).get(int(item["serial"]), 32767) <= k
+                        for item in full_positive
+                    ):
+                        audit["recall"][str(k)]["recalled"] += 1
+                        audit["recall_by_group"][group][str(k)]["recalled"] += 1
+                b1_positive_rank = min(
+                    (rank_map_by_q.get(1, {}).get(int(item["serial"]), 32767) for item in full_positive),
+                    default=32767,
+                )
+                b2_positive_rank = min(
+                    (rank_map_by_q.get(2, {}).get(int(item["serial"]), 32767) for item in full_positive),
+                    default=32767,
+                )
+                b4_positive_rank = min(
+                    (rank_map_by_q.get(4, {}).get(int(item["serial"]), 32767) for item in full_positive),
+                    default=32767,
+                )
+                audit["b1_rank_gt64_b2_rank_le64"] += int(b1_positive_rank > 64 and b2_positive_rank <= 64)
+                audit["b1_rank_gt64_b4_rank_le64"] += int(b1_positive_rank > 64 and b4_positive_rank <= 64)
+            for candidate in legal:
+                serial = int(candidate["serial"])
+                if serial not in retained_serials:
+                    continue
                 gap = int(target["first"]) - int(candidate["last"])
                 name = _gap_bucket(gap)
                 audit["gap_bins"].setdefault(name, {"legal": 0, "positive": 0, "recalled_at_64": 0})["legal"] += 1
@@ -463,15 +568,20 @@ def _make_event_rows(
                     audit["positive_pairs"] += label
                     if label:
                         audit["gap_bins"][name]["positive"] += 1
-                        if rank <= 64:
+                        if any(rank_map.get(serial, 32767) <= 64 for rank_map in rank_map_by_q.values()):
                             audit["gap_bins"][name]["recalled_at_64"] += 1
                 else:
                     audit["unknown_pairs"] += 1
                 rows.append({
                     "video_id": int(video.video_id), "target_serial": int(target["serial"]), "candidate_serial": int(candidate["serial"]),
                     "target_base": int(bool(target["base"])), "candidate_base": int(bool(candidate["base"])), "label": int(label),
-                    "gap": gap, "prefilter_rank": int(rank), "target_first": int(target["first"]), "candidate_last": int(candidate["last"]),
-                    "query_rows": [int(value) for value in target["rows"][:max(query_observations)]],
+                    "gap": gap,
+                    "prefilter_rank": int(rank_map_by_q.get(1, next(iter(rank_map_by_q.values()))).get(serial, 32767)),
+                    "prefilter_rank_b1": int(rank_map_by_q.get(1, {}).get(serial, 32767)),
+                    "prefilter_rank_b2": int(rank_map_by_q.get(2, {}).get(serial, 32767)),
+                    "prefilter_rank_b4": int(rank_map_by_q.get(4, {}).get(serial, 32767)),
+                    "target_first": int(target["first"]), "candidate_last": int(candidate["last"]),
+                    "query_rows": [int(value) for value in target["rows"][:max(qcounts)]],
                     "candidate_rows": [int(value) for value in candidate["rows"]],
                 })
     for item in audit["recall"].values():
@@ -479,6 +589,13 @@ def _make_event_rows(
     for group_values in audit["recall_by_group"].values():
         for item in group_values.values():
             item["value"] = float(item["recalled"] / max(item["positive"], 1))
+    for query_values in audit["recall_by_query"].values():
+        for item in query_values.values():
+            item["value"] = float(item["recalled"] / max(item["positive"], 1))
+    for query_groups in audit["recall_by_query_group"].values():
+        for group_values in query_groups.values():
+            for item in group_values.values():
+                item["value"] = float(item["recalled"] / max(item["positive"], 1))
     audit["status"] = "COMPLETED"
     return rows, audit
 
@@ -493,6 +610,12 @@ def _audit_markdown(frontend: str, split: str, audit: Mapping[str, Any], manifes
         values = audit.get("recall_by_group", {}).get(group, {})
         formatted = [f"{float(values.get(str(k), {}).get('value', 0.0)):.6f}" for k in (1, 8, 16, 32, 64)]
         lines.append("| " + group + " | " + " | ".join(formatted) + " |")
+    lines += ["", "## B-specific prefilter recall", "", "| query observations | Recall@1 | Recall@8 | Recall@16 | Recall@32 | Recall@64 |", "|---:|---:|---:|---:|---:|---:|"]
+    for query_count in sorted(audit.get("recall_by_query", {}), key=int):
+        values = audit["recall_by_query"][query_count]
+        formatted = [f"{float(values.get(str(k), {}).get('value', 0.0)):.6f}" for k in (1, 8, 16, 32, 64)]
+        lines.append("| " + query_count + " | " + " | ".join(formatted) + " |")
+    lines.append(f"- B1 rank >64 but B2 rank <=64: `{audit.get('b1_rank_gt64_b2_rank_le64', 0)}`; B1 rank >64 but B4 rank <=64: `{audit.get('b1_rank_gt64_b4_rank_le64', 0)}`")
     lines += ["", f"- correct identity events in past fragments: `{audit.get('correct_identity_events', 0)}`; legal under min/max gap: `{audit.get('correct_identity_in_legal_bank', 0)}`; excluded by min-gap: `{audit.get('correct_identity_excluded_by_min_gap', 0)}`; excluded by max-gap: `{audit.get('correct_identity_excluded_by_max_gap', 0)}`; dropped only by top-K: `{audit.get('correct_identity_dropped_only_by_top_k', 0)}`"]
     lines += ["", "| gap bin | legal candidates | positive | positive in top-64 |", "|---|---:|---:|---:|"]
     for _, _, name in GAP_BINS:
@@ -511,7 +634,7 @@ def audit_candidates(
     annotation_path = _require(annotation, "annotation")
     videos = _videos_from_cache(manifest_path, annotation_path, prediction_path, max_videos)
     _, audit = _make_event_rows(videos, min_gap=0, max_gap=int(max_gap), candidate_k=int(candidate_k), query_observations=query_observations)
-    result = {"schema_version": V9_SCHEMA, "artifact": "v9_candidate_recall_audit", "frontend": frontend, "split": split, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "frontend_prediction": str(prediction_path), "frontend_prediction_hash": _sha256(prediction_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), **audit}
+    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_candidate_recall_audit", "frontend": frontend, "split": split, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "frontend_prediction": str(prediction_path), "frontend_prediction_hash": _sha256(prediction_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), **audit}
     output_path = Path(output); output_path.mkdir(parents=True, exist_ok=True)
     _write_json(output_path / "candidate_recall.json", result)
     _write_text(output_path / f"CANDIDATE_RECALL_{frontend.upper()}.md", _audit_markdown(frontend, split, result, manifest_path, annotation_path))
@@ -536,14 +659,35 @@ def build_event_cache(
     top_r: Sequence[int], output: str | Path, device: str = "cpu", max_videos: int | None = None,
 ) -> dict[str, Any]:
     del checkpoint, device  # checkpoint is consumed by sweep without rebuilding this cache.
+    if int(candidate_k) != 64:
+        raise ValueError("V9.1 event cache must retain the B-specific Top64 union")
     manifest_path = _require(manifest, "native manifest")
     prediction_path = _require(frontend_prediction, "frontend prediction")
     annotation_path = _require(annotation, "annotation")
     videos = _videos_from_cache(manifest_path, annotation_path, prediction_path, max_videos)
-    event_rows, audit = _make_event_rows(videos, min_gap=int(min_gap), max_gap=int(max_gap), candidate_k=int(candidate_k), query_observations=query_observations)
-    cosines: list[np.ndarray] = []; evidences: list[np.ndarray] = []; mem_lengths: list[int] = []
-    max_q = max(int(value) for value in query_observations)
-    for item in event_rows:
+    qcounts = sorted({max(1, int(value)) for value in query_observations})
+    event_rows, audit = _make_event_rows(videos, min_gap=int(min_gap), max_gap=int(max_gap), candidate_k=64, query_observations=qcounts)
+    output_path = Path(output).resolve(); output_path.mkdir(parents=True, exist_ok=True)
+    count = len(event_rows)
+    max_q = max(qcounts)
+    array_specs = {
+        "cosine": ((count, max_q, 64), np.float32),
+        "evidence": ((count, 64, 7), np.float32),
+        "mem_len": ((count,), np.int16),
+        "gap": ((count,), np.int16),
+        "group_id": ((count,), np.int64),
+        "label": ((count,), np.int8),
+        "target_base": ((count,), np.bool_),
+        "prefilter_rank_b1": ((count,), np.int32),
+        "prefilter_rank_b2": ((count,), np.int32),
+        "prefilter_rank_b4": ((count,), np.int32),
+    }
+    maps = {
+        name: np.lib.format.open_memmap(output_path / f"{name}.npy", mode="w+", dtype=dtype, shape=shape)
+        for name, (shape, dtype) in array_specs.items()
+    }
+    group_ids: dict[tuple[int, int], int] = {}
+    for index, item in enumerate(event_rows):
         video = videos[int(item["video_id"])]
         qrows = np.asarray(item["query_rows"][:max_q], dtype=np.int64)
         crows = np.asarray(item["candidate_rows"], dtype=np.int64)
@@ -558,45 +702,96 @@ def build_event_cache(
         cosine = q @ m.T
         padded_cosine = np.zeros((max_q, 64), dtype=np.float32); padded_cosine[:len(cosine), :len(m)] = cosine
         padded_evidence = np.zeros((64, 7), dtype=np.float32); padded_evidence[:len(anchor.evidence)] = anchor.evidence
-        cosines.append(padded_cosine); evidences.append(padded_evidence); mem_lengths.append(len(m))
+        maps["cosine"][index] = padded_cosine
+        maps["evidence"][index] = padded_evidence
+        maps["mem_len"][index] = len(m)
+        maps["gap"][index] = int(item["gap"])
+        group_key = (int(item["video_id"]), int(item["target_serial"]))
+        group_ids.setdefault(group_key, len(group_ids))
+        maps["group_id"][index] = group_ids[group_key]
+        maps["label"][index] = int(item["label"])
+        maps["target_base"][index] = bool(item["target_base"])
+        maps["prefilter_rank_b1"][index] = int(item["prefilter_rank_b1"])
+        maps["prefilter_rank_b2"][index] = int(item["prefilter_rank_b2"])
+        maps["prefilter_rank_b4"][index] = int(item["prefilter_rank_b4"])
         item["raw_support"] = {}
         for qcount in sorted(set(int(value) for value in query_observations)):
             for rank in sorted(set(int(value) for value in top_r)):
                 item["raw_support"][f"B{qcount}_r{rank}"] = _formal_support(padded_cosine, padded_evidence, len(m), query_count=qcount, top_r=rank)
-    output_path = Path(output).resolve(); output_path.mkdir(parents=True, exist_ok=True)
-    npz_path = output_path / "events.npz"
-    np.savez_compressed(npz_path, cosine=np.asarray(cosines, dtype=np.float32), evidence=np.asarray(evidences, dtype=np.float32), mem_len=np.asarray(mem_lengths, dtype=np.int16))
+    for value in maps.values():
+        value.flush()
+    del maps
     rows_path = output_path / "events.jsonl"
     with rows_path.open("w", encoding="utf-8") as handle:
         for item in event_rows:
             handle.write(json.dumps(item, ensure_ascii=False) + "\n")
-    metadata = {"schema_version": V9_SCHEMA, "artifact": "v9_psmr_event_cache", "frontend": frontend, "split": split, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "frontend_prediction": str(prediction_path), "frontend_prediction_hash": _sha256(prediction_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "min_gap": int(min_gap), "max_gap": int(max_gap), "candidate_k": int(candidate_k), "query_observations": [int(value) for value in query_observations], "top_r": [int(value) for value in top_r], "events": len(event_rows), "arrays": str(npz_path), "arrays_hash": _sha256(npz_path), "rows_path": str(rows_path), "rows_hash": _sha256(rows_path), "audit": audit}
+    array_paths = {name: str((output_path / f"{name}.npy").resolve()) for name in array_specs}
+    array_hashes = {name: _sha256(path) for name, path in array_paths.items()}
+    metadata = {
+        "schema_version": V91_SCHEMA,
+        "artifact": "v9_1_psmr_event_cache",
+        "frontend": frontend,
+        "split": split,
+        "manifest": str(manifest_path),
+        "manifest_hash": _sha256(manifest_path),
+        "frontend_prediction": str(prediction_path),
+        "frontend_prediction_hash": _sha256(prediction_path),
+        "annotation": str(annotation_path),
+        "annotation_hash": _sha256(annotation_path),
+        "min_gap": int(min_gap),
+        "max_gap": int(max_gap),
+        "candidate_top_k": 64,
+        "memory_capacity": 64,
+        "query_observations": qcounts,
+        "top_r": [int(value) for value in top_r],
+        "events": count,
+        "b_specific_prefilter": True,
+        "candidate_top_k_independent": True,
+        "memory_capacity_independent": True,
+        "storage": "npy_memmap",
+        "arrays": array_paths,
+        "array_hashes": array_hashes,
+        "arrays_hash": object_hash(array_hashes),
+        "rows_path": str(rows_path),
+        "rows_hash": _sha256(rows_path),
+        "audit": audit,
+    }
     _write_json(output_path / "metadata.json", metadata)
     _write_json(output_path / "event_cache.json", {key: value for key, value in metadata.items() if key != "rows"})
-    return {"status": "COMPLETED", "output": str(output_path), "metadata": str(output_path / "metadata.json"), "events": len(event_rows), "arrays": str(npz_path), "arrays_hash": _sha256(npz_path), "audit": audit}
+    return {"status": "COMPLETED", "output": str(output_path), "metadata": str(output_path / "metadata.json"), "events": count, "arrays": array_paths, "arrays_hash": metadata["arrays_hash"], "audit": audit}
 
 
-def _load_event_cache(path: str | Path) -> tuple[dict[str, Any], dict[str, np.ndarray], list[dict[str, Any]]]:
+def _load_event_cache(path: str | Path) -> tuple[dict[str, Any], dict[str, np.ndarray], None]:
     root = Path(path)
     if root.is_file() and root.name == "metadata.json":
         metadata_path = root
     else:
         metadata_path = root / "metadata.json"
     metadata = _json(metadata_path)
-    if metadata.get("artifact") != "v9_psmr_event_cache":
-        raise ValueError(f"not a V9 event cache: {metadata_path}")
-    arrays_path = Path(metadata["arrays"])
-    if not arrays_path.exists() or metadata.get("arrays_hash") != _sha256(arrays_path):
-        raise ValueError(f"event cache array hash mismatch: {arrays_path}")
+    if metadata.get("artifact") != "v9_1_psmr_event_cache" or int(metadata.get("schema_version", -1)) != V91_SCHEMA:
+        raise ValueError(f"legacy V9 event cache rejected for V9.1: {metadata_path}")
+    if metadata.get("storage") != "npy_memmap" or not metadata.get("b_specific_prefilter"):
+        raise ValueError(f"event cache is not a V9.1 mmap/B-specific cache: {metadata_path}")
+    array_paths = {str(key): Path(value) for key, value in dict(metadata.get("arrays", {})).items()}
+    array_hashes = dict(metadata.get("array_hashes", {}))
+    required = {"cosine", "evidence", "mem_len", "gap", "group_id", "label", "target_base", "prefilter_rank_b1", "prefilter_rank_b2", "prefilter_rank_b4"}
+    if not required.issubset(array_paths):
+        raise ValueError(f"V9.1 event cache missing arrays: {sorted(required - set(array_paths))}")
+    arrays: dict[str, np.ndarray] = {}
+    for name in required:
+        arrays_path = array_paths[name]
+        if not arrays_path.exists() or array_hashes.get(name) != _sha256(arrays_path):
+            raise ValueError(f"event cache array hash mismatch: {arrays_path}")
+        arrays[name] = np.load(arrays_path, mmap_mode="r", allow_pickle=False)
     rows_path = Path(metadata.get("rows_path", metadata_path.parent / "events.jsonl"))
     if not rows_path.exists():
         raise FileNotFoundError(f"event cache rows missing: {rows_path}")
-    rows = [json.loads(line) for line in rows_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    with np.load(arrays_path, allow_pickle=False) as value:
-        arrays = {key: np.asarray(value[key]) for key in value.files}
-    if len(rows) != len(arrays["mem_len"]):
-        raise ValueError(f"event cache row/array mismatch: {len(rows)} != {len(arrays['mem_len'])}")
-    return metadata, arrays, rows
+    event_count = int(arrays["mem_len"].shape[0])
+    if any(int(value.shape[0]) != event_count for value in arrays.values()):
+        raise ValueError("event cache mmap arrays have inconsistent event counts")
+    # events.jsonl is an audit stream only.  The sweep consumes mmap arrays and
+    # deliberately does not deserialize millions of Python dictionaries.
+    return metadata, arrays, None
 
 
 def _load_calibrator(checkpoint: str | Path | None):
@@ -613,12 +808,14 @@ def _load_calibrator(checkpoint: str | Path | None):
     return model, beta
 
 
-def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray], rows: Sequence[Mapping[str, Any]], config: Mapping[str, Any], checkpoint: str | Path | None, calibrator: Any | None = None, calibrator_beta: float = 0.0, row_arrays: Mapping[str, np.ndarray] | None = None) -> np.ndarray:
+def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray], rows: Sequence[Mapping[str, Any]] | None, config: Mapping[str, Any], checkpoint: str | Path | None, calibrator: Any | None = None, calibrator_beta: float = 0.0, row_arrays: Mapping[str, np.ndarray] | None = None) -> np.ndarray:
     import torch
     cosine = np.asarray(arrays["cosine"], dtype=np.float32)
     evidence = np.asarray(arrays["evidence"], dtype=np.float32)
     mem_len = np.asarray(arrays["mem_len"], dtype=np.int64)
-    qcount = int(config.get("query_observations", 1)); top_r = int(config.get("top_r", 1)); memory_k = int(config.get("memory_capacity", 64))
+    qcount = int(config.get("query_observations", 1)); top_r = int(config.get("top_r", 1))
+    candidate_top_k = int(config.get("candidate_top_k", 64))
+    memory_capacity = int(config.get("memory_capacity", 64))
     multiplier = float(config.get("reliability_multiplier", 0.0))
     reliability = None
     if calibrator is None and checkpoint is not None:
@@ -632,7 +829,7 @@ def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.nda
                 torch.as_tensor(evidence.reshape(-1, 7), dtype=torch.float32)
             ).reshape(evidence.shape[0], evidence.shape[1]).numpy()
     qcount = max(1, min(qcount, cosine.shape[1]))
-    width = min(memory_k, cosine.shape[2])
+    width = min(memory_capacity, cosine.shape[2])
     rank = max(1, min(top_r, width))
     values = np.asarray(cosine[:, :qcount, :width], dtype=np.float32).copy()
     valid_memory = np.arange(width, dtype=np.int64)[None, :] < np.minimum(mem_len, width)[:, None]
@@ -650,26 +847,49 @@ def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.nda
     denom = np.maximum(denom, 1.0)[:, None]
     support = (numer / denom).mean(axis=1).astype(np.float32)
     if row_arrays is None:
-        ranks = np.asarray([int(item["prefilter_rank"]) for item in rows], dtype=np.int64)
+        if rows is None:
+            raise ValueError("V9.1 scoring requires mmap row arrays")
+        rank_key = f"prefilter_rank_b{qcount}"
+        ranks = np.asarray([int(item[rank_key]) for item in rows], dtype=np.int64)
         gaps = np.asarray([int(item["gap"]) for item in rows], dtype=np.int64)
     else:
-        ranks = np.asarray(row_arrays["prefilter_rank"], dtype=np.int64)
+        rank_key = f"prefilter_rank_b{qcount}"
+        if rank_key not in row_arrays:
+            raise ValueError(f"V9.1 requires B-specific prefilter rank {rank_key}; legacy V9 event cache must be rebuilt")
+        ranks = np.asarray(row_arrays[rank_key], dtype=np.int64)
         gaps = np.asarray(row_arrays["gap"], dtype=np.int64)
-    legal = (ranks <= memory_k)
+    legal = (ranks <= candidate_top_k)
     legal &= gaps <= int(config.get("max_gap", metadata.get("max_gap", 360)))
     legal &= gaps >= int(config.get("min_dormant_gap", metadata.get("min_gap", 0)))
     return np.where(legal, support, -np.inf).astype(np.float32)
 
 
-def _prepare_row_arrays(rows: Sequence[Mapping[str, Any]]) -> dict[str, np.ndarray]:
+def _prepare_row_arrays(rows: Sequence[Mapping[str, Any]] | Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
+    if isinstance(rows, Mapping):
+        required = ("gap", "prefilter_rank_b1", "prefilter_rank_b2", "prefilter_rank_b4")
+        missing = [key for key in required if key not in rows]
+        if missing:
+            raise ValueError(f"V9.1 row arrays missing {missing}; legacy event cache is not accepted")
+        return {key: np.asarray(rows[key]) for key in required}
     return {
-        "prefilter_rank": np.fromiter((int(item["prefilter_rank"]) for item in rows), dtype=np.int64, count=len(rows)),
         "gap": np.fromiter((int(item["gap"]) for item in rows), dtype=np.int64, count=len(rows)),
+        "prefilter_rank_b1": np.fromiter((int(item["prefilter_rank_b1"]) for item in rows), dtype=np.int64, count=len(rows)),
+        "prefilter_rank_b2": np.fromiter((int(item["prefilter_rank_b2"]) for item in rows), dtype=np.int64, count=len(rows)),
+        "prefilter_rank_b4": np.fromiter((int(item["prefilter_rank_b4"]) for item in rows), dtype=np.int64, count=len(rows)),
     }
 
 
-def _prepare_group_arrays(rows: Sequence[Mapping[str, Any]]) -> dict[str, np.ndarray]:
+def _prepare_group_arrays(rows: Sequence[Mapping[str, Any]] | Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
     """Build the immutable event-group index once for a vectorized sweep."""
+    if isinstance(rows, Mapping):
+        required = ("group_id", "label", "target_base")
+        if any(key not in rows for key in required):
+            raise ValueError("V9.1 mmap event cache is missing group/label arrays")
+        return {
+            "group_id": np.asarray(rows["group_id"]),
+            "label": np.asarray(rows["label"]),
+            "base": np.asarray(rows["target_base"]),
+        }
     count = len(rows)
     keys = np.empty(count, dtype=[("video", "i8"), ("target", "i8")])
     keys["video"] = np.fromiter((int(item["video_id"]) for item in rows), dtype=np.int64, count=count)
@@ -792,6 +1012,7 @@ def sweep_psmr(
 ) -> dict[str, Any]:
     if int(structural_shard_count) < 1 or not 0 <= int(structural_shard_index) < int(structural_shard_count):
         raise ValueError("structural shard must satisfy 0 <= index < count and count >= 1")
+    protocol = _normalize_v91_protocol(protocol)
     metadata, arrays, rows = _load_event_cache(event_cache)
     config = load_yaml(search_space)
     search = dict(config.get("search", {}))
@@ -800,7 +1021,8 @@ def sweep_psmr(
     max_gaps = [int(value) for value in search.get(max_gap_key, [metadata.get("max_gap", 360)])]
     min_gap_key = "min_dormant_gap_cov" if frontend_name == "covtrack" else ("min_dormant_gap_vov" if frontend_name == "vovtrack" else "min_dormant_gap_masa")
     mins = [int(value) for value in search.get(min_gap_key, search.get("min_dormant_gap", [metadata.get("min_gap", 0)]))]
-    memories = [int(value) for value in search.get("candidate_top_k", search.get("memory_capacity", [8, 16, 32, 64]))]
+    candidate_ks = [int(value) for value in search.get("candidate_top_k", [8, 16, 32, 64])]
+    memory_caps = [int(value) for value in search.get("memory_capacity", [64])]
     top_rs = [int(value) for value in search.get("top_r", [1, 3, 5])]
     batches = [int(value) for value in search.get("query_observations", [1, 2, 4])]
     requested_multipliers = [float(value) for value in search.get("reliability_multiplier", [0, .1, .25, .5, .75, 1, 1.25])]
@@ -831,12 +1053,12 @@ def sweep_psmr(
     margins = [float(value) for value in search.get("score_margin", search.get("margin_threshold", [0, .005, .01, .02, .03, .05, .075, .1, .15]))]
     percentiles = [float(value) for value in search.get("score_percentiles", [30, 40, 50, 60, 70, 75, 80, 85, 90, 92.5, 95, 97.5, 99])]
     def structural_configs():
-        return itertools.product(mins, max_gaps, memories, top_rs, batches, multipliers)
+        return itertools.product(mins, max_gaps, candidate_ks, memory_caps, top_rs, batches, multipliers)
     rows_out: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
     evaluated_structural = 0
-    prepared_rows = _prepare_row_arrays(rows)
-    prepared_groups = _prepare_group_arrays(rows)
+    prepared_rows = _prepare_row_arrays(arrays)
+    prepared_groups = _prepare_group_arrays(arrays)
     calibrators: dict[str, tuple[Any | None, float]] = {}
     for checkpoint_step, checkpoint_path in checkpoint_variants:
         calibrators[checkpoint_step] = (None, 0.0) if checkpoint_path is None else _load_calibrator(checkpoint_path)
@@ -844,12 +1066,14 @@ def sweep_psmr(
     output_path = Path(output).resolve(); output_path.parent.mkdir(parents=True, exist_ok=True)
     rows_jsonl = output_path.with_suffix(output_path.suffix + ".jsonl")
     rows_jsonl.unlink(missing_ok=True)
-    frozen_test_invalid = protocol == "frozen" and str(metadata.get("split", "")).lower() == "test"
+    is_test_cache = str(metadata.get("split", "")).lower() == "test"
+    frozen_test_invalid = protocol == "FROZEN_DEV" and is_test_cache
+    frozen_dev_selection_invalid = protocol == "FROZEN_DEV"
     structural_ordinal = 0
     for checkpoint_step, checkpoint_path in checkpoint_variants:
         calibrator, calibrator_beta = calibrators[checkpoint_step]
-        for min_gap, max_gap, memory_capacity, top_r, batch, multiplier in structural_configs():
-            if max_gap <= min_gap or memory_capacity < top_r:
+        for min_gap, max_gap, candidate_top_k, memory_capacity, top_r, batch, multiplier in structural_configs():
+            if max_gap <= min_gap or candidate_top_k < 1 or memory_capacity < top_r:
                 continue
             ordinal = structural_ordinal
             structural_ordinal += 1
@@ -857,34 +1081,42 @@ def sweep_psmr(
                 continue
             if structural_limit is not None and evaluated_structural >= int(structural_limit):
                 break
-            structural_config = {"min_dormant_gap": min_gap, "max_gap": max_gap, "candidate_top_k": memory_capacity, "memory_capacity": memory_capacity, "top_r": top_r, "query_observations": batch, "reliability_multiplier": multiplier}
-            scores = _event_score_arrays(metadata, arrays, rows, structural_config, checkpoint_path, calibrator=calibrator, calibrator_beta=calibrator_beta, row_arrays=prepared_rows)
-            stats = _group_statistics(scores, rows, prepared=prepared_groups)
+            structural_config = {"min_dormant_gap": int(min_gap), "max_gap": int(max_gap), "candidate_top_k": int(candidate_top_k), "memory_capacity": int(memory_capacity), "top_r": int(top_r), "query_observations": int(batch), "reliability_multiplier": float(multiplier)}
+            scores = _event_score_arrays(metadata, arrays, None, structural_config, checkpoint_path, calibrator=calibrator, calibrator_beta=calibrator_beta, row_arrays=prepared_rows)
+            stats = _group_statistics(scores, None, prepared=prepared_groups)
             if not len(stats["best"]):
                 continue
             evaluated_structural += 1
             thresholds = _thresholds(scores, percentiles)
             # Frozen selection is valid only on the Base development stream;
             # a Test frozen sweep is recorded but cannot select from Test GT.
-            selected_base_only = protocol == "test-base-adapted" or (protocol == "frozen" and not frozen_test_invalid)
+            # FROZEN_DEV is a pre-selected development operating point and
+            # cannot select from this sweep's GT.  VAL/TEST_BASE_ADAPTED use
+            # Base GT only; TEST_FULL_ORACLE is diagnostic upper bound only.
+            selected_base_only = protocol in {"VAL_BASE_ADAPTED", "TEST_BASE_ADAPTED"}
             grids = _metric_grid(stats, thresholds, margins, selection_base_only=selected_base_only)
             with rows_jsonl.open("a", encoding="utf-8") as stream:
                 for threshold in thresholds:
                     for margin in margins:
                         selection, application = grids[(float(threshold), float(margin))]
-                        item = {"protocol": protocol, "frontend": metadata.get("frontend"), "split": metadata.get("split"), "config": {**structural_config, "threshold": threshold, "margin_threshold": margin, "checkpoint_step": checkpoint_step}, "selection_metrics": selection, "application_metrics": application, "checkpoint": None if checkpoint_path is None else str(checkpoint_path), "checkpoint_hash": None if checkpoint_path is None else _sha256(checkpoint_path), "selection_status": "INVALID_TEST_FROZEN_SELECTION" if frozen_test_invalid else "VALID"}
+                        invalid_status = None
+                        if frozen_dev_selection_invalid:
+                            invalid_status = "FROZEN_DEV_REQUIRES_PRESELECTED_CONFIG"
+                        elif frozen_test_invalid:
+                            invalid_status = "INVALID_TEST_FROZEN_SELECTION"
+                        item = {"protocol": protocol, "frontend": metadata.get("frontend"), "split": metadata.get("split"), "config": {**structural_config, "threshold": threshold, "margin_threshold": margin, "checkpoint_step": checkpoint_step}, "selection_metrics": selection, "application_metrics": application, "checkpoint": None if checkpoint_path is None else str(checkpoint_path), "checkpoint_hash": None if checkpoint_path is None else _sha256(checkpoint_path), "selection_status": invalid_status or "VALID"}
                         stream.write(json.dumps(item, ensure_ascii=False) + "\n")
                         evaluated_rows += 1
                         rows_out.append(item)
                         if len(rows_out) > 4000:
                             rows_out.sort(key=lambda value: (float(value["selection_metrics"]["recall"]), float(value["selection_metrics"]["f1"]), float(value["selection_metrics"]["precision"])), reverse=True)
                             del rows_out[2000:]
-                        if not frozen_test_invalid and selection["precision"] >= .95:
-                            rank = (selection["recall"], selection["f1"], selection["precision"], -selection["false_merge"], -max_gap, -memory_capacity, -batch)
+                        if invalid_status is None and selection["precision"] >= .95:
+                            rank = (selection["recall"], selection["f1"], selection["precision"], -selection["false_merge"], -max_gap, -candidate_top_k, -memory_capacity, -batch)
                             if best is None or rank > best["_rank"]:
                                 best = {**item, "_rank": rank}
     rows_out.sort(key=lambda item: (float(item["selection_metrics"]["recall"]), float(item["selection_metrics"]["f1"]), float(item["selection_metrics"]["precision"])), reverse=True)
-    result = {"schema_version": V9_SCHEMA, "artifact": "v9_psmr_sweep", "protocol": protocol, "event_cache": str(Path(event_cache).resolve()), "event_cache_hash": _sha256(Path(event_cache) / "metadata.json" if Path(event_cache).is_dir() else Path(event_cache)), "search_space": str(Path(search_space).resolve()), "search_space_hash": _sha256(search_space), "checkpoint": None if checkpoint is None else str(Path(checkpoint).resolve()), "requested_checkpoint_steps": checkpoint_steps, "evaluated_checkpoint_steps": [step for step, _ in checkpoint_variants], "requested_reliability_multipliers": requested_multipliers, "evaluated_reliability_multipliers": multipliers, "untrained_multiplier_equivalence": not any(path is not None for _, path in checkpoint_variants), "structural_shard_index": int(structural_shard_index), "structural_shard_count": int(structural_shard_count), "structural_configs_total": int(structural_ordinal), "evaluated_structural_configs": evaluated_structural, "evaluated_rows": evaluated_rows, "all_rows_jsonl": str(rows_jsonl), "all_rows_hash": _sha256(rows_jsonl), "best": None if best is None else {key: value for key, value in best.items() if key != "_rank"}, "top_rows": rows_out[:200]}
+    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_psmr_sweep", "protocol": protocol, "event_cache": str(Path(event_cache).resolve()), "event_cache_hash": _sha256(Path(event_cache) / "metadata.json" if Path(event_cache).is_dir() else Path(event_cache)), "search_space": str(Path(search_space).resolve()), "search_space_hash": _sha256(search_space), "checkpoint": None if checkpoint is None else str(Path(checkpoint).resolve()), "requested_checkpoint_steps": checkpoint_steps, "evaluated_checkpoint_steps": [step for step, _ in checkpoint_variants], "requested_reliability_multipliers": requested_multipliers, "evaluated_reliability_multipliers": multipliers, "untrained_multiplier_equivalence": not any(path is not None for _, path in checkpoint_variants), "candidate_top_k_independent": True, "memory_capacity_independent": True, "selection_metric": "Base-only internal gate at precision floor 0.95; FROZEN_DEV must use an externally selected config", "structural_shard_index": int(structural_shard_index), "structural_shard_count": int(structural_shard_count), "structural_configs_total": int(structural_ordinal), "evaluated_structural_configs": evaluated_structural, "evaluated_rows": evaluated_rows, "all_rows_jsonl": str(rows_jsonl), "all_rows_hash": _sha256(rows_jsonl), "best": None if best is None else {key: value for key, value in best.items() if key != "_rank"}, "top_rows": rows_out[:200]}
     _write_json(output_path, result)
     for index, item in enumerate(rows_out[:8], start=1):
         _write_json(output_path.with_name(f"{output_path.stem}_top_{index:02d}.json"), item)
@@ -905,10 +1137,12 @@ def merge_sweep_shards(*, parts: Sequence[str | Path], output: str | Path) -> di
         raise ValueError("at least one sweep shard is required")
     manifests = [_json(path) for path in part_paths]
     first = manifests[0]
-    required = ("protocol", "event_cache_hash", "search_space_hash", "structural_shard_count")
+    required = ("schema_version", "artifact", "protocol", "event_cache_hash", "search_space_hash", "structural_shard_count")
     for item in manifests:
         if any(item.get(key) != first.get(key) for key in required):
             raise ValueError("sweep shards do not share protocol/event/search provenance")
+        if int(item.get("schema_version", -1)) != V91_SCHEMA or item.get("artifact") != "v9_1_psmr_sweep":
+            raise ValueError("legacy V9 sweep shard rejected for V9.1 merge")
         if int(item.get("structural_shard_count", 1)) != len(part_paths):
             raise ValueError("sweep shard count does not match merger inputs")
     indices = sorted(int(item.get("structural_shard_index", -1)) for item in manifests)
@@ -941,20 +1175,21 @@ def merge_sweep_shards(*, parts: Sequence[str | Path], output: str | Path) -> di
                         del top[200:]
                     selection = item.get("selection_metrics", {})
                     cfg = item.get("config", {})
-                    if float(selection.get("precision", 0.0)) < .95 or item.get("selection_status") == "INVALID_TEST_FROZEN_SELECTION":
+                    if float(selection.get("precision", 0.0)) < .95 or item.get("selection_status") != "VALID":
                         continue
                     rank = (
                         float(selection.get("recall", 0.0)), float(selection.get("f1", 0.0)),
                         float(selection.get("precision", 0.0)), -int(selection.get("false_merge", 0)),
-                        -int(cfg.get("max_gap", 10**9)), -int(cfg.get("memory_capacity", 10**9)),
+                        -int(cfg.get("max_gap", 10**9)), -int(cfg.get("candidate_top_k", 10**9)),
+                        -int(cfg.get("memory_capacity", 10**9)),
                         -int(cfg.get("query_observations", 10**9)),
                     )
                     if best is None or rank > best["_rank"]:
                         best = {**item, "_rank": rank}
     top.sort(key=lambda value: (float(value["selection_metrics"]["recall"]), float(value["selection_metrics"]["f1"]), float(value["selection_metrics"]["precision"])), reverse=True)
     result = {
-        "schema_version": V9_SCHEMA,
-        "artifact": "v9_psmr_sweep",
+        "schema_version": V91_SCHEMA,
+        "artifact": "v9_1_psmr_sweep",
         "protocol": first.get("protocol"),
         "event_cache": first.get("event_cache"),
         "event_cache_hash": first.get("event_cache_hash"),
@@ -1033,10 +1268,12 @@ def _native_prediction_rows(
 def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, protocol: str, output: str | Path, device: str = "cuda:0", devices: str | Sequence[str] | None = None, video_limit: int | None = 128) -> dict[str, Any]:
     """Run the real Dual tracker on deterministic cached video shards.
 
-    The screen records a GT-free continuity proxy for every configuration;
-    the selected rows are later materialized and sent to official TETA.  No
-    synthetic score table is used to claim a Dual result.
+    The screen records merge-sensitive pairwise F1 for every configuration.
+    Dominant-ID purity and transition rate are legacy diagnostics only.  The
+    returned Top12 must still be materialized and judged by official subset
+    AssocA before a parent enters a paper selection.
     """
+    protocol = _normalize_v91_protocol(protocol)
     manifest_path = _require(manifest, "native manifest")
     annotation_path = _require(annotation, "annotation")
     from ..v6_cli import _cache_shards, _frames_for_shard, _load_cache_manifest
@@ -1076,6 +1313,8 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
             # no GT is ever passed to the production tracker.  It measures the
             # dominant predicted ID purity for each known Base identity.
             base_purity: list[float] = []; novel_purity: list[float] = []
+            base_gt: list[int] = []; base_pred: list[int] = []
+            novel_gt: list[int] = []; novel_pred: list[int] = []
             for shard in shards:
                 current_rows = sorted(by_video.get(int(shard["video_id"]), []), key=lambda item: (int(item["frame_index"]), str(item["observation_uid"])))
                 previous = None
@@ -1096,6 +1335,12 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
                     gt_id = int(video.gt_identity[index])
                     identities[gt_id].append(predicted_by_uid[uid])
                     identity_base[gt_id] = bool(identity_base[gt_id] or video.supervision_allowed[index])
+                    token_gt = hash((int(shard["video_id"]), gt_id)) & 0x7FFFFFFF
+                    token_pred = hash((int(shard["video_id"]), int(predicted_by_uid[uid]))) & 0x7FFFFFFF
+                    if bool(video.supervision_allowed[index]):
+                        base_gt.append(token_gt); base_pred.append(token_pred)
+                    else:
+                        novel_gt.append(token_gt); novel_pred.append(token_pred)
                 for gt_id, predicted_ids in identities.items():
                     if not predicted_ids:
                         continue
@@ -1103,15 +1348,15 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
                     purity = float(counts.max() / len(predicted_ids))
                     is_base = bool(identity_base[gt_id])
                     (base_purity if is_base else novel_purity).append(purity)
-            row = {"config_index": int(start_index + local_index), "stage": stage, "config": dict(cfg), "device": assigned_device, "video_count": len(shards), "observations": observations, "track_transitions": transitions, "transition_rate": float(transitions / max(total - len(shards), 1)), "base_assoc_proxy": float(np.mean(base_purity)) if base_purity else None, "novel_assoc_proxy": float(np.mean(novel_purity)) if novel_purity else None, "base_identity_count": len(base_purity), "novel_identity_count": len(novel_purity), "production_entrypoint": "MasaDualTimescaleTracker.associate_precomputed"}
+            from ..analysis.association_proxy import pairwise_assoc_f1
+            base_pair = pairwise_assoc_f1(base_gt, base_pred); novel_pair = pairwise_assoc_f1(novel_gt, novel_pred)
+            row = {"config_index": int(start_index + local_index), "stage": stage, "config": dict(cfg), "device": assigned_device, "video_count": len(shards), "observations": observations, "track_transitions": transitions, "transition_rate": float(transitions / max(total - len(shards), 1)), "base_assoc_proxy": float(np.mean(base_purity)) if base_purity else None, "novel_assoc_proxy": float(np.mean(novel_purity)) if novel_purity else None, "base_identity_count": len(base_purity), "novel_identity_count": len(novel_purity), "base_pair_precision": base_pair["pair_precision"], "base_pair_recall": base_pair["pair_recall"], "base_pair_f1": base_pair["pair_f1"], "novel_pair_precision": novel_pair["pair_precision"], "novel_pair_recall": novel_pair["pair_recall"], "novel_pair_f1": novel_pair["pair_f1"], "production_entrypoint": "MasaDualTimescaleTracker.associate_precomputed"}
             screen_rows.append(row)
         return screen_rows
 
     d1_rows = screen_config(d1, "D1")
-    if protocol == "test-base-adapted":
-        parents = sorted(d1_rows, key=lambda item: (-(item["base_assoc_proxy"] if item["base_assoc_proxy"] is not None else -1.0), item["transition_rate"], item["config_index"]))[:3]
-    else:
-        parents = sorted(d1_rows, key=lambda item: (item["transition_rate"], item["config_index"]))[:3]
+    d1_top12 = sorted(d1_rows, key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))[:12]
+    parents = d1_top12[:3]
     d2 = []
     for parent_index, parent in enumerate(parents):
         parent_cfg = dict(parent["config"])
@@ -1120,10 +1365,40 @@ def sweep_dual(*, manifest: str | Path, annotation: str | Path, split: str, prot
                 d2.append({"stage": "D2", "parent_index": int(parent.get("config_index", parent_index)), "alpha_fast": alpha_fast, "alpha_slow": float(parent_cfg["alpha_slow"]), "dual_logit_scale": scale, "fast_accept_threshold": float(parent_cfg["fast_accept_threshold"]), "assignment_mode": "official_greedy"})
     d2_rows = screen_config(d2, "D2", start_index=len(d1_rows))
     rows = d1_rows + d2_rows
-    rows.sort(key=lambda item: (-(item["base_assoc_proxy"] if protocol == "test-base-adapted" and item["base_assoc_proxy"] is not None else -item["transition_rate"]), item["transition_rate"], item["config_index"]))
-    result = {"schema_version": V9_SCHEMA, "artifact": "v9_dual_sweep", "split": split, "protocol": protocol, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "video_count": len(shards), "screen_video_selection": "sha256(video_id) first 128", "d1_configs": len(d1_rows), "d2_configs": len(d2_rows), "evaluated_configs": len(rows), "best": rows[:8], "d1_parents": parents, "rows": rows}
+    rows.sort(key=lambda item: (-float(item["base_pair_f1"]), -float(item["base_pair_precision"]), int(item["config_index"])))
+    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_dual_sweep", "split": split, "protocol": protocol, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "annotation": str(annotation_path), "annotation_hash": _sha256(annotation_path), "video_count": len(shards), "screen_video_selection": "sha256(video_id) first 128", "d1_configs": len(d1_rows), "d2_configs": len(d2_rows), "evaluated_configs": len(rows), "selection_metric": "base_pair_f1_pre_screen_then_official_subset_AssocA", "official_subset_top12_required": True, "best": rows[:8], "d1_top12": d1_top12, "d1_parents": parents, "rows": rows}
     output_path = Path(output).resolve(); _write_json(output_path, result)
     return {"status": "COMPLETED", "output": str(output_path), **result}
+
+
+def _resolve_materialize_checkpoint(
+    selected: Mapping[str, Any],
+    cfg: Mapping[str, Any],
+    checkpoint_arg: str | Path | None,
+) -> Path | None:
+    """Resolve and verify the exact learned checkpoint selected by a sweep."""
+    if float(cfg.get("reliability_multiplier", 0.0)) <= 0.0:
+        return None
+    selected_path = selected.get("checkpoint")
+    selected_hash = selected.get("checkpoint_hash")
+    if selected_path:
+        path = _require(selected_path, "selected PSMR checkpoint")
+    else:
+        if checkpoint_arg is None:
+            raise FileNotFoundError("learned PSMR materialization requires the checkpoint selected by the sweep")
+        base = Path(checkpoint_arg).resolve()
+        if base.is_dir():
+            step = cfg.get("checkpoint_step")
+            if step is None:
+                raise ValueError("checkpoint directory supplied but selected config has no checkpoint_step")
+            path = _require(base / f"step_{int(step)}.pt", "selected PSMR checkpoint step")
+        else:
+            path = _require(base, "selected PSMR checkpoint")
+    if selected_hash:
+        actual = _sha256(path)
+        if actual != str(selected_hash):
+            raise ValueError(f"selected checkpoint hash mismatch: {actual} != {selected_hash}")
+    return path
 
 
 def materialize(
@@ -1131,16 +1406,23 @@ def materialize(
     checkpoint: str | Path | None, selected_config: str | Path, output: str | Path, device: str,
     shard_index: int | None = None, shard_count: int = 1,
 ) -> dict[str, Any]:
-    selected = _json(selected_config)
-    if isinstance(selected, Mapping) and "best" in selected:
-        selected = selected["best"]
-    cfg = dict(selected.get("config", selected if isinstance(selected, Mapping) else {}))
+    selected_doc = _json(selected_config)
+    if isinstance(selected_doc, Mapping) and "best" in selected_doc:
+        selected = selected_doc["best"]
+    else:
+        selected = selected_doc
+    if not isinstance(selected, Mapping):
+        raise ValueError("selected config is not a mapping")
+    cfg = dict(selected.get("config", selected))
+    selected_config_path = _require(selected_config, "selected config")
+
+    effective_checkpoint = _resolve_materialize_checkpoint(selected, cfg, checkpoint)
     output_path = Path(output).resolve(); output_path.mkdir(parents=True, exist_ok=True)
     manifest_path = _require(manifest, "native manifest"); prediction_path = _require(frontend_prediction, "frontend prediction"); annotation_path = _require(annotation, "annotation")
     if frontend in {"masa_detic", "masa_r50"} and (cfg.get("method", "").startswith("dual") or "assignment_mode" in cfg):
         rows = _native_prediction_rows(manifest_path, annotation_path, mode="dual", device=device, tracker_config=cfg)
         _write_json(output_path / "prediction.json", rows)
-        meta = {"schema_version": V9_SCHEMA, "artifact": "v9_dual_prediction", "config": cfg, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "prediction_hash": object_hash(rows), "record_count": len(rows)}
+        meta = {"schema_version": V91_SCHEMA, "artifact": "v9_dual_prediction", "config": cfg, "selected_config_path": str(selected_config_path), "selected_config_hash": _sha256(selected_config_path), "selected_checkpoint": None, "selected_checkpoint_hash": None, "manifest": str(manifest_path), "manifest_hash": _sha256(manifest_path), "prediction_hash": object_hash(rows), "record_count": len(rows)}
         _write_json(output_path / "prediction.meta.json", meta)
         return {"status": "COMPLETED", "prediction": str(output_path / "prediction.json"), "prediction_hash": meta["prediction_hash"], "metadata": str(output_path / "prediction.meta.json")}
     # PSMR deployment and training use the same V7 StreamingReactivationEngine
@@ -1148,11 +1430,23 @@ def materialize(
     from .psmr_v7 import _native_prediction_records_from_frontend
     result = _native_prediction_records_from_frontend(
         manifest_path=manifest_path, annotation=annotation_path, frontend_prediction=prediction_path,
-        checkpoint=None if checkpoint is None or str(checkpoint).lower() in {"none", "null", ""} else Path(checkpoint),
-        calibration={"top_r": int(cfg.get("top_r", 1)), "gap": int(cfg.get("max_gap", cfg.get("gap", 60))), "min_dormant_gap": int(cfg.get("min_dormant_gap", cfg.get("min_gap", 0))), "candidate_top_k": int(cfg.get("memory_capacity", cfg.get("candidate_top_k", 64))), "threshold": float(cfg.get("threshold", .60)), "margin_threshold": float(cfg.get("margin_threshold", 0.0)), "reliability_multiplier": float(cfg.get("reliability_multiplier", 1.0))},
+        checkpoint=effective_checkpoint,
+        calibration={"top_r": int(cfg.get("top_r", 1)), "gap": int(cfg.get("max_gap", cfg.get("gap", 60))), "min_dormant_gap": int(cfg.get("min_dormant_gap", cfg.get("min_gap", 0))), "candidate_top_k": int(cfg.get("candidate_top_k", 64)), "memory_capacity": int(cfg.get("memory_capacity", 64)), "threshold": float(cfg.get("threshold", .60)), "margin_threshold": float(cfg.get("margin_threshold", 0.0)), "reliability_multiplier": float(cfg.get("reliability_multiplier", 1.0))},
         query_observations=int(cfg.get("query_observations", 1)), scheme="V9_PSMR", device=device, run_root=output_path, source_label=frontend,
-        config_overrides={"candidate_top_k": int(cfg.get("memory_capacity", cfg.get("candidate_top_k", 64))), "min_dormant_gap": int(cfg.get("min_dormant_gap", cfg.get("min_gap", 0))), "reliability_multiplier": float(cfg.get("reliability_multiplier", 1.0))}, shard_index=shard_index, shard_count=int(shard_count),
+        config_overrides={"candidate_top_k": int(cfg.get("candidate_top_k", 64)), "memory_capacity": int(cfg.get("memory_capacity", 64)), "min_dormant_gap": int(cfg.get("min_dormant_gap", cfg.get("min_gap", 0))), "reliability_multiplier": float(cfg.get("reliability_multiplier", 1.0))}, shard_index=shard_index, shard_count=int(shard_count),
     )
+    metadata_path = Path(result["metadata"])
+    prediction_metadata = _json(metadata_path)
+    prediction_metadata.update({
+        "schema_version": V91_SCHEMA,
+        "selected_config_path": str(selected_config_path),
+        "selected_config_hash": _sha256(selected_config_path),
+        "selected_checkpoint": None if effective_checkpoint is None else str(effective_checkpoint),
+        "selected_checkpoint_hash": None if effective_checkpoint is None else _sha256(effective_checkpoint),
+        "effective_config": cfg,
+        "materialization_contract": "candidate_top_k/memory_capacity/checkpoint hash verified",
+    })
+    _write_json(metadata_path, prediction_metadata)
     return result
 
 

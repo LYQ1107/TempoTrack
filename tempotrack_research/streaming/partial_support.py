@@ -226,7 +226,13 @@ def build_memory_anchor(
     )
 
 
-def _split_fragments(records: Sequence[Mapping[str, Any]], embeddings: np.ndarray) -> list[MemoryAnchor]:
+def _split_fragments(
+    records: Sequence[Mapping[str, Any]],
+    embeddings: np.ndarray,
+    *,
+    capacity: int = 64,
+    max_gap: int = 60,
+) -> list[MemoryAnchor]:
     grouped: dict[tuple[int, int, int], list[int]] = {}
     last_by_id: dict[tuple[int, int], int] = {}
     fragment_counter: dict[tuple[int, int], int] = {}
@@ -257,6 +263,7 @@ def _split_fragments(records: Sequence[Mapping[str, Any]], embeddings: np.ndarra
             rows=indices, features=embeddings, boxes_xyxy=np.asarray([records[i]["_box_xyxy"] for i in range(len(records))], dtype=np.float32),
             scores=np.asarray([records[i]["score"] for i in range(len(records))], dtype=np.float32),
             frames=np.asarray([records[i]["frame_index"] for i in range(len(records))], dtype=np.int64),
+            capacity=int(capacity), max_gap=int(max_gap),
         )
         output.append(anchor)
     return sorted(output, key=lambda item: (item.video_id, item.first_frame, item.fragment_id))
@@ -379,7 +386,12 @@ class StreamingReactivationEngine:
         """
         if not records:
             return [], ReactivationDiagnostics()
-        fragments = _split_fragments(records, embeddings)
+        fragments = _split_fragments(
+            records,
+            embeddings,
+            capacity=int(self.config.memory_capacity),
+            max_gap=int(self.config.max_gap),
+        )
         result = [dict(row) for row in records]
         diagnostics = ReactivationDiagnostics()
         diagnostics.fragments_total = len(fragments)

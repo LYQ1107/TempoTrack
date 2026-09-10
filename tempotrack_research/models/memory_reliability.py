@@ -18,7 +18,13 @@ class MemoryReliabilityCalibrator(nn.Module):
     def forward(self, evidence: Tensor) -> Tensor:
         if evidence.shape[-1] != 7:
             raise ValueError(f"reliability evidence must end in 7, got {tuple(evidence.shape)}")
-        return self.net(evidence.float()).squeeze(-1)
+        # ``log_rel_scale`` is deliberately not part of the reliability
+        # probability: V9.1 applies beta=softplus(log_rel_scale) exactly once
+        # in the support score.  Keep a zero-valued autograd edge here so
+        # callers that build a composite loss from the raw logit still see
+        # the scale parameter in the graph without changing its semantics.
+        logit = self.net(evidence.float()).squeeze(-1)
+        return logit + self.log_rel_scale * 0.0
 
     @property
     def reliability_scale(self) -> Tensor:
