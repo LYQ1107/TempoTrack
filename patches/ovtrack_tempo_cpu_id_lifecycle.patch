@@ -1,0 +1,18 @@
+--- a/ovtrack/models/trackers/ovtracker.py
++++ b/ovtrack/models/trackers/ovtracker.py
+@@ -244,7 +244,6 @@
+                     ids = torch.as_tensor(
+                         self._tempo_adapter.preassigned_ids(
+                             tempo_decision, tempo_snapshot.observation_count
+                         ),
+                         dtype=torch.long,
+-                        device=bboxes.device,
+                     )
+@@ -282,7 +281,6 @@
+                     ids = torch.as_tensor(
+                         self._tempo_adapter.preassigned_ids(
+                             tempo_decision, tempo_snapshot.observation_count
+                         ),
+                         dtype=torch.long,
+-                        device=bboxes.device,
+                     )
