@@ -142,7 +142,7 @@ def install_ovtrack_plus_runtime_compat() -> dict[str, bool]:
         builder_spec.loader.exec_module(builder)
     else:
         builder = sys.modules[builder_name]
-    if not hasattr(builder, "MOTION"):
+    if hasattr(builder, "MOTIONS") and not hasattr(builder, "MOTION"):
         builder.MOTION = builder.MOTIONS
         installed["motion_registry_alias"] = True
     else:
