@@ -124,11 +124,11 @@ shapes `(50,)` int64 and `(50, 5)` float32.  The existing converter in
 filename mapping and serializes those two keys; it was not invoked because
 the canonical manifest is missing.
 
-## Source-visible tracker locator (not an approved hook yet)
+## Source-visible tracker locator and verified thin-hook boundary
 
-The following locations are observed in the current local source; they are
-not a claim that V10 may patch them before the shared core contract is
-available.
+The following locations are observed in the current local source.  After the
+exact `CORE_SHA` below became available, the thin adapter was implemented at
+this boundary; no independent TempoTrack core was added.
 
 1. `masa/models/tracker/masa_tao_tracker.py:457` computes current 256-D
    association embeddings with `model.track_head.predict`.
@@ -150,13 +150,14 @@ available.
 7. The observation recorder at lines `491-505` runs after association and is
    therefore explicitly **post-association**, not a valid V10 input hook.
 
-The source-visible candidate transition for a future adapter is the boundary
-after the native score matrix has been formed and before assignment/ID
-allocation.  It remains `UNCONFIRMED_PENDING_SHARED_CORE`: this local boundary
-is a V9 refactor relative to the pinned upstream tracker, and Agent E will not
-guess or patch it until Agent A publishes the exact shared
-`PreAssociationSnapshot`/overlay contract and core SHA.  No final hook is
-approved by this draft.
+The implemented adapter boundary is after the native score matrix has been
+formed and before assignment/ID allocation.  This local boundary is a V9
+refactor relative to the pinned upstream tracker, so the report retains the
+upstream/local distinction.  The adapter now passes the exact native affinity
+and causal memo arrays into `PreAssociationSnapshot`, maps only the shared
+proposal back to MASA IDs, and commits after native `update()`.  The disabled
+path delegates to native assignment.  This is a thin adapter on
+`CORE_SHA=b11b601...`; it is not a claim that `CORE_SHA_V10_FULL` is ready.
 
 ## Canonical-manifest gate
 
@@ -170,10 +171,13 @@ not available:
 - `/data2/usr_for_deadline/tempotrack_v10_unified/detector/common_r50_detpro/manifest.json`
 
 Therefore the MASA lane is currently `BLOCKED_DATA` with reason
-`AGENT_A_CANONICAL_DETECTOR_MANIFEST_MISSING` (Agent A records the underlying
-detector-equivalence gate as `BLOCKED_EXTERNAL_CONFIG`: the task-named VOV
-no-dynamic config is absent and the available VOV/COV caches are
-`DETECTOR_DIFFERENT`).  In particular, Agent E has not converted detections,
+`AGENT_A_CANONICAL_DETECTOR_MANIFEST_MISSING` (the latest Agent A report
+records the official-source generation phase, but the final manifest is not
+present).  The latest Agent A branch is `c3b4ba3` and changes provenance
+reporting only; no `CORE_SHA_V10_FULL` was published or assumed.  At the
+follow-up audit timestamp the named canonical worker PIDs were no longer
+present and the canonical directory contained no manifest, so no completion
+artifact is claimed.  In particular, Agent E has not converted detections,
 loaded the checkpoint, run native baseline, or started FULL TempoTrack.
 
 ## Adapter checks
@@ -212,8 +216,9 @@ was left behind.
 
 ## Next legal action
 
-Wait for the exact Agent A canonical detector manifest and shared-core SHA.
-Then bind the immutable common observations to MASA public-det format, verify
-frame mapping/counts/box/score/label hashes, and only after those checks write
-the MASA adapter at the confirmed pre-association point.  Until then this
-lane must remain audit-only and no MASA-R50 experiment result exists.
+Wait for both the exact Agent A canonical detector manifest and
+`CORE_SHA_V10_FULL`.  Then bind the immutable common observations to MASA
+public-det format, verify frame mapping/counts/box/score/label hashes, and
+run the native and +FULL paths from that same observation stream.  Until then
+this lane must remain audit-only and no V10.3 MASA-R50 experiment result
+exists.
