@@ -111,12 +111,19 @@ copied into the result table.
 
 | dependency | state |
 |---|---|
-| Agent A `CORE_SHA` | `MISSING` — no `reports/tempotrack_v10/V9_COMPONENT_REUSE_MAP.md` found |
-| detector-equivalence evidence | `MISSING` — no `COVTRACK_DETECTOR_EQUIVALENCE.json` found |
+| Agent A `CORE_SHA` | `AVAILABLE`: `b11b601385aaf89e68675c6f478bf70debd39016` (cherry-picked exactly) |
+| detector-equivalence evidence | `DETECTOR_DIFFERENT`; static reasons `DIFF_CHECKPOINT`, `DIFF_CONFIG`, `DIFF_HEAD` |
+| canonical detector stream | `BLOCKED_EXTERNAL_CONFIG` — no valid unified manifest was generated |
 | COV native reproduction | `REPRO_PASS` via verified retained artifact |
-| TempoTrack shared-core integration | `BLOCKED_BY_AGENT_A_CORE_AND_EQUIVALENCE` |
+| COV pre-association adapter | `AVAILABLE`; focused disabled/native-parity gate `PASS` |
+| unified/full COV TETA | `BLOCKED_EXTERNAL_CONFIG` (not run and not fabricated) |
 | detector/MCF/confidence-fusion edits | `NOT_DONE_BY_DESIGN` |
 
-No COV adapter, shared core, detector patch, MCF patch, or confidence-fusion
-patch was implemented before the required Agent A gate. This is intentional
-and preserves the native baseline as the control.
+The exact Agent A core is an ancestor of this lane at
+`b11b601385aaf89e68675c6f478bf70debd39016`; it was imported with
+`git cherry-pick`, not copied. The COV adapter is available at
+`tempotrack_v10/adapters/covtrack.py`. It only bridges the already-finalized
+native COV state at the locator documented in the companion insertion report.
+No detector, MCF/confidence fusion, embedding, native affinity, final-ID, or
+memo implementation was modified. Because the canonical detector stream is
+blocked externally, no unified or full TempoTrack TETA number is reported.

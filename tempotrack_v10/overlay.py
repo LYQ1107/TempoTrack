@@ -167,7 +167,6 @@ class TempoTrackOverlay:
 
     def propose(self, snapshot: PreAssociationSnapshot) -> OverlayProposal:
         """Produce a deterministic candidate assignment before native IDs commit."""
-        self._ensure_snapshot_memory(snapshot)
         count = snapshot.observation_count
         empty = tuple(None for _ in range(count))
         if not self.config.enabled:
@@ -186,6 +185,8 @@ class TempoTrackOverlay:
                 snapshot.immutable_observation_hash(), proposal
             )
             return proposal
+
+        self._ensure_snapshot_memory(snapshot)
 
         video = self._video_key(snapshot.video_id)
         occupied = {int(value) for value in snapshot.metadata.get("occupied_ids", ())}
