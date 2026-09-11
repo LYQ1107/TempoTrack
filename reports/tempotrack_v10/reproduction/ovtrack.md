@@ -1,6 +1,6 @@
 # OVTrack native reproduction (V10.3 Agent B)
 
-Status: **RUNNING — native inference has started; no metric is reported yet.**
+Status: **NATIVE RUNNING — 10-video prediction parity receipt PASS; full Val/Test metrics pending.**
 
 This is the OVTrack lane only.  No TempoTrack code, shared core, detector,
 embedding, or native tracker source was changed.  The V10.3 task specification
@@ -135,3 +135,22 @@ These are the V10.3 task-book reference values only:
 The dashes are intentionally not filled from another run.  Once the native
 outputs and official summary exist, this table will be updated with the real
 metrics and deltas.  No TempoTrack result is included in this lane report.
+
+## Disabled adapter prediction receipt
+
+The completed 10-video native and adapter-labelled runs produced byte-identical
+prediction files.  The exact receipt is committed at
+`reports/tempotrack_v10/provenance/ovtrack_disabled_parity.json`:
+
+| item | value |
+|---|---|
+| coverage | 10 videos / 400 images / 1,177 annotations |
+| native pkl SHA256 | `44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f` |
+| adapter pkl SHA256 | `44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f` |
+| each file size | 51,953,767 bytes |
+| recursive objects compared | 963,203 |
+| recursive differences | 0 |
+
+This is prediction equality only; it is not a canonical or enabled result.
+The exact runtime line-216 pre-association invocation is being checked
+separately before claiming hook-execution evidence.

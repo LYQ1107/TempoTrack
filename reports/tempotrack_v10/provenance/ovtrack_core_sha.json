@@ -6,8 +6,16 @@
   "adapter_branch": "codex/v10-ovtrack",
   "adapter_base_before_import": "a4f3d3d958c01c2905eb8feac8339ab140458dc9",
   "upstream_frontend_sha": "e188b32eccc049fd425e80b11a3bc45ce88edb31",
-  "native_reproduction_status": "RUNNING",
+  "native_reproduction_status": "RUNNING_WITH_10_VIDEO_PREDICTION_PARITY_RECEIPT",
   "canonical_stream_status": "BLOCKED_EXTERNAL_CONFIG",
+  "disabled_parity": {
+    "receipt": "reports/tempotrack_v10/provenance/ovtrack_disabled_parity.json",
+    "status": "PREDICTION_PARITY_PASS",
+    "native_sha256": "44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f",
+    "adapter_sha256": "44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f",
+    "recursive_objects_compared": 963203,
+    "recursive_diffs": 0
+  },
   "shared_core_tests": {
     "command": "PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py -q",
     "result": "11 passed"

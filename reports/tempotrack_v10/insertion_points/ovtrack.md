@@ -1,8 +1,10 @@
 # OVTrack insertion-point report (V10.3 Agent B)
 
-Status: **LOCATED; no production patch made.**  This report is the required
-pre-patch locator.  Agent B has not implemented a second core or adapter, and
-no shared-core `CORE_SHA` has been supplied to this worktree.
+Status: **LOCATED; exact shared core imported; thin adapter present; disabled
+prediction parity receipt recorded.**  No upstream OVTrack source was edited,
+and no second Dual/PSMR core was implemented.  Canonical/full remains
+`BLOCKED_EXTERNAL_CONFIG` until the required full core SHA and external
+configuration are available.
 
 ## Pin and files
 
@@ -77,11 +79,25 @@ The planned pre-association hook is immediately after
 232  self.update_memo(ids, bboxes, labels, embeds, cls_embeds, frame_id)
 ```
 
-This is pre-association rather than post-association because at line 200 the
-native score matrix exists but `ids` has not been initialized or assigned;
-existing IDs, new IDs, and memo writes occur only afterward.  It therefore
-allows the future overlay to propose existing-ID/NEW decisions while leaving
-native bookkeeping as the commit boundary.
+This is pre-association rather than post-association because at line 216 the
+native score matrix has already been finalized (line 198 and optional line
+200 in the pinned bisoftmax path), but `ids` has not been initialized or
+assigned; existing IDs, new IDs, and memo writes occur only afterward.  It
+therefore allows the adapter to observe the native affinity while leaving
+native bookkeeping as the commit boundary.  The thin adapter is implemented
+in `tempotrack_v10/adapters/ovtrack.py`; it does not allocate IDs or write the
+OVTrack memo.
+
+## Imported core and disabled parity receipt
+
+The exact Agent A core `b11b601385aaf89e68675c6f478bf70debd39016` was imported
+by cherry-pick before the adapter commit.  The disabled 10-video prediction
+receipt is `reports/tempotrack_v10/provenance/ovtrack_disabled_parity.json`:
+both native and adapter-labelled pkl files are 51,953,767 bytes with SHA256
+`44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f`, and a
+recursive comparator checked 963,203 objects with zero differences.  This
+does not claim a full or enabled result; a corrected runtime check of actual
+line-216 adapter invocation is separate.
 
 ## Important observed contract caveat
 
