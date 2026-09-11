@@ -1,7 +1,7 @@
 # COVTrack association insertion point — V10.3 Agent C
 
-**Status:** `LOCATED`; integration is intentionally not implemented until
-Agent A supplies the exact `CORE_SHA` and detector-equivalence evidence.
+**Status:** `LOCATED`; thin adapter available, with new experiments held by
+the runtime GT-visualization gate and canonical-detector blocker.
 
 **Upstream source pin:**
 `9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b`
@@ -90,7 +90,10 @@ calculation. The branch also contains an optional visualization path guarded by
 `self.vis` that reads `filename2ann` and GT annotations. That path is not an
 inference input and must be disabled or kept observational in any later
 integration. The production adapter must consume the native post-fusion
-features/affinity, never the visualization GT path.
+features/affinity, never the visualization GT path. The adapter's explicit
+`assert_paper_runtime_gate(...)` requires `tracker.vis=False`,
+`confused_features=True`, the paper threshold/memo/fusion/max-per-image
+values, and no `filename2ann` attribute before a new run can proceed.
 
 ## Integration gate and non-changes
 
@@ -129,14 +132,16 @@ Focused command:
 PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py tests/test_v10_covtrack_adapter.py -q
 ```
 
-Result: `14 passed in 1.68s`.
+Result after adding the runtime gate: `15 passed in 2.98s`.
 
 The COV adapter test uses the post-MCF/pre-ID tensor shape and verifies that
 `enabled=False` produces no proposal seed, leaves native final IDs unchanged,
 does not initialize overlay memory, and preserves boxes, final association
 embeddings, and native affinity byte-for-byte. The shared core's disabled path
 was also corrected minimally so it returns before memory initialization; this
-does not alter detector/MCF/embedding or enabled association behavior.
+does not alter detector/MCF/embedding or enabled association behavior. The
+runtime-gate test accepts the explicit no-GT configuration and rejects
+`vis=True` or an attached `filename2ann`.
 
 The remaining execution gate is:
 
@@ -148,7 +153,8 @@ The remaining execution gate is:
 | COV hook locator | `PASS` (this report) |
 | thin adapter import/build | `PASS` |
 | disabled/native parity | `PASS` |
-| unified/full COV experiment | `BLOCKED_EXTERNAL_CONFIG` |
+| `GT_VISUALIZATION_PATH_DISABLED` | `PASS` for new adapter gate; old artifact not paper-qualified |
+| unified/full COV experiment | `BLOCKED_EXTERNAL_CONFIG` and held by runtime gate |
 
 The correct next action is to route a valid canonical observation stream into
 this already-tested hook, preserve the native observation stream byte-for-byte,

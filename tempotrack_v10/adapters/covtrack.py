@@ -82,6 +82,41 @@ class COVTrackTempoAdapter:
 
         self.overlay.reset(video_id)
 
+    @staticmethod
+    def assert_paper_runtime_gate(*, tracker: Any, rcnn_test_cfg: Any, fusion_head: Any) -> None:
+        """Fail closed unless the documented COV paper runtime is active.
+
+        The pinned tracker defaults ``vis=True`` and can load
+        ``filename2ann`` for visualization.  That path is GT-backed and is
+        forbidden for association inference, so an integration must prove the
+        explicit ``vis=False`` gate before calling ``prepare``.
+        """
+
+        checks = {
+            "tracker.match_score_thr": (getattr(tracker, "match_score_thr", None), 0.37),
+            "tracker.memo_frames": (getattr(tracker, "memo_frames", None), 50),
+            "tracker.momentum_embed": (getattr(tracker, "momentum_embed", None), 0.4),
+            "tracker.confused_features": (getattr(tracker, "confused_features", None), True),
+            "tracker.vis": (getattr(tracker, "vis", None), False),
+            "rcnn_test_cfg.max_per_img": (getattr(rcnn_test_cfg, "max_per_img", None), 80),
+            "fusion_head.max_fusion_ratio": (getattr(fusion_head, "max_fusion_ratio", None), 2.0),
+        }
+        failures = []
+        for name, (actual, expected) in checks.items():
+            if isinstance(expected, float):
+                try:
+                    matches = float(actual) == expected
+                except (TypeError, ValueError):
+                    matches = False
+            else:
+                matches = actual is expected or actual == expected
+            if not matches:
+                failures.append(f"{name}={actual!r}, expected {expected!r}")
+        if hasattr(tracker, "filename2ann"):
+            failures.append("tracker.filename2ann must be absent")
+        if failures:
+            raise SnapshotContractError("COV_RUNTIME_GATE_FAILED: " + "; ".join(failures))
+
     def build_snapshot(
         self,
         *,
