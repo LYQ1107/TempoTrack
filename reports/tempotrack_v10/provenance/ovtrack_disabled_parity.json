@@ -1,0 +1,26 @@
+{
+  "status": "PREDICTION_PARITY_PASS",
+  "frontend": "ovtrack",
+  "upstream_sha": "e188b32eccc049fd425e80b11a3bc45ce88edb31",
+  "core_sha": "b11b601385aaf89e68675c6f478bf70debd39016",
+  "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/parity10/annotation.json",
+  "annotation_sha256": "df7a4201bede2c6e3e5d0402ee029fa5ff7ae68ad17cc5aa19d802e180a2167f",
+  "coverage": {"videos": 10, "images": 400, "annotations": 1177},
+  "native_prediction": {
+    "path": "/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/parity10/native/native_results.pkl",
+    "bytes": 51953767,
+    "sha256": "44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f"
+  },
+  "adapter_prediction": {
+    "path": "/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/parity10/adapter/native_results.pkl",
+    "bytes": 51953767,
+    "sha256": "44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f"
+  },
+  "recursive_comparator": {
+    "objects_compared": 963203,
+    "diffs": 0,
+    "result": "PASS",
+    "array_comparison": "shape, dtype, and values including NaNs"
+  },
+  "scope_note": "This receipt records exact prediction equality for the completed native and adapter-labelled runs. It does not claim enabled/full TempoTrack results; canonical/full remains BLOCKED_EXTERNAL_CONFIG. A corrected runtime check of the line-216 pre-association adapter invocation is retained separately before this receipt is upgraded to hook-execution evidence."
+}
