@@ -161,3 +161,28 @@ The wrapper help/import check passes with the repository's required
 plain import in `tempotrack_test` without that preload exposed the known
 `sqlite3_deserialize` environment mismatch and was not treated as a source
 failure.
+
+## Live V10.3 state (observed after core integration)
+
+- Shared core and controlled query-conditioned reranker are integrated at
+  `b87ae9de8aaede964e7d9bd640e9e669754a4d29`; the integration tree is clean,
+  and the latest focused suite is `38 passed in 2.62s`.
+- OVTrack native Val/Test remain active in four Val and four Test shards under
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack`; the
+  completion watcher waits for all shard artifacts before invoking the pinned
+  official evaluator.  At the last snapshot Val was about 4.3--4.4k/9.1k per
+  shard and Test about 3.2--4.4k/13.0k; no final metric is claimed.
+- OVTrack+ native Val is active from the pinned OVT-B-Dataset source with the
+  verified released checkpoint SHA256
+  `36f10026e86d0310c08dac941bea7f68ec4c4d6d3693d38f99bdc3a90e7dc872`;
+  its checkpoint-load missing-track-head warning and compatibility shims are
+  retained in the lane report.
+- The exact COVTrack reproduction remains `REPRO_GAP` with the measured old
+  Test Novel AssocA delta `-0.640`; no new COV result is substituted while the
+  current CUDA driver is unavailable to this execution namespace.
+- MASA-R50 remains an audit-only lane until a verified canonical OVTrack
+  detector manifest is complete; no alternative detector or GT observation is
+  substituted.
+- Existing disabled OVTrack parity evidence retains the old core SHA that
+  actually generated it.  It is not relabeled as output from the later full
+  core.
