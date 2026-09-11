@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from types import SimpleNamespace
 
 from tempotrack_v10 import COVTrackTempoAdapter, SnapshotContractError, TempoTrackConfig
 
@@ -61,3 +62,35 @@ def test_adapter_requires_causal_memo_timestamps_and_rejects_post_ids():
     state["metadata"] = {"assigned_track_ids": [42, -1]}
     with pytest.raises(SnapshotContractError, match="BLOCKED_POST_ASSOCIATION_INPUT"):
         COVTrackTempoAdapter().prepare(**state)
+
+
+def test_paper_runtime_gate_requires_explicit_no_gt_visualization():
+    tracker = SimpleNamespace(
+        match_score_thr=0.37,
+        memo_frames=50,
+        momentum_embed=0.4,
+        confused_features=True,
+        vis=False,
+    )
+    COVTrackTempoAdapter.assert_paper_runtime_gate(
+        tracker=tracker,
+        rcnn_test_cfg=SimpleNamespace(max_per_img=80),
+        fusion_head=SimpleNamespace(max_fusion_ratio=2.0),
+    )
+
+    tracker.vis = True
+    with pytest.raises(SnapshotContractError, match="COV_RUNTIME_GATE_FAILED"):
+        COVTrackTempoAdapter.assert_paper_runtime_gate(
+            tracker=tracker,
+            rcnn_test_cfg=SimpleNamespace(max_per_img=80),
+            fusion_head=SimpleNamespace(max_fusion_ratio=2.0),
+        )
+
+    tracker.vis = False
+    tracker.filename2ann = {}
+    with pytest.raises(SnapshotContractError, match="filename2ann"):
+        COVTrackTempoAdapter.assert_paper_runtime_gate(
+            tracker=tracker,
+            rcnn_test_cfg=SimpleNamespace(max_per_img=80),
+            fusion_head=SimpleNamespace(max_fusion_ratio=2.0),
+        )

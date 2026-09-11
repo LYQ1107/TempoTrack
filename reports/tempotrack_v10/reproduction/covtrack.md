@@ -1,6 +1,8 @@
 # COVTrack native reproduction — V10.3 Agent C
 
-**Status:** `REPRO_PASS` (hash-backed native reproduction artifact verified and reused; no new V10 inference was claimed)
+**Status:** `REPRO_GAP` (hash-backed native artifacts exist, but the effective
+paper override/runtime safety gate was not captured in the old run logs; Test
+is not accepted as paper-override-qualified)
 
 **Audit date:** 2026-09-12
 
@@ -18,9 +20,10 @@ The artifact is reused rather than rerun in this V10 stage because the live
 NVIDIA driver was unavailable (`nvidia-smi` could not communicate with the
 driver). This is a provenance distinction, not a fabricated fresh run: the
 complete native prediction/evaluation artifacts already exist and match the
-required upstream pin and operating point. The exact native launcher command
-was not preserved in the current report; the retained stream and evaluator
-logs are listed below.
+required upstream pin and public checkpoint. The old native launcher command
+did not preserve all effective runtime overrides, so its operating point is
+not silently promoted to a paper-qualified reproduction. The retained stream
+and evaluator logs are listed below.
 
 ## Source, environment, and inputs
 
@@ -47,6 +50,97 @@ The Val annotation contains 988 videos, 36,375 images, 112,798 annotations,
 52,155 images, 166,764 annotations, 1,203 categories, and 7,946 tracks. These
 are the BURST-derived COV/VOV evaluation annotations and are not replaced by
 MASA's LVIS Test annotation.
+
+## Paper overrides and GT-visualization gate
+
+The exact pinned paper runner (`run_later.py`, SHA256
+`7eb37762cce0dd4b7b4b2c71c381663217739c4594ca8e822d96d09cb4f0286b`) and its
+README evaluation command (SHA256
+`f816db21e12f2bc770d9c912a82e631d2b3e6a4b7c27b1d2a1daffe928410d89`) document
+these test-time overrides:
+
+| field | required value | evidence |
+|---|---:|---|
+| `model.tracker.match_score_thr` | `0.37` | pinned `run_later.py:215`, README:198 |
+| `model.tracker.memo_frames` | `50` | pinned `run_later.py:215`, README:203 |
+| `model.tracker.momentum_embed` | `0.4` | pinned `run_later.py:215`, README:204 |
+| `model.test_cfg.rcnn.max_per_img` | `80` | pinned `run_later.py:215`, README:199 |
+| `model.roi_head.feature_fusion_head.max_fusion_ratio` | `2.0` | pinned `run_later.py:204/215`, README:200 |
+| `model.tracker.confused_features` | `True` | pinned `run_later.py:215`, README:201 |
+
+The clean pinned config itself has defaults `match_score_thr=0.5`,
+`memo_frames=10`, `momentum_embed=0.8`, and `max_per_img=50`, so these values
+must be present in the effective runtime config rather than inferred from the
+base file. The retained Val stream log proves that the exact public
+`ctao_public.pth` was loaded and processed against the 36,375-image Val
+stream; it does not print the complete override vector.
+
+The required runtime safety gate is separate and currently **not evidenced**
+for the retained native run:
+
+- pinned `OVTrackerUncertainty.__init__` defaults `vis=True`;
+- its constructor loads `filename2ann` when the hard-coded visualization file
+  exists;
+- neither the pinned paper command nor the retained native log explicitly sets
+  `model.tracker.vis=False` or proves that `filename2ann` is absent at runtime;
+- the hard-coded `filename2ann` file is absent on this host now, but that
+  read-only fact is not a substitute for an explicit runtime gate.
+
+The V10 adapter now exposes
+`COVTrackTempoAdapter.assert_paper_runtime_gate(...)`, which requires all six
+paper values above plus `tracker.vis is False`, `confused_features is True`,
+and no `filename2ann` attribute. Its positive and negative checks pass in the
+focused test, but the old native prediction artifact is not retroactively
+requalified. The GT visualization branch is therefore forbidden for any new
+run.
+
+### Exact Val replay gate and external blocker
+
+Because the old log does not prove the effective override vector, the next
+eligible Val replay is the following command. It was **not launched** in this
+audit because the CUDA preflight failed; it is recorded here so a future
+recovery cannot silently reuse the old operating point:
+
+```bash
+cd /data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/COVTrack
+PATH=/home/lwr/anaconda3/envs/ovtr/bin:$PATH \
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+bash tools/dist_test.sh \
+  configs/uncertainty-ovtrack-teta/ovtrack_r50_ctao_train.py \
+  saved_models/ctao_public_res/ctao_public.pth \
+  4 33339 --eval track \
+  --eval-options resfile_path=/data2/usr_for_deadline/tempotrack_v10/cov_val_paper_override \
+  --cfg-options \
+  model.tracker.match_score_thr=0.37 \
+  model.tracker.memo_frames=50 \
+  model.tracker.momentum_embed=0.4 \
+  model.test_cfg.rcnn.max_per_img=80 \
+  model.roi_head.feature_fusion_head.max_fusion_ratio=2.0 \
+  model.tracker.confused_features=True \
+  model.tracker.vis=False \
+  model.roi_head.only_validation_categories=True
+```
+
+The intended COV inference environment is
+`/home/lwr/anaconda3/envs/ovtr/bin/python` (Python 3.8.20, torch
+`1.10.1+cu113`, mmcv 1.3.17, mmdet 2.23.0); official TETA evaluation uses
+`/home/lwr/anaconda3/envs/masaenv/bin/python` and the evaluator SHA recorded
+above. The 2026-09-12 01:43:11 CST preflight evidence was:
+
+```text
+nvidia-smi ... -> NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver
+nvidia_smi_rc=9
+ovtr torch.cuda.is_available()=False
+ovtr torch.cuda.device_count()=0
+torch.cuda.init() -> RuntimeError: No CUDA GPUs are available
+```
+
+No model command was entered, so there is no model traceback to conceal; the
+failure occurs at the driver/CUDA preflight. This is the precise external
+blocker for the required exact-override Val replay. If the driver recovers,
+Val must run first and only its paper-qualified result can determine whether
+Test is released. Until then Test remains held and the old metrics remain
+`REPRO_GAP`, not `REPRO_PASS`.
 
 ## Native predictions and official evaluation artifacts
 
@@ -90,8 +184,10 @@ Published-target comparison for TETA/LocA/AssocA (reproduced minus published):
 | Val | `-0.046 / -0.145 / -0.040` | `-0.095 / -0.027 / -0.364` |
 | Test | `-0.121 / +0.098 / +0.007` | `-0.214 / +0.066 / -0.640` |
 
-The reproduced baseline is therefore within the documented release variance,
-with the largest discrepancy in Test Novel AssocA. No old paper number was
+The retained Test Novel AssocA is `31.960` versus the published `32.600`, a
+reproduced-minus-published gap of **`-0.640`**. Because the effective
+paper/runtime gate was not captured, this is reported as an observed artifact
+gap, not as a new paper-qualified reproduction claim. No old paper number was
 copied into the result table.
 
 ## Integrity checks and limitations
@@ -105,7 +201,9 @@ copied into the result table.
   or committed by this lane. The exact source object at the pinned commit was
   read for the call-chain audit; no dirty source file is treated as V10 code.
 - Live `nvidia-smi` failed with “couldn't communicate with the NVIDIA driver”,
-  so a fresh GPU replay is an external blocker for this session.
+  so a fresh exact-override Val replay is an external blocker for this
+  session. The existing exact-checkpoint Val artifact remains retained, but
+  no new Test run was started after the gate gap was found.
 
 ## V10.3 dependency gate
 
@@ -114,8 +212,13 @@ copied into the result table.
 | Agent A `CORE_SHA` | `AVAILABLE`: `b11b601385aaf89e68675c6f478bf70debd39016` (cherry-picked exactly) |
 | detector-equivalence evidence | `DETECTOR_DIFFERENT`; static reasons `DIFF_CHECKPOINT`, `DIFF_CONFIG`, `DIFF_HEAD` |
 | canonical detector stream | `BLOCKED_EXTERNAL_CONFIG` — no valid unified manifest was generated |
-| COV native reproduction | `REPRO_PASS` via verified retained artifact |
+| exact-public-checkpoint Val artifact | `PASS` (retained full Val stream/evaluation) |
+| COV native reproduction | `REPRO_GAP` — effective override/runtime gate incomplete |
+| paper override vector | `PARTIAL` — `.37/50/.4`, `80`, `2.0`, `True` documented; not captured in old log |
+| `GT_VISUALIZATION_PATH_DISABLED` | `PASS` for the new adapter gate (`vis=False`, no `filename2ann`) |
+| old artifact paper qualification | `NO` — old runtime did not capture the explicit gate |
 | COV pre-association adapter | `AVAILABLE`; focused disabled/native-parity gate `PASS` |
+| Test after corrected gate | `HELD` — not rerun |
 | unified/full COV TETA | `BLOCKED_EXTERNAL_CONFIG` (not run and not fabricated) |
 | detector/MCF/confidence-fusion edits | `NOT_DONE_BY_DESIGN` |
 
@@ -126,4 +229,5 @@ The exact Agent A core is an ancestor of this lane at
 native COV state at the locator documented in the companion insertion report.
 No detector, MCF/confidence fusion, embedding, native affinity, final-ID, or
 memo implementation was modified. Because the canonical detector stream is
-blocked externally, no unified or full TempoTrack TETA number is reported.
+blocked externally, and because the retained native run lacks the explicit
+`vis=False` runtime proof, no unified or new full COV TETA number is reported.
