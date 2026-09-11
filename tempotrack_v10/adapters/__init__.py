@@ -9,6 +9,12 @@ from .masa import (
     install_masa_overlay,
 )
 
+from .ovtrack import (
+    OVTrackTempoAdapter,
+    OVTrackTempoConfig,
+    load_ovtrack_tempo_config,
+)
+
 __all__ = [
     "MasaPreAssociationDecision",
     "MasaPreAssociationTrace",
@@ -16,4 +22,7 @@ __all__ = [
     "install_masa_overlay",
     "COVTrackAssociationDecision",
     "COVTrackTempoAdapter",
+    "OVTrackTempoAdapter",
+    "OVTrackTempoConfig",
+    "load_ovtrack_tempo_config",
 ]

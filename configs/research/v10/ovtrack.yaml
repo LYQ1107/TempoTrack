@@ -1,0 +1,4 @@
+frontend: ovtrack
+tempo:
+  enabled: false
+  config_path: tempo.yaml
