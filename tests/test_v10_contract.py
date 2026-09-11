@@ -33,6 +33,25 @@ def make_snapshot(*, frame=10, affinity=None, metadata=None, memory_last=5):
     )
 
 
+def make_empty_memory_snapshot(*, frame=10, count=1, metadata=None, embeddings=None):
+    if embeddings is None:
+        embeddings = np.tile(np.asarray([[1, 0]], dtype=np.float32), (count, 1))
+    return PreAssociationSnapshot(
+        video_id=7,
+        frame_id=frame,
+        boxes_xyxy=np.tile(np.asarray([[0, 0, 10, 10]], dtype=np.float32), (count, 1)),
+        det_scores=np.full(count, 0.9, dtype=np.float32),
+        labels=np.full(count, 3, dtype=np.int64),
+        observation_uids=tuple(f"7:{frame}:{index}" for index in range(count)),
+        embeddings=np.asarray(embeddings, dtype=np.float32),
+        native_affinity=np.empty((count, 0), dtype=np.float32),
+        memory_ids=(),
+        memory_embeddings=np.empty((0, 2), dtype=np.float32),
+        memory_last_frame=np.empty((0,), dtype=np.int64),
+        metadata={"association_stage": "pre_association", **(metadata or {})},
+    )
+
+
 def test_snapshot_rejects_gt_and_post_association_fields():
     with pytest.raises(SnapshotContractError, match="BLOCKED_POST_ASSOCIATION_INPUT"):
         make_snapshot(metadata={"gt_identity": [1, 1]})
@@ -145,3 +164,105 @@ def test_post_association_stage_is_rejected_even_without_gt_fields():
 def test_future_memory_frame_is_rejected_by_snapshot_contract():
     with pytest.raises(SnapshotContractError, match="BLOCKED_POST_ASSOCIATION_INPUT"):
         make_snapshot(frame=10, memory_last=10)
+
+
+def test_dormant_union_reactivates_without_native_affinity():
+    overlay = TempoTrackOverlay(TempoTrackConfig(score_threshold=-10.0, margin_threshold=-1.0))
+    seed = make_snapshot(frame=5, memory_last=1)
+    overlay.propose(seed)
+    overlay.commit(seed, [42, -1])
+    proposal = overlay.propose(make_empty_memory_snapshot(frame=10))
+    assert proposal.assignments == (42,)
+    assert proposal.diagnostics["native_candidate_count"] == 0
+    assert proposal.diagnostics["dormant_candidate_count"] == 1
+
+
+def test_dormant_candidate_respects_expired_gap():
+    overlay = TempoTrackOverlay(TempoTrackConfig(min_gap=6, max_gap=20, score_threshold=-10.0))
+    seed = make_snapshot(frame=5, memory_last=1)
+    overlay.propose(seed)
+    overlay.commit(seed, [42, -1])
+    proposal = overlay.propose(make_empty_memory_snapshot(frame=10))
+    assert proposal.assignments == (None,)
+    assert proposal.reasons == ("no_legal_candidate",)
+
+
+def test_dormant_root_lineage_competition_is_event_local():
+    overlay = TempoTrackOverlay(TempoTrackConfig(score_threshold=-10.0, margin_threshold=-1.0))
+    seed = make_empty_memory_snapshot(frame=5, count=2, metadata={"observation_root_ids": [7, 7]})
+    overlay.propose(seed)
+    overlay.commit(seed, [42, 43])
+    proposal = overlay.propose(make_empty_memory_snapshot(frame=10, count=2))
+    assert sum(proposal.accepted) == 1
+    assert proposal.reasons.count("competition_loser") == 1
+    assert proposal.assignments[1] is None
+
+
+def test_dormant_frame_collision_rejects_without_fallback():
+    overlay = TempoTrackOverlay(TempoTrackConfig(score_threshold=-10.0, margin_threshold=-1.0))
+    seed = make_snapshot(frame=5, memory_last=1)
+    overlay.propose(seed)
+    overlay.commit(seed, [42, -1])
+    proposal = overlay.propose(make_empty_memory_snapshot(frame=10, metadata={"occupied_ids": [42]}))
+    assert proposal.assignments == (None,)
+    assert proposal.reasons == ("frame_collision",)
+
+
+def test_dormant_candidate_order_is_deterministic_after_union():
+    def run_once():
+        overlay = TempoTrackOverlay(TempoTrackConfig(score_threshold=-10.0, margin_threshold=-1.0))
+        seed = make_empty_memory_snapshot(frame=5, count=2)
+        overlay.propose(seed)
+        overlay.commit(seed, [43, 42])
+        return overlay.propose(make_empty_memory_snapshot(frame=10)).assignments
+
+    assert run_once() == run_once() == (42,)
+
+
+def test_exact_v9_reranker_is_used_with_controlled_provenance():
+    checkpoint = "/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/v9_3/reranker/covtrack/training_seed0/best.pt"
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(
+            score_threshold=-100.0,
+            margin_threshold=-1.0,
+            reranker_weight=1.0,
+            reranker_checkpoint=checkpoint,
+        )
+    )
+    metadata = {"memory_evidence": np.ones((1, 1, 7), dtype=np.float32)}
+    proposal = overlay.propose(make_snapshot(metadata=metadata))
+    provenance = proposal.diagnostics["reranker_status"]
+    assert proposal.diagnostics["full_capability_status"] == "FULL_EXACT_V9_RERANKER"
+    assert provenance["checkpoint_sha256"] == "36e7bbfc80d70fbe3fd6bec4830b9df419d6b9a05ca94fabc1ccfa0fa156c82b"
+    assert len(provenance["feature_names"]) == 24
+    assert provenance["model_source_hash_match"] is True
+
+
+def test_reranker_missing_evidence_fails_closed_without_heuristic_fallback():
+    checkpoint = "/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/v9_3/reranker/covtrack/training_seed0/best.pt"
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(
+            score_threshold=-100.0,
+            margin_threshold=-1.0,
+            reranker_weight=1.0,
+            reranker_checkpoint=checkpoint,
+        ),
+    )
+    seed = make_empty_memory_snapshot(
+        frame=5,
+        count=2,
+        metadata={
+            "observation_evidence": {
+                "7:5:0": None,
+                "7:5:1": np.ones(7, dtype=np.float32),
+            }
+        },
+    )
+    overlay.propose(seed)
+    overlay.commit(seed, [42, 43])
+    proposal = overlay.propose(make_empty_memory_snapshot(frame=10))
+    # 42 is the first selected candidate but has no evidence.  43 remains
+    # aligned at its own selected position and is not silently dropped.
+    assert proposal.assignments == (43,)
+    assert proposal.reasons == ("accepted",)
+    assert proposal.diagnostics["reranker_missing_evidence"] == 1

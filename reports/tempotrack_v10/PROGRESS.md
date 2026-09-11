@@ -21,12 +21,25 @@ deleted by this lane.
   `pgrep` audit. External processes are not touched.
 - Cleanup: dry-run only. No deletion is authorized in this lane.
 
-## A3 — reuse map
+## A3 — reuse map and shared-core repair
 
-The reuse map is being written from the checked-out V9.3 source and records
-the exact source paths, symbols, source SHA, and the V10 wrapper/refactor
-decision before any new shared core code is added. The map is now complete in
-`V9_COMPONENT_REUSE_MAP.md`.
+The reuse map records the exact source paths, symbols, source SHA, and the V10
+wrapper/refactor decision. The shared core now has a native-memory union with
+independent dormant records, no fabricated dormant native affinity, causal
+gap legality, root/lineage-aware event-local competition, frame collision,
+loser-no-fallback, deterministic ordering, and commit-time evidence history.
+The map is complete in `V9_COMPONENT_REUSE_MAP.md`.
+
+The V9 query-conditioned reranker is integrated through controlled,
+byte-for-byte copies of `query_conditioned_reranker.py`, `reranker_trainer.py`,
+and `v9_reranker.py`, plus the receipt-checked `tempotrack_v10/reranker.py`
+adapter. Runtime model inference uses only the controlled V10 source; no
+dirty V9 path is required. It uses the exact 24-feature/64-32-1 path. The
+available checkpoint is explicitly diagnostic only (`VAL_BASE_PILOT`,
+`NOT_PAPER_VALID`); no heuristic is labeled FULL. Its historical receipt has
+an older orchestration hash, which is reported separately as
+`receipt_orchestration_hash_match=false` while the controlled current source
+hash check is true.
 
 ## A4 — detector equivalence audit
 
@@ -73,11 +86,11 @@ decision before any new shared core code is added. The map is now complete in
 
 ## Current gate
 
-`A0_A3_COMPLETE_A4_DETECTOR_DIFFERENT_A5_CANONICAL_RUNNING`
+`A0_A3_COMPLETE_A4_DETECTOR_DIFFERENT_A5_CANONICAL_RUNNING_SHARED_CORE_REPAIRED`
 
 ## Focused production checks
 
-- `PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py -q`: **11 passed**.
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py -q`: **18 passed** (11 existing + 7 new union/causality/root/collision/order/reranker checks).
 - Reused V9 reactivation smoke: `tests/test_psmr_reactivation.py`: **3 passed**.
 - Source compile/import smoke over the new modules and tools: **PASS**;
   `TempoTrackConfig` imports with the documented alpha defaults.
@@ -86,16 +99,12 @@ decision before any new shared core code is added. The map is now complete in
 
 ## A5/A6 decision
 
-The exact task-named VOV config
-`configs/ovtrack-teta/ovtrack_r50_no_dynamic_threshold.py` is absent from the
-checked-out external tree. The closest present config is
-`ovtrack_r50_reverse_without_inference.py`, while the available VOV cache
-manifest declares an `adding_spatial` config. Since A4 is
-`DETECTOR_DIFFERENT` on the existing observations, the cache cannot be
-promoted to a common canonical stream and no arbitrary detector conversion is
-performed. Canonical generation is therefore **BLOCKED_EXTERNAL_CONFIG**;
-the exact missing path and the already-audited alternatives are recorded in
-`COVTRACK_DETECTOR_EQUIVALENCE.json`.
+The earlier `BLOCKED_EXTERNAL_CONFIG` conclusion is withdrawn. The exact
+official VOV source/config is present at the corrected LocateMOT pin, and the
+already-running official workers use that path. Their canonical output is
+still `CANONICAL_GENERATION_RUNNING`; no final manifest or detector hash is
+claimed before those workers finish. The old external_ovmot VOV cache and the
+COV native cache remain separate and are not promoted as equivalent.
 
 The A0 dry-run inventory remains at
 `/data2/usr_for_deadline/DATA2_CLEANUP_DRYRUN.tsv`; all rows require explicit
