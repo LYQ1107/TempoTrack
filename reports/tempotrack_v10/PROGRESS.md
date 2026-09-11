@@ -273,3 +273,31 @@ failure.
 - GPU2--9 remain assigned to the recovery native OVTrack Val/Test shards. The
   new Test runner and evaluator have both passed their import/build checks;
   their long outputs are kept in separate roots and no old cache is replaced.
+
+## Live correction update — 2026-09-12 05:12 CST
+
+- The first COV exact-override Val launch is retained as
+  `val_paper_override_20260912/` with traceback
+  `ModuleNotFoundError: No module named 'mmengine'`; it accidentally resolved
+  the integration worktree's `tools/test.py` and exited before model inference.
+  It is not counted as a run.
+- A corrected second attempt is running from the pinned dirty COV source tree
+  in the independent root
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/covtrack/val_paper_override_20260912_attempt2`.
+  It uses the public `ctao_public.pth`, Val annotation, `vis=False`,
+  `match_score_thr=0.37`, `max_per_img=80`, `max_fusion_ratio=2.0`,
+  `confused_features=True`, `memo_frames=50`, `momentum_embed=0.4`, and
+  `only_validation_categories=True`. It is single-GPU bounded streaming on
+  physical GPU1, PID 25090, and entered the official inference loop at about
+  10.2 frames/s. No metric is claimed until `tao_track.json` and the official
+  TETA summary are complete.
+- The explicit COV runtime gate was independently executed against the same
+  effective values and passed:
+  `GT_VISUALIZATION_PATH_DISABLED=PASS` (`vis=False`, no `filename2ann`).
+- The official OVTrack recovery remains healthy under supervisor PID 11051:
+  eight workers 11071--11078 are progressing Val/Test shards on GPUs2--9.
+  OVTrack+ Test remains healthy as PID 20428 on GPU0. Neither job was
+  signalled or restarted.
+- The focused production suite was rerun after the shared-core integration:
+  `38 passed in 8.26s` covering the V10 contract, COV/MASA/OVTrack+ adapters,
+  native parity/pre-association guards, and V9 reactivation behavior.

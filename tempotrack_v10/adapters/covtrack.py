@@ -33,7 +33,8 @@ def _numpy(value: Any, *, dtype: np.dtype) -> np.ndarray:
 class COVTrackAssociationDecision:
     """Prepared proposal and native-ID seed for one COVTrack frame.
 
-    ``native_id_seed`` contains existing memo IDs accepted by the overlay and
+    ``native_id_seed`` contains IDs accepted by the overlay, including a
+    causal dormant identity that is no longer in the current native memo, and
     ``-1`` for rejected/unchanged observations.  It is a proposal only; the
     COVTrack caller remains responsible for its final ID allocation and memo
     bookkeeping, then calls ``commit_after_native_ids`` with the actual IDs.
@@ -194,14 +195,15 @@ class COVTrackTempoAdapter:
 
         snapshot = self.build_snapshot(**kwargs)
         proposal = self.overlay.propose(snapshot)
-        memory_index = set(snapshot.memory_ids)
         seed = np.full((snapshot.observation_count,), -1, dtype=np.int64)
         for index, assignment in enumerate(proposal.assignments):
             if assignment is None:
                 continue
             assigned_id = int(assignment)
-            if assigned_id not in memory_index:
-                raise SnapshotContractError("overlay assignment is not a COVTrack memo ID")
+            # A dormant identity is intentionally absent from the native memo
+            # and has no native affinity column.  Passing its identity through
+            # the pre-ID seed lets the frontend's normal init/update path
+            # re-create that ID without fabricating a native candidate.
             seed[index] = assigned_id
         return COVTrackAssociationDecision(snapshot, proposal, seed)
 

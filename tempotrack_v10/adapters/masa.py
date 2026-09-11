@@ -187,7 +187,11 @@ class MasaTaoPreAssociationAdapter:
             if not accepted or assignment is None:
                 continue
             ids[index] = int(assignment)
-            assigned[index] = int(memo_index[int(assignment)])
+            # A dormant identity is not present in the current native memo;
+            # keep the trace's memo index at -1 while preserving the logical
+            # identity in ``ids``.  The frontend's ordinary update path then
+            # reintroduces that identity causally.
+            assigned[index] = int(memo_index.get(int(assignment), -1))
         trace = self._overlay_trace(
             proposal=proposal,
             native_affinity=native_affinity,

@@ -94,3 +94,22 @@ def test_paper_runtime_gate_requires_explicit_no_gt_visualization():
             rcnn_test_cfg=SimpleNamespace(max_per_img=80),
             fusion_head=SimpleNamespace(max_fusion_ratio=2.0),
         )
+
+
+def test_dormant_identity_seed_is_allowed_without_native_affinity_column():
+    config = TempoTrackConfig(score_threshold=-10.0, margin_threshold=-1.0)
+    adapter = COVTrackTempoAdapter(config=config)
+    first = adapter.prepare(**cov_match_state())
+    adapter.commit_after_native_ids(first, np.asarray([42, -1], dtype=np.int64))
+
+    state = cov_match_state()
+    state.update(
+        frame_id=20,
+        memo_ids=(),
+        memo_embeds=np.empty((0, 2), dtype=np.float32),
+        memo_last_frame=np.empty((0,), dtype=np.int64),
+        scores=np.empty((2, 0), dtype=np.float32),
+    )
+    decision = adapter.prepare(**state)
+    assert decision.proposal.assignments[0] == 42
+    np.testing.assert_array_equal(COVTrackTempoAdapter.native_seed(decision), [42, -1])

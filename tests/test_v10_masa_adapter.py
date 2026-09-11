@@ -91,6 +91,32 @@ def test_enabled_adapter_maps_overlay_assignment_before_commit():
     adapter.commit(decision, decision.ids)
 
 
+def test_enabled_adapter_reactivates_dormant_identity_without_memo_index():
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(score_threshold=-10.0, margin_threshold=-1.0)
+    )
+    adapter = MasaTaoPreAssociationAdapter(overlay)
+    first = adapter.decide(tracker=FakeTracker(), **inputs())
+    adapter.commit(first, torch.tensor([42]))
+
+    dormant_inputs = inputs()
+    dormant_inputs.update(
+        frame_id=20,
+        native_affinity=torch.empty((1, 0)),
+        memory={
+            "bboxes": torch.empty((0, 4)),
+            "labels": torch.empty((0,), dtype=torch.long),
+            "embeds": torch.empty((0, 2)),
+            "ids": torch.empty((0,), dtype=torch.long),
+            "frame_ids": torch.empty((0,), dtype=torch.long),
+        },
+    )
+    decision = adapter.decide(tracker=FakeTracker(), **dormant_inputs)
+    assert decision.proposal.assignments == (42,)
+    assert torch.equal(decision.ids, torch.tensor([42]))
+    assert torch.equal(decision.trace.assigned_memo_index, torch.tensor([-1]))
+
+
 def test_install_attaches_only_the_thin_adapter():
     tracker = FakeTracker()
     overlay = TempoTrackOverlay(TempoTrackConfig(enabled=False))
