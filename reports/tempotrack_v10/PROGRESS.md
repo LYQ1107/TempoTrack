@@ -254,3 +254,20 @@ failure.
   `e188b32eccc049fd425e80b11a3bc45ce88edb31`, the same official checkpoint,
   prompt, annotation and image root. The new comparison will be made only
   after this output is complete.
+
+## Parallel native lanes — 2026-09-12 04:42 CST
+
+- OVTrack+ official Test native reproduction is running detached as PID
+  `20428` on GPU0, with the pinned OVT-B-Dataset source commit
+  `f033b314c659995936b1d3becd5baf1deb93e121`, checkpoint SHA
+  `36f10026e86d0310c08dac941bea7f68ec4c4d6d3693d38f99bdc3a90e7dc872`, and
+  the audited `tao_test_burst_v1.json` (1419 videos). Its separate output is
+  `/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus/native_test_current/`;
+  the Val output is not overwritten.
+- The same-input official OVTrack native parity reference remains PID `19542`
+  on GPU1. Current logs show approximately `36/74` parity videos; no PASS is
+  claimed until recursive bbox/score/class/ID comparison against the disabled
+  adapter output completes.
+- GPU2--9 remain assigned to the recovery native OVTrack Val/Test shards. The
+  new Test runner and evaluator have both passed their import/build checks;
+  their long outputs are kept in separate roots and no old cache is replaced.
