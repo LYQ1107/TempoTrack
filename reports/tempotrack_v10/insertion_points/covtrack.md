@@ -94,26 +94,64 @@ features/affinity, never the visualization GT path.
 
 ## Integration gate and non-changes
 
-No adapter or shared-core implementation is present in this lane. In
-particular, this stage did not:
+The exact Agent A shared core was imported with
+`git cherry-pick b11b601385aaf89e68675c6f478bf70debd39016`. The thin COV
+bridge is implemented at
+`tempotrack_v10/adapters/covtrack.py::COVTrackTempoAdapter`:
 
-- copy or reimplement the shared TempoTrack core;
+1. `prepare(...)` receives the post-filter COV `bboxes`, labels, already fused
+   association `embeds`, completed native `scores`, and causal memo tensors.
+2. It constructs the strict immutable `PreAssociationSnapshot`, calls the
+   shared `TempoTrackOverlay`, and maps accepted existing memo IDs to a
+   read-only `native_id_seed`; `None` remains the native `-1`/new-ID sentinel.
+3. The frontend keeps final ID allocation and memo bookkeeping. After that
+   native commit, `commit_after_native_ids(...)` forwards the actual final IDs
+   to the shared overlay.
+
+This adapter is deliberately not injected into the dirty external COVTrack
+checkout in this stage. Its hook contract is the exact boundary above and is
+ready for the canonical-detector route once that external prerequisite is
+resolved.
+
+In particular, this stage did not:
+
 - modify COVTrack detector extraction, `FeatureFusionModule`, `loss_cyc`,
   confidence fusion, or native `match` semantics;
+- copy or reimplement a second shared core;
 - add a recorder patch to the external dirty COV checkout;
 - alter final IDs, memo updates, or new-ID allocation.
 
-Integration remains gated by the following missing Agent A evidence:
+## Disabled/native-parity gate
+
+Focused command:
+
+```text
+PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py tests/test_v10_covtrack_adapter.py -q
+```
+
+Result: `14 passed in 1.68s`.
+
+The COV adapter test uses the post-MCF/pre-ID tensor shape and verifies that
+`enabled=False` produces no proposal seed, leaves native final IDs unchanged,
+does not initialize overlay memory, and preserves boxes, final association
+embeddings, and native affinity byte-for-byte. The shared core's disabled path
+was also corrected minimally so it returns before memory initialization; this
+does not alter detector/MCF/embedding or enabled association behavior.
+
+The remaining execution gate is:
 
 | gate | state |
 |---|---|
-| exact `CORE_SHA` | `MISSING` |
-| detector-equivalence manifest | `MISSING` |
-| detector-equivalence result/evidence | `MISSING` |
+| exact `CORE_SHA` | `PASS`: `b11b601385aaf89e68675c6f478bf70debd39016` |
+| detector-equivalence manifest | `PASS`, status `DETECTOR_DIFFERENT` |
+| canonical detector/equivalence route | `BLOCKED_EXTERNAL_CONFIG` |
 | COV hook locator | `PASS` (this report) |
-| shared-core integration | `BLOCKED_BY_REQUIRED_AGENT_A_EVIDENCE` |
+| thin adapter import/build | `PASS` |
+| disabled/native parity | `PASS` |
+| unified/full COV experiment | `BLOCKED_EXTERNAL_CONFIG` |
 
-The correct next action after the two missing artifacts arrive is to apply the
-minimal hook/adapter at the boundary above, preserve the native observation
-stream byte-for-byte, and run the task's detector-equivalence and native
-prediction checks before any TempoTrack result is reported.
+The correct next action is to route a valid canonical observation stream into
+this already-tested hook, preserve the native observation stream byte-for-byte,
+and then run the required unified/full prediction and official TETA checks.
+Those checks are intentionally not claimed here because the detector route is
+currently blocked by the documented external configuration mismatch.
