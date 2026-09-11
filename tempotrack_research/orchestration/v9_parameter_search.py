@@ -32,6 +32,7 @@ from .v8_crossbaseline import _external_videos
 
 V9_SCHEMA = 9
 V91_SCHEMA = 10
+V92_RELIABILITY_SCHEMA = 11
 GAP_BINS = ((0, 10, "0-10"), (10, 30, "10-30"), (30, 60, "30-60"),
             (60, 90, "60-90"), (90, 120, "90-120"), (120, 180, "120-180"),
             (180, 240, "180-240"), (240, 360, "240-360"))
@@ -826,35 +827,180 @@ def _load_calibrator(checkpoint: str | Path | None):
     return model, beta
 
 
-def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.ndarray], rows: Sequence[Mapping[str, Any]] | None, config: Mapping[str, Any], checkpoint: str | Path | None, calibrator: Any | None = None, calibrator_beta: float = 0.0, row_arrays: Mapping[str, np.ndarray] | None = None, reliability_values: np.ndarray | None = None) -> np.ndarray:
-    import torch
-    cosine = np.asarray(arrays["cosine"], dtype=np.float32)
+def _reliability_cache_paths(output: str | Path, checkpoint: str | Path) -> tuple[Path, Path, str]:
+    checkpoint_path = _require(checkpoint, "PSMR reliability checkpoint")
+    checkpoint_hash = _sha256(checkpoint_path)
+    root = Path(output).resolve()
+    return root / f"{checkpoint_hash}.npy", root / f"{checkpoint_hash}.json", checkpoint_hash
+
+
+def _reliability_cache_metadata_path(event_cache: str | Path) -> Path:
+    root = Path(event_cache)
+    return root if root.is_file() and root.name == "metadata.json" else root / "metadata.json"
+
+
+def _load_reliability_cache(
+    *,
+    event_cache: str | Path,
+    checkpoint: str | Path,
+    reliability_cache_dir: str | Path,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Load and validate one shared, read-only checkpoint reliability mmap."""
+    metadata, arrays, _ = _load_event_cache(event_cache)
+    metadata_path = _reliability_cache_metadata_path(event_cache).resolve()
+    npy_path, sidecar_path, checkpoint_hash = _reliability_cache_paths(
+        reliability_cache_dir, checkpoint
+    )
+    if not sidecar_path.exists() or not npy_path.exists():
+        raise FileNotFoundError(
+            f"reliability mmap missing for checkpoint {checkpoint_hash}: {npy_path}"
+        )
+    sidecar = _json(sidecar_path)
+    expected_arrays_hash = metadata.get("arrays_hash")
+    if sidecar.get("artifact") != "v9_2_reliability_mmap" or int(sidecar.get("schema_version", -1)) != V92_RELIABILITY_SCHEMA:
+        raise ValueError(f"invalid V9.2 reliability sidecar: {sidecar_path}")
+    if sidecar.get("event_cache_metadata_hash") != _sha256(metadata_path):
+        raise ValueError(f"reliability mmap event metadata hash mismatch: {sidecar_path}")
+    if sidecar.get("event_arrays_hash") != expected_arrays_hash:
+        raise ValueError(f"reliability mmap event arrays hash mismatch: {sidecar_path}")
+    if sidecar.get("checkpoint_hash") != checkpoint_hash:
+        raise ValueError(f"reliability mmap checkpoint hash mismatch: {sidecar_path}")
+    evidence = arrays["evidence"]
+    expected_shape = [int(evidence.shape[0]), int(evidence.shape[1])]
+    if sidecar.get("shape") != expected_shape or sidecar.get("dtype") != "float32":
+        raise ValueError(f"reliability mmap shape/dtype mismatch: {sidecar_path}")
+    values = np.load(npy_path, mmap_mode="r", allow_pickle=False)
+    if tuple(values.shape) != tuple(expected_shape) or values.dtype != np.dtype(np.float32):
+        raise ValueError(f"reliability mmap array shape/dtype mismatch: {npy_path}")
+    return values, sidecar
+
+
+def precompute_reliability_cache(
+    *,
+    event_cache: str | Path,
+    checkpoint: str | Path,
+    output: str | Path,
+    device: str = "cpu",
+    chunk_events: int = 4096,
+) -> dict[str, Any]:
+    """Precompute one checkpoint's per-anchor reliability into a shared mmap."""
+    if int(chunk_events) < 1:
+        raise ValueError("chunk_events must be positive")
+    metadata, arrays, _ = _load_event_cache(event_cache)
+    metadata_path = _reliability_cache_metadata_path(event_cache).resolve()
+    checkpoint_path = _require(checkpoint, "PSMR reliability checkpoint")
+    output_npy, output_sidecar, checkpoint_hash = _reliability_cache_paths(
+        output, checkpoint_path
+    )
+    output_npy.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        values, sidecar = _load_reliability_cache(
+            event_cache=event_cache,
+            checkpoint=checkpoint_path,
+            reliability_cache_dir=output_npy.parent,
+        )
+        return {
+            "status": "REUSED",
+            "artifact": "v9_2_reliability_mmap",
+            "array": str(output_npy),
+            "sidecar": str(output_sidecar),
+            "shape": list(values.shape),
+            "sidecar_hash": _sha256(output_sidecar),
+            "checkpoint_hash": checkpoint_hash,
+            "chunk_events": int(sidecar.get("chunk_events", chunk_events)),
+        }
+    except (FileNotFoundError, ValueError, OSError):
+        # A stale or partial target is not a valid cache.  Rebuild the exact
+        # checkpoint-named file; no detector/native/event data is touched.
+        pass
+
     evidence = np.asarray(arrays["evidence"], dtype=np.float32)
+    if evidence.ndim != 3 or evidence.shape[-1] != 7:
+        raise ValueError(f"event evidence must have shape [N,64,7], got {evidence.shape}")
+    if int(evidence.shape[1]) != 64:
+        raise ValueError(f"V9.2 reliability mmap requires 64 anchors, got {evidence.shape[1]}")
+    calibrator, beta = _load_calibrator(checkpoint_path)
+    calibrator = calibrator.to(device) if hasattr(calibrator, "to") else calibrator
+    if hasattr(calibrator, "eval"):
+        calibrator.eval()
+    event_count = int(evidence.shape[0])
+    mapped = np.lib.format.open_memmap(
+        output_npy,
+        mode="w+",
+        dtype=np.float32,
+        shape=(event_count, int(evidence.shape[1])),
+    )
+    import torch
+    with torch.inference_mode():
+        for start in range(0, event_count, int(chunk_events)):
+            end = min(start + int(chunk_events), event_count)
+            batch = np.array(evidence[start:end], dtype=np.float32, copy=True, order="C")
+            tensor = torch.from_numpy(batch.reshape(-1, 7)).to(device, non_blocking=True)
+            value = calibrator.reliability(tensor).reshape(end - start, evidence.shape[1])
+            mapped[start:end] = value.detach().cpu().numpy().astype(np.float32, copy=False)
+            del tensor, value, batch
+    mapped.flush()
+    del mapped
+    sidecar = {
+        "artifact": "v9_2_reliability_mmap",
+        "schema_version": V92_RELIABILITY_SCHEMA,
+        "event_cache": str(Path(event_cache).resolve()),
+        "event_cache_metadata": str(metadata_path),
+        "event_cache_metadata_hash": _sha256(metadata_path),
+        "event_arrays_hash": metadata.get("arrays_hash"),
+        "checkpoint": str(checkpoint_path),
+        "checkpoint_hash": checkpoint_hash,
+        "calibrator_beta": float(beta),
+        "shape": [event_count, int(evidence.shape[1])],
+        "dtype": "float32",
+        "chunk_events": int(chunk_events),
+        "array": str(output_npy),
+        "array_hash": _sha256(output_npy),
+        "storage": "npy_memmap",
+    }
+    _write_json(output_sidecar, sidecar)
+    return {
+        "status": "COMPLETED",
+        "artifact": sidecar["artifact"],
+        "array": str(output_npy),
+        "sidecar": str(output_sidecar),
+        "shape": sidecar["shape"],
+        "array_hash": sidecar["array_hash"],
+        "sidecar_hash": _sha256(output_sidecar),
+        "checkpoint_hash": checkpoint_hash,
+        "event_cache_metadata_hash": sidecar["event_cache_metadata_hash"],
+        "chunk_events": int(chunk_events),
+    }
+
+
+def _event_raw_support_arrays(
+    *,
+    arrays: Mapping[str, np.ndarray],
+    config: Mapping[str, Any],
+    calibrator_beta: float = 0.0,
+    reliability_values: np.ndarray | None = None,
+) -> np.ndarray:
+    """Compute formal PSMR support without structural candidate legality.
+
+    This function deliberately knows nothing about candidate rank, minimum
+    gap, or maximum gap.  Those are properties of a structural sweep config
+    and are applied by :func:`_apply_structural_legality` after this raw
+    support has optionally been cached.
+    """
+    cosine = np.asarray(arrays["cosine"], dtype=np.float32)
     mem_len = np.asarray(arrays["mem_len"], dtype=np.int64)
-    qcount = int(config.get("query_observations", 1)); top_r = int(config.get("top_r", 1))
-    candidate_top_k = int(config.get("candidate_top_k", 64))
+    qcount = max(1, min(int(config.get("query_observations", 1)), cosine.shape[1]))
+    top_r = int(config.get("top_r", 1))
     memory_capacity = int(config.get("memory_capacity", 64))
     multiplier = float(config.get("reliability_multiplier", 0.0))
-    reliability = None if reliability_values is None else np.asarray(reliability_values, dtype=np.float32)
-    if calibrator is None and checkpoint is not None:
-        calibrator, calibrator_beta = _load_calibrator(checkpoint)
-    if reliability is None and calibrator is not None and multiplier > 0:
-        # The calibrator is deliberately evaluated once per structural sweep,
-        # not once per event row.  CPU batches keep the exact trained model
-        # semantics while avoiding a Python call for every candidate.
-        with torch.no_grad():
-            reliability = calibrator.reliability(
-                torch.as_tensor(evidence.reshape(-1, 7), dtype=torch.float32)
-            ).reshape(evidence.shape[0], evidence.shape[1]).numpy()
-    qcount = max(1, min(qcount, cosine.shape[1]))
     cache_width = int(cosine.shape[2])
     width = min(memory_capacity, cache_width)
     if width < 1:
         raise ValueError("memory_capacity must be positive")
     rank = max(1, min(top_r, width))
-    # The cache stores each anchor bank oldest-to-newest.  The production
-    # builder retains the *last* N rows for capacity N, so a capacity ablation
-    # must gather a right-aligned window instead of taking the oldest [:N].
+
+    # The cache is chronological oldest -> newest.  A capacity ablation must
+    # use the same right-aligned recent-N semantics as build_memory_anchor.
     available = np.minimum(np.maximum(mem_len, 0), cache_width)
     starts = np.maximum(available - width, 0)
     offsets = np.arange(width, dtype=np.int64)
@@ -863,45 +1009,140 @@ def _event_score_arrays(metadata: Mapping[str, Any], arrays: Mapping[str, np.nda
         column_indices[:, None, :], (cosine.shape[0], qcount, width)
     )
     values = np.take_along_axis(
-        np.asarray(cosine[:, :qcount, :], dtype=np.float32),
-        broadcast_indices,
-        axis=2,
+        cosine[:, :qcount, :], broadcast_indices, axis=2
     ).copy()
     valid_memory = offsets[None, :] < np.minimum(available, width)[:, None]
     values = np.where(valid_memory[:, None, :], values, -np.inf)
-    if reliability is not None and multiplier > 0:
+
+    if reliability_values is not None and multiplier > 0.0:
+        reliability = np.asarray(reliability_values, dtype=np.float32)
+        if reliability.ndim != 2 or reliability.shape[0] != cosine.shape[0] or reliability.shape[1] < cache_width:
+            raise ValueError(
+                "reliability cache must have shape [N_events, cache_width]"
+            )
         selected_reliability = np.take_along_axis(
-            np.asarray(reliability[:, :cache_width], dtype=np.float32),
-            column_indices,
-            axis=1,
+            reliability[:, :cache_width], column_indices, axis=1
         )
-        values += float(calibrator_beta) * float(multiplier) * np.log(np.maximum(selected_reliability[:, None, :], 1e-6))
+        values += (
+            float(calibrator_beta)
+            * multiplier
+            * np.log(np.maximum(selected_reliability[:, None, :], 1e-6))
+        )
         values = np.where(valid_memory[:, None, :], values, -np.inf)
-    # ``partition`` is equivalent to the formal top-r support but operates on
-    # all events in one NumPy kernel.  Invalid/padded memory slots contribute
-    # zero and the denominator remains the number of retained anchors.
+
     top = np.partition(values, width - rank, axis=2)[:, :, -rank:]
     finite = np.isfinite(top)
     numer = np.where(finite, top, 0.0).sum(axis=2)
     denom = np.minimum(np.minimum(available, width), rank).astype(np.float32)
     denom = np.maximum(denom, 1.0)[:, None]
-    support = (numer / denom).mean(axis=1).astype(np.float32)
-    if row_arrays is None:
-        if rows is None:
-            raise ValueError("V9.1 scoring requires mmap row arrays")
-        rank_key = f"prefilter_rank_b{qcount}"
-        ranks = np.asarray([int(item[rank_key]) for item in rows], dtype=np.int64)
-        gaps = np.asarray([int(item["gap"]) for item in rows], dtype=np.int64)
+    return (numer / denom).mean(axis=1).astype(np.float32)
+
+
+def _apply_structural_legality(
+    raw_support: np.ndarray,
+    *,
+    row_arrays: Mapping[str, np.ndarray],
+    config: Mapping[str, Any],
+) -> np.ndarray:
+    """Apply B-specific rank and gap legality to one raw support vector."""
+    qcount = int(config.get("query_observations", 1))
+    rank_key = f"prefilter_rank_b{qcount}"
+    if rank_key not in row_arrays:
+        raise ValueError(
+            f"missing {rank_key}; legacy/non-B-specific event cache rejected"
+        )
+    if "gap" not in row_arrays:
+        raise ValueError("missing gap; legacy/non-B-specific event cache rejected")
+    ranks = np.asarray(row_arrays[rank_key], dtype=np.int64)
+    gaps = np.asarray(row_arrays["gap"], dtype=np.int64)
+    scores = np.asarray(raw_support, dtype=np.float32)
+    if len(ranks) != len(scores) or len(gaps) != len(scores):
+        raise ValueError("structural legality arrays do not match raw support length")
+    legal = ranks <= int(config.get("candidate_top_k", 64))
+    legal &= gaps >= int(config.get("min_dormant_gap", 0))
+    legal &= gaps <= int(config.get("max_gap", 360))
+    return np.where(legal, scores, -np.inf).astype(np.float32)
+
+
+def _chunked_reliability_values(
+    evidence: np.ndarray,
+    calibrator: Any,
+    *,
+    device: str = "cpu",
+    chunk_events: int = 4096,
+) -> np.ndarray:
+    """Evaluate a calibrator in bounded event chunks.
+
+    Sweep workers use the persistent mmap path below.  This helper remains for
+    the reference wrapper and guarantees that a direct call cannot recreate the
+    former all-events MLP allocation.
+    """
+    if int(chunk_events) < 1:
+        raise ValueError("chunk_events must be positive")
+    import torch
+
+    values = np.asarray(evidence, dtype=np.float32)
+    if values.ndim != 3 or values.shape[-1] != 7:
+        raise ValueError(f"evidence must have shape [N,M,7], got {values.shape}")
+    model = calibrator.to(device) if hasattr(calibrator, "to") else calibrator
+    if hasattr(model, "eval"):
+        model.eval()
+    output = np.empty(values.shape[:2], dtype=np.float32)
+    with torch.inference_mode():
+        for start in range(0, values.shape[0], int(chunk_events)):
+            end = min(start + int(chunk_events), values.shape[0])
+            batch = np.array(values[start:end], dtype=np.float32, copy=True, order="C")
+            tensor = torch.from_numpy(batch.reshape(-1, 7)).to(device, non_blocking=True)
+            result = model.reliability(tensor).reshape(end - start, values.shape[1])
+            output[start:end] = result.detach().cpu().numpy().astype(np.float32, copy=False)
+            del tensor, result, batch
+    return output
+
+
+def _event_score_arrays(
+    metadata: Mapping[str, Any],
+    arrays: Mapping[str, np.ndarray],
+    rows: Sequence[Mapping[str, Any]] | None,
+    config: Mapping[str, Any],
+    checkpoint: str | Path | None,
+    calibrator: Any | None = None,
+    calibrator_beta: float = 0.0,
+    row_arrays: Mapping[str, np.ndarray] | None = None,
+    reliability_values: np.ndarray | None = None,
+) -> np.ndarray:
+    """Reference wrapper: raw support first, structural legality second."""
+    multiplier = float(config.get("reliability_multiplier", 0.0))
+    reliability = None if reliability_values is None else np.asarray(reliability_values, dtype=np.float32)
+    if calibrator is None and checkpoint is not None:
+        calibrator, calibrator_beta = _load_calibrator(checkpoint)
+    if reliability is None and calibrator is not None and multiplier > 0.0:
+        reliability = _chunked_reliability_values(
+            np.asarray(arrays["evidence"], dtype=np.float32),
+            calibrator,
+            device="cpu",
+            chunk_events=4096,
+        )
+    raw_support = _event_raw_support_arrays(
+        arrays=arrays,
+        config=config,
+        calibrator_beta=calibrator_beta,
+        reliability_values=reliability,
+    )
+    if row_arrays is not None:
+        # Direct reference callers may provide only the B-specific rank they
+        # are exercising.  The legality function rejects a missing current
+        # rank; loading a production cache remains strict via _load_event_cache.
+        prepared = {key: np.asarray(value) for key, value in row_arrays.items()}
     else:
-        rank_key = f"prefilter_rank_b{qcount}"
-        if rank_key not in row_arrays:
-            raise ValueError(f"V9.1 requires B-specific prefilter rank {rank_key}; legacy V9 event cache must be rebuilt")
-        ranks = np.asarray(row_arrays[rank_key], dtype=np.int64)
-        gaps = np.asarray(row_arrays["gap"], dtype=np.int64)
-    legal = (ranks <= candidate_top_k)
-    legal &= gaps <= int(config.get("max_gap", metadata.get("max_gap", 360)))
-    legal &= gaps >= int(config.get("min_dormant_gap", metadata.get("min_gap", 0)))
-    return np.where(legal, support, -np.inf).astype(np.float32)
+        prepared = _prepare_row_arrays(rows)
+    legality_config = dict(config)
+    legality_config.setdefault("max_gap", metadata.get("max_gap", 360))
+    legality_config.setdefault("min_dormant_gap", metadata.get("min_gap", 0))
+    return _apply_structural_legality(
+        raw_support,
+        row_arrays=prepared,
+        config=legality_config,
+    )
 
 
 def _prepare_row_arrays(rows: Sequence[Mapping[str, Any]] | Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
@@ -1049,6 +1290,7 @@ def sweep_psmr(
     output: str | Path, checkpoint: str | Path | None = None,
     structural_limit: int | None = None, structural_shard_index: int = 0,
     structural_shard_count: int = 1,
+    reliability_cache_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     if int(structural_shard_count) < 1 or not 0 <= int(structural_shard_index) < int(structural_shard_count):
         raise ValueError("structural shard must satisfy 0 <= index < count and count >= 1")
@@ -1099,42 +1341,58 @@ def sweep_psmr(
     evaluated_structural = 0
     prepared_rows = _prepare_row_arrays(arrays)
     prepared_groups = _prepare_group_arrays(arrays)
-    calibrators: dict[str, tuple[Any | None, float]] = {}
     reliability_by_checkpoint: dict[str, np.ndarray | None] = {}
-    score_cache_hits = 0
-    score_cache_misses = 0
+    reliability_beta_by_checkpoint: dict[str, float] = {}
+    reliability_sidecars: dict[str, dict[str, Any]] = {}
+    support_cache_hits = 0
+    support_cache_misses = 0
+    lambda_zero_seen: set[tuple[int, int, int, int, int, int]] = set()
+    has_learned_checkpoint = any(path is not None for _, path in checkpoint_variants)
+    needs_reliability = any(float(value) > 0.0 for value in multipliers)
     for checkpoint_step, checkpoint_path in checkpoint_variants:
-        calibrators[checkpoint_step] = (None, 0.0) if checkpoint_path is None else _load_calibrator(checkpoint_path)
-        calibrator, _ = calibrators[checkpoint_step]
-        if calibrator is None:
+        if checkpoint_path is None or not needs_reliability:
             reliability_by_checkpoint[checkpoint_step] = None
+            reliability_beta_by_checkpoint[checkpoint_step] = 0.0
         else:
-            # Reliability is a property of the immutable event evidence and
-            # checkpoint, not of threshold/candidate/memory structural
-            # settings.  Evaluate it once per checkpoint and reuse it for
-            # every exact structural configuration below.
-            import torch
-            evidence = np.asarray(arrays["evidence"], dtype=np.float32)
-            with torch.no_grad():
-                reliability_by_checkpoint[checkpoint_step] = calibrator.reliability(
-                    torch.as_tensor(evidence.reshape(-1, 7), dtype=torch.float32)
-                ).reshape(evidence.shape[0], evidence.shape[1]).numpy()
-            del evidence
+            if reliability_cache_dir is None:
+                raise ValueError(
+                    "learned V9.2 sweep requires --reliability-cache-dir; "
+                    "precompute one shared mmap per checkpoint first"
+                )
+            values, sidecar = _load_reliability_cache(
+                event_cache=event_cache,
+                checkpoint=checkpoint_path,
+                reliability_cache_dir=reliability_cache_dir,
+            )
+            reliability_by_checkpoint[checkpoint_step] = values
+            reliability_beta_by_checkpoint[checkpoint_step] = float(sidecar["calibrator_beta"])
+            reliability_sidecars[checkpoint_step] = sidecar
     evaluated_rows = 0
     output_path = Path(output).resolve(); output_path.parent.mkdir(parents=True, exist_ok=True)
     rows_jsonl = output_path.with_suffix(output_path.suffix + ".jsonl")
     rows_jsonl.unlink(missing_ok=True)
+    rows_jsonl.touch()
     is_test_cache = cache_split == "test"
     frozen_test_invalid = protocol == "FROZEN_DEV" and is_test_cache
     frozen_dev_selection_invalid = protocol == "FROZEN_DEV"
     structural_ordinal = 0
     for checkpoint_step, checkpoint_path in checkpoint_variants:
-        calibrator, calibrator_beta = calibrators[checkpoint_step]
+        calibrator_beta = reliability_beta_by_checkpoint[checkpoint_step]
         reliability_values = reliability_by_checkpoint[checkpoint_step]
-        score_cache: dict[tuple[int, int, int, float], np.ndarray] = {}
+        support_cache: dict[tuple[int, int, int, float], np.ndarray] = {}
         for min_gap, max_gap, candidate_top_k, memory_capacity, top_r, batch, multiplier in structural_configs():
             if max_gap <= min_gap or candidate_top_k < 1 or memory_capacity < top_r:
                 continue
+            # A zero multiplier is independent of checkpoint weights.  Keep
+            # exactly one canonical raw-support lane across 2k/5k/10k/20k.
+            zero_key = (
+                int(min_gap), int(max_gap), int(candidate_top_k),
+                int(memory_capacity), int(top_r), int(batch),
+            )
+            if float(multiplier) == 0.0:
+                if zero_key in lambda_zero_seen:
+                    continue
+                lambda_zero_seen.add(zero_key)
             ordinal = structural_ordinal
             structural_ordinal += 1
             if ordinal % int(structural_shard_count) != int(structural_shard_index):
@@ -1142,24 +1400,24 @@ def sweep_psmr(
             if structural_limit is not None and evaluated_structural >= int(structural_limit):
                 break
             structural_config = {"min_dormant_gap": int(min_gap), "max_gap": int(max_gap), "candidate_top_k": int(candidate_top_k), "memory_capacity": int(memory_capacity), "top_r": int(top_r), "query_observations": int(batch), "reliability_multiplier": float(multiplier)}
-            score_key = (int(batch), int(top_r), int(memory_capacity), float(multiplier))
-            scores = score_cache.get(score_key)
-            if scores is None:
-                score_cache_misses += 1
-                scores = _event_score_arrays(
-                    metadata,
-                    arrays,
-                    None,
-                    structural_config,
-                    None,
-                    calibrator=None,
+            support_key = (int(batch), int(top_r), int(memory_capacity), float(multiplier))
+            raw_support = support_cache.get(support_key)
+            if raw_support is None:
+                support_cache_misses += 1
+                raw_support = _event_raw_support_arrays(
+                    arrays=arrays,
+                    config=structural_config,
                     calibrator_beta=calibrator_beta,
-                    row_arrays=prepared_rows,
                     reliability_values=reliability_values,
                 )
-                score_cache[score_key] = scores
+                support_cache[support_key] = raw_support
             else:
-                score_cache_hits += 1
+                support_cache_hits += 1
+            scores = _apply_structural_legality(
+                raw_support,
+                row_arrays=prepared_rows,
+                config=structural_config,
+            )
             stats = _group_statistics(scores, None, prepared=prepared_groups)
             if not len(stats["best"]):
                 continue
@@ -1193,7 +1451,7 @@ def sweep_psmr(
                             if best is None or rank > best["_rank"]:
                                 best = {**item, "_rank": rank}
     rows_out.sort(key=lambda item: (float(item["selection_metrics"]["recall"]), float(item["selection_metrics"]["f1"]), float(item["selection_metrics"]["precision"])), reverse=True)
-    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_psmr_sweep", "protocol": protocol, "event_cache": str(Path(event_cache).resolve()), "event_cache_hash": _sha256(Path(event_cache) / "metadata.json" if Path(event_cache).is_dir() else Path(event_cache)), "search_space": str(Path(search_space).resolve()), "search_space_hash": _sha256(search_space), "checkpoint": None if checkpoint is None else str(Path(checkpoint).resolve()), "requested_checkpoint_steps": checkpoint_steps, "evaluated_checkpoint_steps": [step for step, _ in checkpoint_variants], "requested_reliability_multipliers": requested_multipliers, "evaluated_reliability_multipliers": multipliers, "untrained_multiplier_equivalence": not any(path is not None for _, path in checkpoint_variants), "candidate_top_k_independent": True, "memory_capacity_independent": True, "selection_metric": "Base-only internal gate at precision floor 0.95; FROZEN_DEV must use an externally selected config", "structural_shard_index": int(structural_shard_index), "structural_shard_count": int(structural_shard_count), "structural_configs_total": int(structural_ordinal), "evaluated_structural_configs": evaluated_structural, "evaluated_rows": evaluated_rows, "score_cache_hits": score_cache_hits, "score_cache_misses": score_cache_misses, "all_rows_jsonl": str(rows_jsonl), "all_rows_hash": _sha256(rows_jsonl), "best": None if best is None else {key: value for key, value in best.items() if key != "_rank"}, "top_rows": rows_out[:200]}
+    result = {"schema_version": V91_SCHEMA, "artifact": "v9_1_psmr_sweep", "protocol": protocol, "event_cache": str(Path(event_cache).resolve()), "event_cache_hash": _sha256(Path(event_cache) / "metadata.json" if Path(event_cache).is_dir() else Path(event_cache)), "search_space": str(Path(search_space).resolve()), "search_space_hash": _sha256(search_space), "checkpoint": None if checkpoint is None else str(Path(checkpoint).resolve()), "reliability_cache_dir": None if reliability_cache_dir is None else str(Path(reliability_cache_dir).resolve()), "reliability_cache_sidecars": reliability_sidecars, "requested_checkpoint_steps": checkpoint_steps, "evaluated_checkpoint_steps": [step for step, _ in checkpoint_variants], "requested_reliability_multipliers": requested_multipliers, "evaluated_reliability_multipliers": multipliers, "untrained_multiplier_equivalence": not has_learned_checkpoint, "lambda_zero_checkpoint_equivalence": bool(has_learned_checkpoint and len(checkpoint_variants) > 1), "candidate_top_k_independent": True, "memory_capacity_independent": True, "support_cache_semantics": "raw support only; K/min_gap/max_gap applied per structural config", "selection_metric": "Base-only internal gate at precision floor 0.95; FROZEN_DEV must use an externally selected config", "structural_shard_index": int(structural_shard_index), "structural_shard_count": int(structural_shard_count), "structural_configs_total": int(structural_ordinal), "evaluated_structural_configs": evaluated_structural, "evaluated_rows": evaluated_rows, "support_cache_hits": support_cache_hits, "support_cache_misses": support_cache_misses, "all_rows_jsonl": str(rows_jsonl), "all_rows_hash": _sha256(rows_jsonl), "best": None if best is None else {key: value for key, value in best.items() if key != "_rank"}, "top_rows": rows_out[:200]}
     _write_json(output_path, result)
     for index, item in enumerate(rows_out[:8], start=1):
         _write_json(output_path.with_name(f"{output_path.stem}_top_{index:02d}.json"), item)
@@ -1273,11 +1531,15 @@ def merge_sweep_shards(*, parts: Sequence[str | Path], output: str | Path) -> di
         "search_space": first.get("search_space"),
         "search_space_hash": first.get("search_space_hash"),
         "checkpoint": first.get("checkpoint"),
+        "reliability_cache_dir": first.get("reliability_cache_dir"),
+        "reliability_cache_sidecars": first.get("reliability_cache_sidecars", {}),
         "requested_checkpoint_steps": first.get("requested_checkpoint_steps", []),
         "evaluated_checkpoint_steps": first.get("evaluated_checkpoint_steps", []),
         "requested_reliability_multipliers": first.get("requested_reliability_multipliers", []),
         "evaluated_reliability_multipliers": first.get("evaluated_reliability_multipliers", []),
         "untrained_multiplier_equivalence": first.get("untrained_multiplier_equivalence"),
+        "lambda_zero_checkpoint_equivalence": first.get("lambda_zero_checkpoint_equivalence"),
+        "support_cache_semantics": first.get("support_cache_semantics"),
         "structural_shard_index": None,
         "structural_shard_count": len(part_paths),
         "structural_configs_total": max(int(item.get("structural_configs_total", 0)) for item in manifests),
@@ -2054,8 +2316,10 @@ def dispatch_psmr_v9(args) -> int:
         result = audit_candidates(frontend=args.frontend, split=args.split, manifest=args.manifest, frontend_prediction=args.frontend_prediction, annotation=args.annotation, max_gap=args.max_gap, candidate_k=args.candidate_k, query_observations=args.query_observations, output=args.output, max_videos=args.video_limit)
     elif action == "build-event-cache":
         result = build_event_cache(frontend=args.frontend, split=args.split, manifest=args.manifest, frontend_prediction=args.frontend_prediction, annotation=args.annotation, checkpoint=args.checkpoint, min_gap=args.min_gap, max_gap=args.max_gap, candidate_k=args.candidate_k, query_observations=args.query_observations, top_r=args.top_r, output=args.output, device=args.device, max_videos=args.video_limit)
+    elif action == "precompute-reliability":
+        result = precompute_reliability_cache(event_cache=args.event_cache, checkpoint=args.checkpoint, output=args.output, device=args.device, chunk_events=args.chunk_events)
     elif action == "sweep-psmr":
-        result = sweep_psmr(event_cache=args.event_cache, protocol=args.protocol, search_space=args.search_space, output=args.output, checkpoint=args.checkpoint, structural_limit=args.structural_limit, structural_shard_index=args.structural_shard_index, structural_shard_count=args.structural_shard_count)
+        result = sweep_psmr(event_cache=args.event_cache, protocol=args.protocol, search_space=args.search_space, output=args.output, checkpoint=args.checkpoint, reliability_cache_dir=args.reliability_cache_dir, structural_limit=args.structural_limit, structural_shard_index=args.structural_shard_index, structural_shard_count=args.structural_shard_count)
     elif action == "merge-sweep":
         result = merge_sweep_shards(parts=args.part, output=args.output)
     elif action == "sweep-dual":
@@ -2086,4 +2350,4 @@ def dispatch_psmr_v9(args) -> int:
     return 0 if str(result.get("status", "COMPLETED")).startswith("COMPLETED") or result.get("status") in {"READY", "REUSED"} else 2
 
 
-__all__ = ["resolve_v9_inputs", "audit_candidates", "build_event_cache", "sweep_psmr", "merge_sweep_shards", "sweep_dual", "materialize", "evaluate_v9", "train_external_v9", "prepare_masa_r50", "convert_public_dets", "format_native_assigned", "convert_vov_detector_dets", "complete_annotation_partition", "r50_native_cache", "report_v9", "dispatch_psmr_v9"]
+__all__ = ["resolve_v9_inputs", "audit_candidates", "build_event_cache", "precompute_reliability_cache", "sweep_psmr", "merge_sweep_shards", "sweep_dual", "materialize", "evaluate_v9", "train_external_v9", "prepare_masa_r50", "convert_public_dets", "format_native_assigned", "convert_vov_detector_dets", "complete_annotation_partition", "r50_native_cache", "report_v9", "dispatch_psmr_v9"]
