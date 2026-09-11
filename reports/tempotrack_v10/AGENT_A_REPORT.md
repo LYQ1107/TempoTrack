@@ -35,19 +35,33 @@ with detector-visible arrays, native affinity, causal memory timestamps, and
 recursive rejection of GT/oracle/post-association fields.
 
 `tempotrack_v10/overlay.py` defines the single shared `TempoTrackOverlay`.
-It reuses V9 `FixedDualMemory`/`MemoryState`, applies causal gap and explicit
-candidate Top-K legality, fast/slow blending, optional frontend reliability,
-deterministic event-local competition, loser-no-fallback, frame-collision
-guards, and commit-after-propose memory updates. `enabled=False` is a strict
-no-op. Detector boxes, scores, labels, and features are copied/read-only and
-are never rewritten. The exact reuse decisions are in
-`V9_COMPONENT_REUSE_MAP.md`.
+It reuses V9 `FixedDualMemory`/`MemoryState`, builds the candidate set as
+native snapshot memory UNION independent dormant `_records`, gives dormant
+IDs no fabricated native affinity, and applies causal gap, root/lineage
+event-local competition, loser-no-fallback, frame-collision guards, and
+commit-after-propose memory updates. `enabled=False` is a strict no-op.
+Detector boxes, scores, labels, and features are copied/read-only and are
+never rewritten. The exact reuse decisions are in `V9_COMPONENT_REUSE_MAP.md`.
+
+The exact V9 query-conditioned reranker is now controlled by
+`tempotrack_v10/query_conditioned_reranker.py`, a byte-for-byte copy with
+SHA256 `2390d4049090c26c3af5be54035671be9d91512b4cf74e3ea6230035712a60da`.
+The exact trainer and orchestration files are also vendored byte-for-byte as
+`tempotrack_v10/reranker_trainer.py` (SHA256
+`fb896e0efca9c356c24cc2c92d14365472d58352ba71cfebd2d7dd6c05868c83`) and
+`tempotrack_v10/v9_reranker.py` (SHA256
+`fac6059ca080a62c8c6f406b8ef44d88a6eb39ee8a12ffbce3e5d6bd3ffba6b9`). The
+adapter imports only the controlled model copy and validates the diagnostic
+checkpoint `36e7bbfc80d70fbe3fd6bec4830b9df419d6b9a05ca94fabc1ccfa0fa156c82b`.
+The checkpoint receipt is `VAL_BASE_PILOT`/`NOT_PAPER_VALID`; its older
+receipt orchestration hash is retained as a provenance difference, not
+silently rewritten.
 
 Focused checks:
 
 ```text
-PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py -q
-11 passed in 4.22s
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py -q
+18 passed (11 existing + 7 new)
 
 PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_psmr_reactivation.py -q
 3 passed in 5.45s
@@ -106,10 +120,13 @@ VOV jobs**. Conversion remains unrun until that output is complete.
 - `reports/tempotrack_v10/V9_COMPONENT_REUSE_MAP.md`
 - `reports/tempotrack_v10/COVTRACK_DETECTOR_EQUIVALENCE.json`
 - `reports/tempotrack_v10/PROGRESS.md`
+- `tempotrack_v10/query_conditioned_reranker.py`
+- `tempotrack_v10/reranker.py`
+- `tempotrack_v10/reranker_trainer.py`
+- `tempotrack_v10/v9_reranker.py`
 
-The branch is ready for the explicit source-only commit and push. The exact
-post-commit `CORE_SHA` is reported from `git rev-parse HEAD`; no checkpoints,
-predictions, caches, or cleanup candidates are staged.
+The current change set is ready for an explicit source/test/report commit and
+push. No checkpoints, predictions, caches, or cleanup candidates are staged.
 
 The converter wrapper help/import check passed with the repository's required
 SQLite preload. A plain import without that preload exposed the known
