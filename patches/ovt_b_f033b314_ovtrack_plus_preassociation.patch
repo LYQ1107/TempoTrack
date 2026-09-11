@@ -1,0 +1,96 @@
+--- a/ovtrack/models/mot/ovtrack.py
++++ b/ovtrack/models/mot/ovtrack.py
+@@ -177,6 +177,7 @@
+                 embeds=track_feats,
+                 cls_embeds=cem_feats,
+                 frame_id=frame_id,
++                video_id=img_metas[0].get("video_id"),
+                 method=self.method,
+             )
+         
+--- a/ovtrack/models/trackers/ovsort_tracker.py
++++ b/ovtrack/models/trackers/ovsort_tracker.py
+@@ -25,6 +25,7 @@
+         num_frames_retain=10,
+         momentum_embed=0.8,
+         motion_weight=0.02,
++        tempo=None,
+         init_cfg=None,
+         **kwargs
+     ):
+@@ -34,6 +35,10 @@
+         self.num_frames_retain = num_frames_retain
+         self.momentums = {'embeds': momentum_embed}
+         self.motion_weight = motion_weight
++        self._tempo_adapter = None
++        if tempo is not None:
++            from tempotrack_v10.adapters.ovtrack_plus import OVTrackPlusTempoAdapter
++            self._tempo_adapter = OVTrackPlusTempoAdapter.from_mapping(tempo)
+         self.reset()
+ 
+     def update_track(self, id, obj):
+@@ -60,11 +65,15 @@
+         embeds,
+         cls_embeds,
+         frame_id,
++        video_id=None,
+         **kwargs
+     ):
+ 
+         if not hasattr(self, 'kf'):
+             self.kf = model.motion
++        if frame_id == 0 and self._tempo_adapter is not None:
++            self._tempo_adapter.reset(video_id)
++        tempo_decision = None
+ 
+         if embeds is None:
+             ids = torch.full((bboxes.size(0),), -1, dtype=torch.long)
+@@ -99,12 +108,32 @@
+             reid_dists = (scores + cos) / 2
+             
+             match_dists = (1 - self.motion_weight) * reid_dists + self.motion_weight * iou_dists
+-            match_dists = 1.0 - match_dists.T
+-            row, col = linear_sum_assignment(match_dists.cpu().numpy())
+-            for r, c in zip(row, col):
+-                dist = match_dists[r, c]
+-                if dist <= self.match_score_thr:
+-                    ids[c] = active_ids[r]
++            if self._tempo_adapter is not None and self._tempo_adapter.enabled:
++                memory_last_frame = [
++                    int(self.tracks[track_id]['frame_ids'][-1])
++                    for track_id in active_ids
++                ]
++                tempo_decision = self._tempo_adapter.prepare(
++                    video_id=video_id,
++                    frame_id=frame_id,
++                    bboxes=bboxes,
++                    labels=labels,
++                    embeds=embeds,
++                    native_affinity=match_dists,
++                    memory_ids=active_ids,
++                    memory_embeddings=track_embeds,
++                    memory_last_frame=memory_last_frame,
++                )
++                ids = self._tempo_adapter.preassigned_ids(
++                    tempo_decision, device=bboxes.device
++                )
++            else:
++                match_dists = 1.0 - match_dists.T
++                row, col = linear_sum_assignment(match_dists.cpu().numpy())
++                for r, c in zip(row, col):
++                    dist = match_dists[r, c]
++                    if dist <= self.match_score_thr:
++                        ids[c] = active_ids[r]
+ 
+             ids = ids.to(bboxes.device) 
+             new_track_inds = ids == -1
+@@ -130,6 +159,8 @@
+             labels=labels, 
+             embeds=embeds, 
+             frame_ids=frame_id)
++        if tempo_decision is not None:
++            self._tempo_adapter.commit(tempo_decision, ids)
+         return bboxes, labels, ids
+     
+     def remove_distractor(
+

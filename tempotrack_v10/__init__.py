@@ -14,7 +14,13 @@ from .overlay import (
     TempoTrackConfig,
     TempoTrackOverlay,
 )
-from .adapters import COVTrackAssociationDecision, COVTrackTempoAdapter
+from .adapters import (
+    COVTrackAssociationDecision,
+    COVTrackTempoAdapter,
+    CORE_SHA_V10_FULL,
+    OVTrackPlusDecision,
+    OVTrackPlusTempoAdapter,
+)
 
 __all__ = [
     "FrameCollisionError",
@@ -25,4 +31,7 @@ __all__ = [
     "TempoTrackOverlay",
     "COVTrackAssociationDecision",
     "COVTrackTempoAdapter",
+    "CORE_SHA_V10_FULL",
+    "OVTrackPlusDecision",
+    "OVTrackPlusTempoAdapter",
 ]
