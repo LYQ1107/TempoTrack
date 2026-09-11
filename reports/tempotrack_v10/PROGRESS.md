@@ -249,11 +249,13 @@ failure.
 - The disabled run itself completed with 400/400 output objects at
   `/data2/usr_for_deadline/tempotrack_v10_unified/tempo_parity10_disabled_v10/native_results.pkl`,
   SHA256 `908d4f16cd8eb131144267136bcc64cddddd561a6282ecf1fd7f12b066c41ed3`.
-- A valid same-input native reference is now running as PID `19542` on GPU1
-  using the pinned official OVTrack source commit
-  `e188b32eccc049fd425e80b11a3bc45ce88edb31`, the same official checkpoint,
-  prompt, annotation and image root. The new comparison will be made only
-  after this output is complete.
+- A valid same-input native reference completed on GPU1 from the pinned
+  official OVTrack source commit `e188b32eccc049fd425e80b11a3bc45ce88edb31`
+  with the same checkpoint, prompt, annotation and image root. Its output and
+  the disabled adapter output are byte-identical at SHA256
+  `908d4f16cd8eb131144267136bcc64cddddd561a6282ecf1fd7f12b066c41ed3` after
+  recursive comparison. Receipt:
+  `/data2/usr_for_deadline/tempotrack_v10_unified/tempo_parity10_disabled_v10/parity_receipt.json`.
 
 ## Parallel native lanes — 2026-09-12 04:42 CST
 
@@ -264,10 +266,10 @@ failure.
   the audited `tao_test_burst_v1.json` (1419 videos). Its separate output is
   `/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus/native_test_current/`;
   the Val output is not overwritten.
-- The same-input official OVTrack native parity reference remains PID `19542`
-  on GPU1. Current logs show approximately `36/74` parity videos; no PASS is
-  claimed until recursive bbox/score/class/ID comparison against the disabled
-  adapter output completes.
+- The same-input official OVTrack native parity gate is `NATIVE_PARITY_PASS`:
+  10 videos, 400 images, 1,177 annotations, 400 bbox result lists and 400
+  track result lists, with zero recursive differences. The older retained
+  OVT-B checkpoint reference is explicitly marked invalid for this gate.
 - GPU2--9 remain assigned to the recovery native OVTrack Val/Test shards. The
   new Test runner and evaluator have both passed their import/build checks;
   their long outputs are kept in separate roots and no old cache is replaced.
