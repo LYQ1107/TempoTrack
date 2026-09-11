@@ -18,13 +18,17 @@ from typing import Any
 import numpy as np
 
 
-VOV_ROOT = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/VOVTrack")
+# This is the audited OVTrack pin.  The external_ovmot clone used by the
+# first audit is retained as historical evidence only; it is not the V10
+# official canonical source.
+VOV_ROOT = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/references/l3/OVTrack")
 COV_ROOT = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/COVTrack")
-VOV_CONFIG = VOV_ROOT / "configs/ovtrack-teta/ovtrack_r50_reverse_without_inference.py"
+VOV_CONFIG = VOV_ROOT / "configs/ovtrack-teta/ovtrack_r50_no_dynamic_threshold.py"
 COV_CONFIG = COV_ROOT / "configs/uncertainty-ovtrack-teta/ovtrack_r50_ctao_train.py"
-VOV_CHECKPOINT = VOV_ROOT / "saved_models/our_trained_models/ovtrack_finetune_final.pth"
+VOV_CHECKPOINT = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa/ovtrack/saved_models/ovtrack_detpro_prompt.pth")
 COV_CHECKPOINT = COV_ROOT / "saved_models/ctao_public_res/ctao_public.pth"
 PROMPT_CANDIDATES = (
+    Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa/ovtrack/saved_models/detpro_prompt.pt"),
     VOV_ROOT / "saved_models/pretrained_models/detpro_prompt.pt",
     COV_ROOT / "saved_models/pretrained_models/detpro_prompt.pt",
 )
@@ -32,8 +36,7 @@ CLASS_CANDIDATES = (
     Path("/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/lvis/annotations/lvis_classes_v1.txt"),
     Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa/data/lvis/annotations/lvis_classes_v1.txt"),
 )
-VOV_CACHE = Path("/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/vov_val_native_v8")
-COV_CACHE = Path("/data2/usr_for_deadline/tempotrack_v8_relocated_20260910/crossbaseline_v8_final/cov_val_native")
+CANONICAL_RUN_ROOT = Path("/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack")
 
 
 def sha256(path: Path) -> str | None:
@@ -145,9 +148,26 @@ def frame_arrays(path: Path) -> dict[int, dict[str, np.ndarray]]:
     return result
 
 
-def dynamic_audit(video_limit: int = 10, frame_limit: int = 100) -> dict[str, Any]:
-    vov_files = cache_files(VOV_CACHE)
-    cov_files = cache_files(COV_CACHE)
+def dynamic_audit(vov_cache: Path | None, cov_cache: Path | None, video_limit: int = 10, frame_limit: int = 100) -> dict[str, Any]:
+    if vov_cache is None or cov_cache is None:
+        return {
+            "status": "PENDING_OFFICIAL_VOV_CANONICAL_OUTPUT",
+            "cache_vov": None if vov_cache is None else str(vov_cache),
+            "cache_cov": None if cov_cache is None else str(cov_cache),
+            "selected_frame_count": 0,
+            "compared_detection_count": 0,
+            "note": "Do not compare the historical external_ovmot VOV cache with COV as an equivalent stream.",
+        }
+    if not vov_cache.exists() or not cov_cache.exists():
+        return {
+            "status": "BLOCKED_MISSING_COMPARISON_CACHE",
+            "cache_vov": str(vov_cache),
+            "cache_cov": str(cov_cache),
+            "selected_frame_count": 0,
+            "compared_detection_count": 0,
+        }
+    vov_files = cache_files(vov_cache)
+    cov_files = cache_files(cov_cache)
     common_videos = sorted(set(vov_files).intersection(cov_files))
     selected_videos = common_videos[:video_limit]
     selected_pairs: list[tuple[int, int]] = []
@@ -191,8 +211,9 @@ def dynamic_audit(video_limit: int = 10, frame_limit: int = 100) -> dict[str, An
             "status": "EXACT" if frame_exact else "DIFFERENT",
         })
     return {
-        "cache_vov": str(VOV_CACHE),
-        "cache_cov": str(COV_CACHE),
+        "status": "COMPARED",
+        "cache_vov": str(vov_cache),
+        "cache_cov": str(cov_cache),
         "common_video_count": len(common_videos),
         "selected_videos": selected_videos,
         "selected_frame_count": len(selected_pairs),
@@ -208,6 +229,8 @@ def dynamic_audit(video_limit: int = 10, frame_limit: int = 100) -> dict[str, An
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="reports/tempotrack_v10/COVTRACK_DETECTOR_EQUIVALENCE.json")
+    parser.add_argument("--vov-cache", type=Path, help="Official VOV observation cache; omit while canonical generation is running.")
+    parser.add_argument("--cov-cache", type=Path, help="COV observation cache for a detector-only comparison.")
     args = parser.parse_args()
     prompt = next((path for path in PROMPT_CANDIDATES if path.exists()), None)
     class_file = next((path for path in CLASS_CANDIDATES if path.exists()), None)
@@ -238,9 +261,9 @@ def main() -> int:
         },
     }
     differences = ["DIFF_CHECKPOINT", "DIFF_HEAD"]
-    vov_manifest = cache_manifest(VOV_CACHE)
-    cov_manifest = cache_manifest(COV_CACHE)
-    if vov_manifest.get("config") and Path(str(vov_manifest["config"])).name != VOV_CONFIG.name:
+    vov_manifest = cache_manifest(args.vov_cache) if args.vov_cache else {"status": "NOT_SUPPLIED"}
+    cov_manifest = cache_manifest(args.cov_cache) if args.cov_cache else {"status": "NOT_SUPPLIED"}
+    if VOV_CONFIG.name != COV_CONFIG.name:
         differences.append("DIFF_CONFIG")
     if static["ovtrack"].get("test_score_thr") != static["covtrack"].get("test_score_thr"):
         differences.append("DIFF_THRESHOLD")
@@ -248,7 +271,9 @@ def main() -> int:
         differences.append("DIFF_NMS")
     if static["ovtrack"].get("roi_head") != static["covtrack"].get("roi_head"):
         differences.append("DIFF_HEAD")
-    dynamic = dynamic_audit()
+    if static["ovtrack"].get("rpn_head") != static["covtrack"].get("rpn_head"):
+        differences.append("DIFF_RPN_HEAD")
+    dynamic = dynamic_audit(args.vov_cache, args.cov_cache)
     status = "DETECTOR_DIFFERENT"
     if not differences and dynamic["exact"]:
         status = "DETECTOR_EQUIVALENT_EXACT"
@@ -262,7 +287,20 @@ def main() -> int:
         "static_difference_reasons": sorted(set(differences)),
         "dynamic": dynamic,
         "dynamic_cache_manifests": {"ovtrack": vov_manifest, "covtrack": cov_manifest},
-        "dynamic_note": "Existing native caches were compared read-only; association IDs and appearance fields were excluded. This is an observation audit, not a detector rerun. The available VOV Val cache was produced with its manifest-declared adding_spatial config; the requested no_dynamic_threshold file is absent in the checked-out VOV tree, so that config mismatch is recorded rather than guessed away.",
+        "official_vov_canonical": {
+            "source_repo": str(VOV_ROOT),
+            "source_commit": git_head(VOV_ROOT),
+            "config": str(VOV_CONFIG),
+            "config_sha256": sha256(VOV_CONFIG),
+            "checkpoint": str(VOV_CHECKPOINT),
+            "checkpoint_sha256": sha256(VOV_CHECKPOINT),
+            "prompt": str(prompt) if prompt else None,
+            "prompt_sha256": sha256(prompt) if prompt else None,
+            "run_root": str(CANONICAL_RUN_ROOT),
+            "status": "RUNNING_EXTERNAL_WORKERS",
+            "note": "Canonical output is produced only by the pinned official VOV path. Historical external_ovmot VOV/COV native caches are not promoted to equivalent.",
+        },
+        "dynamic_note": "A4 compares detector settings and only an explicitly supplied cache pair. The historical external_ovmot VOV cache is not used by default; official canonical generation uses the LocateMOT pinned OVTrack source above.",
     }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

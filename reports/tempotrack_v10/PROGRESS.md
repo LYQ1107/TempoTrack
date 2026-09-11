@@ -73,25 +73,50 @@ decision before any new shared core code is added. The map is now complete in
 
 ## A4 — detector equivalence audit
 
-- Static audit used the actual checked-out VOV config
-  `configs/ovtrack-teta/ovtrack_r50_reverse_without_inference.py`; the task's
-  named `ovtrack_r50_no_dynamic_threshold.py` is absent and was not invented.
+- **Corrected source audit:** the official VOV pin is
+  `/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/references/l3/OVTrack` at
+  source commit `e188b32eccc049fd425e80b11a3bc45ce88edb31`, with the real
+  `configs/ovtrack-teta/ovtrack_r50_no_dynamic_threshold.py`.
+- Correct official hashes are config
+  `1381ce560edd314e4586080494675c43499ac81183290073e5221913fbbaa846`,
+  model checkpoint
+  `76b4605067aacacae87fd8d17207e3fb56f01fa9c0b02b9b2b69d9f5676ace47`, and
+  DetPro prompt
+  `00ba2f0bfb9abdb577b2fcf2afae12655d6190a18f11051aabdc97f8e4c24579`.
 - COV used `configs/uncertainty-ovtrack-teta/ovtrack_r50_ctao_train.py`.
-- Both configs share ResNet-50/FPN/RPN/bbox detector settings and the same
-  preprocessing/threshold/NMS values in the files, but the ROI heads differ
-  (`OVTrackRoIHead` vs `OVTrackRoIHeadUncertainty`), checkpoints differ, and
-  the available VOV cache manifest was produced by a different
-  `adding_spatial` config. These are recorded as `DIFF_HEAD`,
-  `DIFF_CHECKPOINT`, and `DIFF_CONFIG`.
-- Existing read-only native caches were compared on 10 common videos and 100
-  common frames, 4,236 detector rows. The first frame already differs in
-  count (VOV 74 vs COV 54), so the result is `DETECTOR_DIFFERENT`; no
-  canonical common detector stream was generated.
+- Both configs use ResNet-50/FPN and the same main score/NMS operating point,
+  but the RPN and ROI heads differ (`RPNHead`/`OVTrackRoIHead` versus
+  `MyRPNHead`/`OVTrackRoIHeadUncertainty`), checkpoints differ, and the old
+  VOV cache manifest was produced by a different `adding_spatial` config.
+  These are recorded as `DIFF_RPN_HEAD`, `DIFF_HEAD`, `DIFF_CHECKPOINT`, and
+  `DIFF_CONFIG`.
+- The comparison status remains `DETECTOR_DIFFERENT` for VOV versus COV,
+  because they use different checkpoint/config/ROI head. The historical
+  `external_ovmot/VOVTrack` cache is **not** treated as the official VOV
+  stream and is not compared as an equivalent cache in the corrected report.
 - Evidence: `COVTRACK_DETECTOR_EQUIVALENCE.json`.
+
+## A5 — corrected canonical decision
+
+- The exact official VOV path is available, so the former
+  `BLOCKED_EXTERNAL_CONFIG` conclusion is withdrawn.
+- Official canonical generation is currently running from that pinned source;
+  no COV detector was changed and no native job was stopped. Observed
+  workers: val retry PIDs `2308/2312` on GPU0, test retry PIDs `2567/2572`
+  on GPU1, and val/test shard workers under supervisor PID `4522` on GPUs
+  2--9. Output root:
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack`.
+- At the latest audit, val shards were approximately 1,229--1,319 / 9,066--
+  9,121 frames and test shards 1,287--1,359 / 13,022--13,053 frames. No
+  final canonical manifest/hash is claimed before these official workers
+  finish.
+- Status: `CANONICAL_GENERATION_RUNNING`; once complete, the official VOV
+  detector rows will be converted into the immutable common stream and
+  compared without mixing COV native features or old VOV caches.
 
 ## Current gate
 
-`A0_A3_COMPLETE_A4_DETECTOR_DIFFERENT`
+`A0_A3_COMPLETE_A4_DETECTOR_DIFFERENT_A5_CANONICAL_RUNNING`
 
 ## Focused production checks
 
