@@ -186,3 +186,29 @@ failure.
 - Existing disabled OVTrack parity evidence retains the old core SHA that
   actually generated it.  It is not relabeled as output from the later full
   core.
+
+## Live execution snapshot — 2026-09-12 03:31 CST
+
+- The first V10 official OVTrack Val/Test shard batch is recorded as
+  `EXTERNALLY_REAPED_PARTIAL`: all eight workers and their supervisor
+  disappeared in the same `03:15:01--03:15:02` interval, with no prediction
+  pickle and no traceback in the retained logs.  The last observed Val counts
+  were `8736/9118`, `8560/9070`, `8838/9121`, `8680/9066`; the last Test
+  counts were `8841/13052`, `8741/13053`, `8344/13028`, `7639/13022`.
+  The original directories and logs are preserved under
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/`.
+- Read-only kernel/GPU inspection found no same-time Python traceback, current
+  OOM event, or XID event.  The exact cause is therefore not guessed; the
+  evidence is classified as external process-lifecycle reaping.
+- Recovery supervisor PID `11051` is detached from the Codex app process and
+  writes a new root at
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/recovery_native_20260912_0325`.
+  It launched Val shards `11071--11074` on GPU2--5 and Test shards
+  `11075--11078` on GPU6--9, with the same pinned OVTrack source/config,
+  checkpoint, prompt, class mapping, and worker limits.  At this snapshot all
+  eight had advanced past initialization; no recovery metric is claimed.
+- Corrected OVTrack Tempo parity attempt3 is active as PID `10200` on GPU1;
+  attempt2's CPU/GPU device traceback remains preserved.  OVTrack+ native Val
+  remains PID `31783` on GPU0.  Neither was stopped or restarted.
+- The integration source/config snapshot is pushed to
+  `codex/tempotrack-v10-ov-ovplus-cov-masa` at `a01fde8`.
