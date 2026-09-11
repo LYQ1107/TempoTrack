@@ -90,6 +90,10 @@ class OVTrackPlusTempoAdapter:
             "margin_threshold",
             "reliability_weight",
             "memory_capacity",
+            "reranker_weight",
+            "reranker_checkpoint",
+            "reranker_source_root",
+            "reranker_device",
         }
         values = {key: tempo[key] for key in allowed if key in tempo}
         values["enabled"] = not disabled
