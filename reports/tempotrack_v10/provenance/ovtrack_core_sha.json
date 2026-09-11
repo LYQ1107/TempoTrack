@@ -1,13 +1,14 @@
 {
   "frontend": "ovtrack",
-  "core_sha": "b11b601385aaf89e68675c6f478bf70debd39016",
-  "core_commit": "Add shared V10 TempoTrack association overlay",
+  "historical_receipt_core_sha": "b11b601385aaf89e68675c6f478bf70debd39016",
+  "core_sha": "c1d4b685a4e8b0863260cb657cd3f5d746285f64",
+  "core_commit": "Complete V10 full candidate and reranker integration",
   "imported_by": "git cherry-pick",
   "adapter_branch": "codex/v10-ovtrack",
   "adapter_base_before_import": "a4f3d3d958c01c2905eb8feac8339ab140458dc9",
   "upstream_frontend_sha": "e188b32eccc049fd425e80b11a3bc45ce88edb31",
   "native_reproduction_status": "RUNNING_WITH_10_VIDEO_PREDICTION_PARITY_RECEIPT",
-  "canonical_stream_status": "BLOCKED_EXTERNAL_CONFIG",
+  "canonical_stream_status": "CANONICAL_GENERATION_RUNNING",
   "disabled_parity": {
     "receipt": "reports/tempotrack_v10/provenance/ovtrack_disabled_parity.json",
     "status": "PREDICTION_PARITY_PASS",

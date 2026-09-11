@@ -209,9 +209,9 @@ copied into the result table.
 
 | dependency | state |
 |---|---|
-| Agent A `CORE_SHA` | `AVAILABLE`: `b11b601385aaf89e68675c6f478bf70debd39016` (cherry-picked exactly) |
+| Agent A `CORE_SHA` | `AVAILABLE`: `c1d4b685a4e8b0863260cb657cd3f5d746285f64` (full shared core; historical b11b601 receipt retained separately) |
 | detector-equivalence evidence | `DETECTOR_DIFFERENT`; static reasons `DIFF_CHECKPOINT`, `DIFF_CONFIG`, `DIFF_HEAD` |
-| canonical detector stream | `BLOCKED_EXTERNAL_CONFIG` — no valid unified manifest was generated |
+| canonical detector stream | `CANONICAL_GENERATION_RUNNING` — pinned official OVTrack Val/Test workers are producing it; no final manifest claimed yet |
 | exact-public-checkpoint Val artifact | `PASS` (retained full Val stream/evaluation) |
 | COV native reproduction | `REPRO_GAP` — effective override/runtime gate incomplete |
 | paper override vector | `PARTIAL` — `.37/50/.4`, `80`, `2.0`, `True` documented; not captured in old log |
@@ -219,15 +219,16 @@ copied into the result table.
 | old artifact paper qualification | `NO` — old runtime did not capture the explicit gate |
 | COV pre-association adapter | `AVAILABLE`; focused disabled/native-parity gate `PASS` |
 | Test after corrected gate | `HELD` — not rerun |
-| unified/full COV TETA | `BLOCKED_EXTERNAL_CONFIG` (not run and not fabricated) |
+| unified/full COV TETA | `PENDING_CANONICAL_STREAM` (not run and not fabricated) |
 | detector/MCF/confidence-fusion edits | `NOT_DONE_BY_DESIGN` |
 
-The exact Agent A core is an ancestor of this lane at
-`b11b601385aaf89e68675c6f478bf70debd39016`; it was imported with
-`git cherry-pick`, not copied. The COV adapter is available at
+The exact Agent A core used by the pending full lane is
+`c1d4b685a4e8b0863260cb657cd3f5d746285f64`; the historical disabled/native
+receipt still names `b11b601385aaf89e68675c6f478bf70debd39016` and is not
+rewritten. The COV adapter is available at
 `tempotrack_v10/adapters/covtrack.py`. It only bridges the already-finalized
 native COV state at the locator documented in the companion insertion report.
 No detector, MCF/confidence fusion, embedding, native affinity, final-ID, or
 memo implementation was modified. Because the canonical detector stream is
-blocked externally, and because the retained native run lacks the explicit
+still being generated, and because the retained native run lacks the explicit
 `vis=False` runtime proof, no unified or new full COV TETA number is reported.
