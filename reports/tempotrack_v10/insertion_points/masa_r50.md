@@ -71,6 +71,36 @@ verified sibling TempoTrack worktree contains the official MASA checkpoint:
 This external, already-existing checkpoint may be bound by a later canonical
 manifest; it was not copied, loaded, or used to start a run in Agent E.
 
+## Shared core and thin adapter status
+
+The exact Agent A shared-core commit was verified with parent
+`aa30fba4ebc4739e6a5936cbf4fa3454bb13805f` and cherry-picked without copying
+or reimplementing it:
+
+- `CORE_SHA`: `b11b601385aaf89e68675c6f478bf70debd39016`
+- shared API: `tempotrack_v10.contract.PreAssociationSnapshot` and
+  `tempotrack_v10.overlay.TempoTrackOverlay`
+- target branch cherry-pick commit: `69bf0f9` (core-only commit)
+
+The MASA-specific addition is deliberately thin:
+
+- `tempotrack_v10/adapters/masa.py` converts MASA tensors and ordered memo
+  state into the shared snapshot and maps the shared proposal back to MASA
+  IDs;
+- `masa/models/tracker/masa_tao_tracker.py` exposes
+  `set_pre_association_adapter()` and invokes the adapter only after
+  `_compute_match_scores()` has returned and before `_assign_matches()` or
+  new-ID allocation;
+- native `update()` remains MASA's memo bookkeeping, followed by
+  `adapter.commit()` so the shared overlay sees the actual final IDs;
+- tracker reset delegates to the adapter/overlay so a new MASA sequence cannot
+  inherit another sequence's overlay state;
+- when `TempoTrackConfig(enabled=False)`, the adapter delegates to the
+  existing `_assign_matches()` path and does not alter native IDs or state.
+
+No detector, backbone, association embedding, native affinity formula, or
+shared-core logic was duplicated or changed.
+
 ## Public-detection format audit
 
 The official MASA loader in `masa/models/mot/masa.py` derives each filename as:
@@ -130,16 +160,44 @@ approved by this draft.
 
 ## Canonical-manifest gate
 
-The following required Agent A artifacts were absent at audit time:
+At the initial audit the following Agent A artifacts were absent.  After the
+exact core cherry-pick, the reuse map and detector-equivalence report are now
+available from the core commit, but the canonical detector stream is still
+not available:
 
 - `/data1/LWR/vranlee/SERVER_ONLY/avis/v10_core_detector/reports/tempotrack_v10/V9_COMPONENT_REUSE_MAP.md`
 - `/data1/LWR/vranlee/SERVER_ONLY/avis/v10_core_detector/reports/tempotrack_v10/COVTRACK_DETECTOR_EQUIVALENCE.json`
 - `/data2/usr_for_deadline/tempotrack_v10_unified/detector/common_r50_detpro/manifest.json`
 
 Therefore the MASA lane is currently `BLOCKED_DATA` with reason
-`AGENT_A_CANONICAL_DETECTOR_MANIFEST_MISSING`.  In particular, Agent E has
-not converted detections, loaded the checkpoint, run native baseline, patched
-the tracker, or started FULL TempoTrack.
+`AGENT_A_CANONICAL_DETECTOR_MANIFEST_MISSING` (Agent A records the underlying
+detector-equivalence gate as `BLOCKED_EXTERNAL_CONFIG`: the task-named VOV
+no-dynamic config is absent and the available VOV/COV caches are
+`DETECTOR_DIFFERENT`).  In particular, Agent E has not converted detections,
+loaded the checkpoint, run native baseline, or started FULL TempoTrack.
+
+## Adapter checks
+
+The synthetic adapter checks are source/contract checks only; they do not load
+MASA or a detector:
+
+```text
+PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest \
+  -p no:cacheprovider tests/test_v10_contract.py \
+  tests/test_v10_masa_adapter.py -q
+```
+
+The checks cover native disabled parity, native-affinity preservation, the
+pre-association metadata/causal-memory guard, accepted-ID mapping, and
+attachment of only the thin adapter.  They do not constitute a native/full
+metric result.
+
+Observed result: `17 passed in 1.91s`.  In-memory compilation of the modified
+adapter and tracker also passed, and a source-order check confirmed that the
+adapter decision is after native affinity construction and its commit is after
+native `update()`.  A bytecode-writing `py_compile` attempt was not used as a
+gate because this shared worktree rejects creation of `__pycache__`; no cache
+was left behind.
 
 ## Resource / safety snapshot
 

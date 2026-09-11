@@ -5,7 +5,7 @@ Licensed: Apache-2.0 License
 
 import atexit
 import os
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -82,6 +82,7 @@ class MasaTaoTracker(BaseTracker):
         self.distance_smoothing_factor = 100 / self.fps
         self.debug_association_trace = bool(debug_association_trace)
         self.last_association_trace: AssociationTrace | None = None
+        self._pre_association_adapter: Any | None = None
         self._embedding_dim = 0
         self._last_device = torch.device("cpu")
         self._observation_recorder = None
@@ -116,6 +117,23 @@ class MasaTaoTracker(BaseTracker):
         self.tracks = dict()
         self.backdrops = []
         self.last_association_trace = None
+        adapter = self._pre_association_adapter
+        if adapter is not None:
+            reset = getattr(adapter, "reset", None)
+            if callable(reset):
+                reset()
+
+    def set_pre_association_adapter(self, adapter: Any | None) -> None:
+        """Attach a thin adapter at the finalized-affinity boundary.
+
+        The default is ``None`` and therefore preserves the native MASA path.
+        The adapter is called only by ``associate_precomputed`` after native
+        affinity is computed and before IDs or memo state are committed.
+        """
+        if adapter is not None:
+            if not callable(getattr(adapter, "decide", None)) or not callable(getattr(adapter, "commit", None)):
+                raise TypeError("pre-association adapter must provide decide() and commit()")
+        self._pre_association_adapter = adapter
 
     def update(
         self,
@@ -295,6 +313,7 @@ class MasaTaoTracker(BaseTracker):
         scores: Tensor,
         embeds: Tensor,
         frame_id: int,
+        video_id: int | str | None = None,
         mask_inds=None,
     ) -> InstanceData:
         """Associate already filtered observations without re-sorting them."""
@@ -311,9 +330,39 @@ class MasaTaoTracker(BaseTracker):
             detection_margin=torch.full((ids.numel(),), float("nan"), dtype=embeds.dtype, device=embeds.device),
             assigned_memo_index=torch.full_like(ids, -1),
         )
+        tempo_decision = None
+        adapter = self._pre_association_adapter
         if bboxes.numel() and memory["ids"].numel():
             match_scores = self._compute_match_scores(embeds, memory, bboxes, int(frame_id))
-            ids, trace = self._assign_matches(match_scores, memory["ids"], scores)
+            if adapter is not None and bool(getattr(adapter, "enabled", False)):
+                tempo_decision = adapter.decide(
+                    tracker=self,
+                    video_id=video_id,
+                    frame_id=int(frame_id),
+                    bboxes=bboxes,
+                    labels=labels,
+                    scores=scores,
+                    embeds=embeds,
+                    native_affinity=match_scores,
+                    memory=memory,
+                )
+                ids, trace = tempo_decision.ids, tempo_decision.trace
+            else:
+                ids, trace = self._assign_matches(match_scores, memory["ids"], scores)
+        elif bboxes.numel() and adapter is not None and bool(getattr(adapter, "enabled", False)):
+            empty_affinity = embeds.new_empty((bboxes.shape[0], 0))
+            tempo_decision = adapter.decide(
+                tracker=self,
+                video_id=video_id,
+                frame_id=int(frame_id),
+                bboxes=bboxes,
+                labels=labels,
+                scores=scores,
+                embeds=embeds,
+                native_affinity=empty_affinity,
+                memory=memory,
+            )
+            ids, trace = tempo_decision.ids, tempo_decision.trace
 
         new_inds = (ids == -1) & (scores > self.init_score_thr)
         num_news = int(new_inds.sum().item())
@@ -332,6 +381,8 @@ class MasaTaoTracker(BaseTracker):
         trace.slow_score = slow_score.detach().clone() if slow_score is not None else None
         self.last_association_trace = trace
         self.update(ids, bboxes, embeds, labels, scores, int(frame_id))
+        if tempo_decision is not None:
+            adapter.commit(tempo_decision, ids)
 
         pred_track_instances = InstanceData()
         tracklet_inds = ids > -1
@@ -484,6 +535,7 @@ class MasaTaoTracker(BaseTracker):
             scores=scores,
             embeds=embeds,
             frame_id=frame_id,
+            video_id=metainfo.get("video_id", metainfo.get("vid_id", None)),
             mask_inds=mask_inds if with_segm else None,
         )
         if with_segm and hasattr(pred_track_instances, "mask_inds"):
