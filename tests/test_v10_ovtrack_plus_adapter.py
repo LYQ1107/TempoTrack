@@ -53,4 +53,4 @@ def test_enabled_snapshot_uses_line_101_affinity_and_causal_memory():
 
 
 def test_core_sha_is_explicit_and_no_second_core_is_declared():
-    assert CORE_SHA_V10_FULL == "b11b601385aaf89e68675c6f478bf70debd39016"
+    assert CORE_SHA_V10_FULL == "c1d4b685a4e8b0863260cb657cd3f5d746285f64"
