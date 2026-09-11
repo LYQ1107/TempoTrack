@@ -1,0 +1,132 @@
+--- a/ovtrack/models/trackers/ovtracker.py
++++ b/ovtrack/models/trackers/ovtracker.py
+@@ -29,6 +29,7 @@
+         match_metric="bisoftmax",
+         match_with_cosine=True,
+         contrastive_thr=0.5,
++        tempo=None,
+     ):
+         self.init_score_thr = init_score_thr
+         self.obj_score_thr = obj_score_thr
+@@ -43,6 +44,12 @@
+         self.match_metric = match_metric
+         self.match_with_cosine = match_with_cosine
+         self.contrastive_thr = contrastive_thr
++        self._tempo_adapter = None
++        if tempo is not None:
++            from tempotrack_v10.adapters.ovtrack import OVTrackTempoAdapter
++            if not isinstance(tempo, dict) or not tempo.get("config_path"):
++                raise ValueError("OVTrack tempo requires an explicit config_path")
++            self._tempo_adapter = OVTrackTempoAdapter.from_config(tempo["config_path"])
+ 
+         self.reset()
+ 
+@@ -164,6 +171,12 @@
+ 
+         """
+ 
++        tempo_decision = None
++        tempo_snapshot = None
++        video_id = kwargs.get("video_id")
++        if self._tempo_adapter is not None and frame_id == 0:
++            self._tempo_adapter.reset(video_id)
++
+         if embeds is None:
+             ids = torch.full((bboxes.size(0),), -1, dtype=torch.long)
+             return bboxes, labels, ids
+@@ -213,23 +226,73 @@
+                 else:
+                     raise NotImplementedError()
+ 
+-                num_objs = bboxes.size(0)
+-                ids = torch.full((num_objs,), -1, dtype=torch.long)
+-                for i in range(num_objs):
+-                    if bboxes[i, -1] < self.obj_score_thr:
+-                        continue
+-                    conf, memo_ind = torch.max(scores[i, :], dim=0)
+-
+-                    if conf > self.match_score_thr:
+-                        ids[i] = memo_ids[memo_ind]
+-                        scores[:i, memo_ind] = 0
+-                        scores[i + 1 :, memo_ind] = 0
++                if self._tempo_adapter is not None and self._tempo_adapter.enabled:
++                    tempo_snapshot = self._tempo_adapter.build_snapshot(
++                        video_id=video_id,
++                        frame_id=frame_id,
++                        bboxes=bboxes,
++                        labels=labels,
++                        embeddings=embeds,
++                        native_affinity=scores,
++                        tracker=self,
++                        metadata={
++                            "native_affinity_stage": "ovtracker_scores_before_ids",
++                            "pre_association": True,
++                        },
++                    )
++                    tempo_decision = self._tempo_adapter.propose(tempo_snapshot)
++                    ids = torch.as_tensor(
++                        self._tempo_adapter.preassigned_ids(
++                            tempo_decision, tempo_snapshot.observation_count
++                        ),
++                        dtype=torch.long,
++                        device=bboxes.device,
++                    )
++                else:
++                    num_objs = bboxes.size(0)
++                    ids = torch.full((num_objs,), -1, dtype=torch.long)
++                    for i in range(num_objs):
++                        if bboxes[i, -1] < self.obj_score_thr:
++                            continue
++                        conf, memo_ind = torch.max(scores[i, :], dim=0)
++
++                        if conf > self.match_score_thr:
++                            ids[i] = memo_ids[memo_ind]
++                            scores[:i, memo_ind] = 0
++                            scores[i + 1 :, memo_ind] = 0
+ 
+             else:
+-                ids = torch.full((bboxes.size(0),), -1, dtype=torch.long)
++                if self._tempo_adapter is not None and self._tempo_adapter.enabled:
++                    tempo_snapshot = self._tempo_adapter.build_snapshot(
++                        video_id=video_id,
++                        frame_id=frame_id,
++                        bboxes=bboxes,
++                        labels=labels,
++                        embeddings=embeds,
++                        native_affinity=torch.empty(
++                            (bboxes.size(0), 0), dtype=torch.float32, device=bboxes.device
++                        ),
++                        tracker=self,
++                        metadata={
++                            "native_affinity_stage": "ovtracker_empty_memo_before_ids",
++                            "pre_association": True,
++                        },
++                    )
++                    tempo_decision = self._tempo_adapter.propose(tempo_snapshot)
++                    ids = torch.as_tensor(
++                        self._tempo_adapter.preassigned_ids(
++                            tempo_decision, tempo_snapshot.observation_count
++                        ),
++                        dtype=torch.long,
++                        device=bboxes.device,
++                    )
++                else:
++                    ids = torch.full((bboxes.size(0),), -1, dtype=torch.long)
+             # init tracklets
+             ids = self.init_tracklets(ids, bboxes[:, -1])
+             self.update_memo(ids, bboxes, labels, embeds, cls_embeds, frame_id)
++            if tempo_decision is not None:
++                self._tempo_adapter.commit(tempo_snapshot, ids)
+         elif method == "ovtrack-tao":
+ 
+             bboxes, labels, embeds, cls_embeds, _ = self.remove_distractor(
+--- a/ovtrack/models/mot/ovtrack.py
++++ b/ovtrack/models/mot/ovtrack.py
+@@ -171,6 +171,7 @@
+                 embeds=track_feats,
+                 cls_embeds=cem_feats,
+                 frame_id=frame_id,
++                video_id=img_metas[0].get("video_id"),
+                 method=self.method,
+             )
+ 
