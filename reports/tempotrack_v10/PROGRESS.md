@@ -212,3 +212,27 @@ failure.
   remains PID `31783` on GPU0.  Neither was stopped or restarted.
 - The integration source/config snapshot is pushed to
   `codex/tempotrack-v10-ov-ovplus-cov-masa` at `a01fde8`.
+
+## Live execution snapshot — 2026-09-12 04:12 CST
+
+- The official-source audit correction is committed as `2ecc79c` and pushed
+  to `codex/tempotrack-v10-ov-ovplus-cov-masa`. `tools/v10_detector_equivalence.py`
+  now names the canonical source `OVTRACK_*`; the old `--vov-cache` spelling is
+  retained only as a compatibility alias. The current full shared-core pin is
+  `c1d4b685a4e8b0863260cb657cd3f5d746285f64`; old parity receipts remain
+  explicitly tied to their historical core.
+- Disabled OVTrack Tempo parity is still running as PID `14617` on GPU1,
+  approximately `56/74` deterministic videos at the last log read. It has no
+  final receipt yet; the process has not been signalled.
+- OVTrack+ native Val has completed prediction generation. The merged
+  prediction is being evaluated by PID `15435` at
+  `/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus_eval/final/`;
+  `official_evaluation.json` is not present yet, so no metric is claimed.
+- The recovery official OVTrack workers remain healthy under supervisor
+  `11051`: Val PIDs `11071--11074` were around `2.99k--3.07k/9.1k` and Test
+  PIDs `11075--11078` around `3.03k--3.13k/13.0k`. Available RAM was about
+  `20G`; no additional model inference was launched while this evaluator and
+  recovery batch were at their memory peak.
+- GPU0 is idle, but launching another model at this point would leave too
+  little RAM headroom. This is a resource safeguard, not a task completion or
+  algorithmic failure; the existing jobs continue detached.
