@@ -1,0 +1,23 @@
+{
+  "frontend": "ovtrack",
+  "core_sha": "b11b601385aaf89e68675c6f478bf70debd39016",
+  "core_commit": "Add shared V10 TempoTrack association overlay",
+  "imported_by": "git cherry-pick",
+  "adapter_branch": "codex/v10-ovtrack",
+  "adapter_base_before_import": "a4f3d3d958c01c2905eb8feac8339ab140458dc9",
+  "upstream_frontend_sha": "e188b32eccc049fd425e80b11a3bc45ce88edb31",
+  "native_reproduction_status": "RUNNING",
+  "canonical_stream_status": "BLOCKED_EXTERNAL_CONFIG",
+  "shared_core_tests": {
+    "command": "PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py -q",
+    "result": "11 passed"
+  },
+  "adapter_tests": {
+    "command": "PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py tests/test_v10_native_parity.py tests/test_v10_preassociation_guard.py -q",
+    "result": "15 passed"
+  },
+  "build_check": {
+    "result": "PASS",
+    "code_hash": "8292f14766a629a465cb896fb42e776903c1bf73ddae17cdd75c5d0449f6fd49"
+  }
+}

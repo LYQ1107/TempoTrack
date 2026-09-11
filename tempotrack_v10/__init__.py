@@ -14,6 +14,11 @@ from .overlay import (
     TempoTrackConfig,
     TempoTrackOverlay,
 )
+from .adapters import (
+    OVTrackTempoAdapter,
+    OVTrackTempoConfig,
+    load_ovtrack_tempo_config,
+)
 
 __all__ = [
     "FrameCollisionError",
@@ -22,4 +27,7 @@ __all__ = [
     "SnapshotContractError",
     "TempoTrackConfig",
     "TempoTrackOverlay",
+    "OVTrackTempoAdapter",
+    "OVTrackTempoConfig",
+    "load_ovtrack_tempo_config",
 ]
