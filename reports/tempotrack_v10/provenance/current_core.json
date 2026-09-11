@@ -1,0 +1,13 @@
+{
+  "status": "INTEGRATED_AND_TESTED",
+  "integration_branch": "codex/tempotrack-v10-ov-cov-tract-masa",
+  "integration_commit": "c1d4b685a4e8b0863260cb657cd3f5d746285f64",
+  "integration_commit_subject": "Complete V10 full candidate and reranker integration",
+  "focused_test_command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. LD_PRELOAD=/home/lwr/anaconda3/envs/tempotrack_test/lib/libsqlite3.so.3.52.0 /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py tests/test_v10_covtrack_adapter.py tests/test_v10_masa_adapter.py tests/test_psmr_reactivation.py -q",
+  "focused_test_result": "31 passed in 2.60s",
+  "historical_core_evidence": {
+    "note": "Existing disabled OVTrack parity and older adapter audit receipts retain the core SHA that actually produced those artifacts; they are not rewritten to this later integration core.",
+    "old_core_sha": "b11b601385aaf89e68675c6f478bf70debd39016"
+  },
+  "native_jobs": "Existing OVTrack native Val/Test jobs were not restarted or stopped."
+}
