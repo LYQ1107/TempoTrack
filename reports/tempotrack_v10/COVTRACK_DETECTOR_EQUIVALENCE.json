@@ -80,8 +80,8 @@
     "DIFF_RPN_HEAD"
   ],
   "dynamic": {
-    "status": "PENDING_OFFICIAL_VOV_CANONICAL_OUTPUT",
-    "cache_vov": null,
+    "status": "PENDING_OFFICIAL_OVTRACK_CANONICAL_OUTPUT",
+    "cache_ovtrack": null,
     "cache_cov": null,
     "selected_frame_count": 0,
     "compared_detection_count": 0,
@@ -95,7 +95,7 @@
       "status": "NOT_SUPPLIED"
     }
   },
-  "official_vov_canonical": {
+  "official_ovtrack_canonical": {
     "source_repo": "/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/references/l3/OVTrack",
     "source_commit": "e188b32eccc049fd425e80b11a3bc45ce88edb31",
     "config": "/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/references/l3/OVTrack/configs/ovtrack-teta/ovtrack_r50_no_dynamic_threshold.py",
@@ -106,7 +106,7 @@
     "prompt_sha256": "00ba2f0bfb9abdb577b2fcf2afae12655d6190a18f11051aabdc97f8e4c24579",
     "run_root": "/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack",
     "status": "RUNNING_EXTERNAL_WORKERS",
-    "note": "Canonical output is produced only by the pinned official VOV path. Historical external_ovmot VOV/COV native caches are not promoted to equivalent."
+    "note": "Canonical output is produced only by the pinned official OVTrack path. Historical external_ovmot VOV/COV native caches are not promoted to equivalent."
   },
   "dynamic_note": "A4 compares detector settings and only an explicitly supplied cache pair. The historical external_ovmot VOV cache is not used by default; official canonical generation uses the LocateMOT pinned OVTrack source above."
 }
