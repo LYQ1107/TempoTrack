@@ -1,8 +1,11 @@
 {
   "frontend": "ovtrack",
-  "core_sha": "b11b601385aaf89e68675c6f478bf70debd39016",
-  "core_commit": "Add shared V10 TempoTrack association overlay",
-  "imported_by": "git cherry-pick",
+  "core_sha": "c1d4b685a4e8b0863260cb657cd3f5d746285f64",
+  "core_sha_short": "c1d4b68",
+  "core_commit": "Complete V10 full candidate and reranker integration",
+  "core_branch": "codex/tempotrack-v10-ov-cov-tract-masa",
+  "imported_by": "parent-integrated; explicit OVTrack adapter patch targets this object",
+  "previous_core_sha_used_by_receipt": "b11b601385aaf89e68675c6f478bf70debd39016",
   "adapter_branch": "codex/v10-ovtrack",
   "adapter_base_before_import": "a4f3d3d958c01c2905eb8feac8339ab140458dc9",
   "upstream_frontend_sha": "e188b32eccc049fd425e80b11a3bc45ce88edb31",
@@ -10,11 +13,13 @@
   "canonical_stream_status": "BLOCKED_EXTERNAL_CONFIG",
   "disabled_parity": {
     "receipt": "reports/tempotrack_v10/provenance/ovtrack_disabled_parity.json",
-    "status": "PREDICTION_PARITY_PASS",
+    "status": "PREDICTION_PARITY_PASS_UNDER_PREVIOUS_CORE",
     "native_sha256": "44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f",
     "adapter_sha256": "44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f",
     "recursive_objects_compared": 963203,
-    "recursive_diffs": 0
+    "recursive_diffs": 0,
+    "target_core_sha": "c1d4b685a4e8b0863260cb657cd3f5d746285f64",
+    "requires_target_core_replay": true
   },
   "shared_core_tests": {
     "command": "PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py -q",
@@ -22,7 +27,7 @@
   },
   "adapter_tests": {
     "command": "PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no:cacheprovider tests/test_v10_contract.py tests/test_v10_native_parity.py tests/test_v10_preassociation_guard.py -q",
-    "result": "15 passed"
+    "result": "16 passed"
   },
   "build_check": {
     "result": "PASS",

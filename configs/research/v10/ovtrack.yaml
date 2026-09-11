@@ -2,3 +2,4 @@ frontend: ovtrack
 tempo:
   enabled: false
   config_path: tempo.yaml
+  core_sha: c1d4b685a4e8b0863260cb657cd3f5d746285f64

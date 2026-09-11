@@ -1,4 +1,5 @@
 enabled: false
+core_sha: c1d4b685a4e8b0863260cb657cd3f5d746285f64
 alpha_fast: 0.70
 alpha_slow: 0.15
 min_gap: 0

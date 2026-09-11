@@ -1,8 +1,9 @@
 {
-  "status": "PREDICTION_PARITY_PASS",
+  "status": "PREDICTION_PARITY_PASS_UNDER_PREVIOUS_CORE",
   "frontend": "ovtrack",
   "upstream_sha": "e188b32eccc049fd425e80b11a3bc45ce88edb31",
   "core_sha": "b11b601385aaf89e68675c6f478bf70debd39016",
+  "target_core_sha": "c1d4b685a4e8b0863260cb657cd3f5d746285f64",
   "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/parity10/annotation.json",
   "annotation_sha256": "df7a4201bede2c6e3e5d0402ee029fa5ff7ae68ad17cc5aa19d802e180a2167f",
   "coverage": {"videos": 10, "images": 400, "annotations": 1177},
@@ -22,5 +23,5 @@
     "result": "PASS",
     "array_comparison": "shape, dtype, and values including NaNs"
   },
-  "scope_note": "This receipt records exact prediction equality for the completed native and adapter-labelled runs. It does not claim enabled/full TempoTrack results; canonical/full remains BLOCKED_EXTERNAL_CONFIG. A corrected runtime check of the line-216 pre-association adapter invocation is retained separately before this receipt is upgraded to hook-execution evidence."
+  "scope_note": "This receipt records exact prediction equality for the completed native and adapter-labelled runs under core b11b601385aaf89e68675c6f478bf70debd39016. It does not claim enabled/full TempoTrack results or parity under target core c1d4b685a4e8b0863260cb657cd3f5d746285f64; canonical/full remains BLOCKED_EXTERNAL_CONFIG and target-core replay is pending."
 }

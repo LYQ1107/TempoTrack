@@ -90,14 +90,19 @@ OVTrack memo.
 
 ## Imported core and disabled parity receipt
 
-The exact Agent A core `b11b601385aaf89e68675c6f478bf70debd39016` was imported
-by cherry-pick before the adapter commit.  The disabled 10-video prediction
+The parent-integrated target core is `c1d4b685a4e8b0863260cb657cd3f5d746285f64`
+(`c1d4b68`, subject `Complete V10 full candidate and reranker integration`).
+The explicit OVTrack adapter/config/test patch records this dependency without
+deleting or importing the parent branch's COV/MASA files.  The completed
+disabled 10-video prediction
 receipt is `reports/tempotrack_v10/provenance/ovtrack_disabled_parity.json`:
 both native and adapter-labelled pkl files are 51,953,767 bytes with SHA256
 `44d03d1d6de9410d3de5cb2323ac90b9bc4abbd5514234b05ef16749998698f`, and a
 recursive comparator checked 963,203 objects with zero differences.  This
-does not claim a full or enabled result; a corrected runtime check of actual
-line-216 adapter invocation is separate.
+receipt was produced under the previous core `b11b601385aaf89e68675c6f478bf70debd39016`;
+it does not claim target-core parity, a full or enabled result, or canonical
+metrics. Target-core replay is gated until the parent confirms the final core
+object.
 
 ## Important observed contract caveat
 

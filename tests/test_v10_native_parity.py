@@ -1,7 +1,11 @@
 import numpy as np
 import torch
 
-from tempotrack_v10.adapters.ovtrack import OVTrackTempoAdapter, load_ovtrack_tempo_config
+from tempotrack_v10.adapters.ovtrack import (
+    OVTRACK_CORE_SHA,
+    OVTrackTempoAdapter,
+    load_ovtrack_tempo_config,
+)
 
 
 class _FakeOVTracker:
@@ -37,6 +41,7 @@ def _native_inputs():
 
 def test_disabled_adapter_preserves_native_ids_and_observations():
     adapter = OVTrackTempoAdapter.from_config("configs/research/v10/ovtrack.yaml")
+    assert adapter.config.core_sha == OVTRACK_CORE_SHA
     snapshot = adapter.build_snapshot(**_native_inputs())
     observation_hash = snapshot.immutable_observation_hash()
     native_ids = np.asarray([42, 7], dtype=np.int64)
@@ -61,3 +66,8 @@ def test_enabled_proposal_maps_only_to_existing_native_ids():
     snapshot = adapter.build_snapshot(**_native_inputs())
     proposal = adapter.propose(snapshot)
     np.testing.assert_array_equal(adapter.preassigned_ids(proposal, 2), np.asarray([42, -1]))
+
+
+def test_adapter_config_requires_and_records_parent_core_sha():
+    config = load_ovtrack_tempo_config("configs/research/v10/ovtrack.yaml")
+    assert config.core_sha == "c1d4b685a4e8b0863260cb657cd3f5d746285f64"

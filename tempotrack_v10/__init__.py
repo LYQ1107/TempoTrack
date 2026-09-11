@@ -15,6 +15,7 @@ from .overlay import (
     TempoTrackOverlay,
 )
 from .adapters import (
+    OVTRACK_CORE_SHA,
     OVTrackTempoAdapter,
     OVTrackTempoConfig,
     load_ovtrack_tempo_config,
@@ -27,6 +28,7 @@ __all__ = [
     "SnapshotContractError",
     "TempoTrackConfig",
     "TempoTrackOverlay",
+    "OVTRACK_CORE_SHA",
     "OVTrackTempoAdapter",
     "OVTrackTempoConfig",
     "load_ovtrack_tempo_config",

@@ -19,6 +19,12 @@ from ..contract import PreAssociationSnapshot, SnapshotContractError
 from ..overlay import OverlayProposal, TempoTrackConfig, TempoTrackOverlay
 
 
+# Parent-integrated V10 full core. The lane records this exact object as the
+# target dependency; it is not silently substituted for an already-completed
+# prediction receipt.
+OVTRACK_CORE_SHA = "c1d4b685a4e8b0863260cb657cd3f5d746285f64"
+
+
 def _numpy(value: Any, *, dtype: np.dtype) -> np.ndarray:
     """Copy torch/NumPy-like values to a CPU NumPy array."""
 
@@ -33,6 +39,7 @@ class OVTrackTempoConfig:
 
     enabled: bool = False
     config_path: str = "configs/research/v10/tempo.yaml"
+    core_sha: str = OVTRACK_CORE_SHA
     overlay: TempoTrackConfig = TempoTrackConfig(enabled=False)
 
 
@@ -92,10 +99,14 @@ def load_ovtrack_tempo_config(path: str | Path) -> OVTrackTempoConfig:
     }
     overlay_kwargs = {key: value for key, value in merged.items() if key in allowed}
     overlay_kwargs["enabled"] = bool(merged.get("enabled", False))
+    core_sha = str(tempo.get("core_sha", merged.get("core_sha", ""))).strip()
+    if not core_sha:
+        raise ValueError("OVTrack config must provide the parent-integrated core_sha")
     overlay = TempoTrackConfig(**overlay_kwargs)
     return OVTrackTempoConfig(
         enabled=bool(merged.get("enabled", False)),
         config_path=str(core_path),
+        core_sha=core_sha,
         overlay=overlay,
     )
 
@@ -310,4 +321,9 @@ class OVTrackTempoAdapter:
         return ids
 
 
-__all__ = ["OVTrackTempoAdapter", "OVTrackTempoConfig", "load_ovtrack_tempo_config"]
+__all__ = [
+    "OVTRACK_CORE_SHA",
+    "OVTrackTempoAdapter",
+    "OVTrackTempoConfig",
+    "load_ovtrack_tempo_config",
+]
