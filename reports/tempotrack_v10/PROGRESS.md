@@ -236,3 +236,21 @@ failure.
 - GPU0 is idle, but launching another model at this point would leave too
   little RAM headroom. This is a resource safeguard, not a task completion or
   algorithmic failure; the existing jobs continue detached.
+
+## Parity provenance correction — 2026-09-12 04:24 CST
+
+- The first disabled-output comparison against
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/parity10/native/native_results.pkl`
+  is **not** a valid native-parity gate: that retained reference used the
+  OVT-B `ovtrack_clip_distillation.pth`, while the current V10 disabled run
+  used the official OVTrack `ovtrack_detpro_prompt.pth`. The observed first
+  mismatch (`bbox_results[0][1]`, empty versus one row) is retained as
+  `INVALID_REFERENCE_DIFFERENT_CHECKPOINT`, not as an algorithm failure.
+- The disabled run itself completed with 400/400 output objects at
+  `/data2/usr_for_deadline/tempotrack_v10_unified/tempo_parity10_disabled_v10/native_results.pkl`,
+  SHA256 `908d4f16cd8eb131144267136bcc64cddddd561a6282ecf1fd7f12b066c41ed3`.
+- A valid same-input native reference is now running as PID `19542` on GPU1
+  using the pinned official OVTrack source commit
+  `e188b32eccc049fd425e80b11a3bc45ce88edb31`, the same official checkpoint,
+  prompt, annotation and image root. The new comparison will be made only
+  after this output is complete.
