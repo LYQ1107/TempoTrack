@@ -1,0 +1,4 @@
+frontend: ovtrack
+tempo:
+  enabled: false
+  config_path: /data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v10_unified/configs/research/v10/tempo.yaml
