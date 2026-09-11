@@ -55,34 +55,43 @@ PYTHONPATH=. /home/lwr/anaconda3/envs/tempotrack_test/bin/python -m pytest -p no
 
 The source compile/import smoke also passed. No pytest cache was created.
 
-## A4 detector audit
+## A4 detector audit (corrected official pin)
 
 Audit artifact: `COVTRACK_DETECTOR_EQUIVALENCE.json`.
 
-- Status: `DETECTOR_DIFFERENT`
-- Existing read-only native caches: 988 common videos; 10 selected videos;
-  100 common frames; 4,236 compared detector rows.
+- Official VOV source: `/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/references/l3/OVTrack`,
+  source commit `e188b32eccc049fd425e80b11a3bc45ce88edb31`.
+- Official VOV config:
+  `configs/ovtrack-teta/ovtrack_r50_no_dynamic_threshold.py`, SHA256
+  `1381ce560edd314e4586080494675c43499ac81183290073e5221913fbbaa846`.
+- Official VOV checkpoint:
+  `/data1/LWR/vranlee/SERVER_ONLY/avis/masa/ovtrack/saved_models/ovtrack_detpro_prompt.pth`,
+  SHA256 `76b4605067aacacae87fd8d17207e3fb56f01fa9c0b02b9b2b69d9f5676ace47`.
+- DetPro prompt SHA256:
+  `00ba2f0bfb9abdb577b2fcf2afae12655d6190a18f11051aabdc97f8e4c24579`.
+- Status for VOV versus COV remains `DETECTOR_DIFFERENT`: their ROI heads,
+  checkpoints and configs differ. This is not a claim that the official VOV
+  source is unavailable.
 - Detector-only fields compared: frame index, boxes, scores, labels.
-- First selected frame already differs: video 4/frame 750 has 74 VOV rows
-  and 54 COV rows.
-- Static reasons: `DIFF_CHECKPOINT`, `DIFF_CONFIG`, `DIFF_HEAD`.
-- VOV requested config
-  `configs/ovtrack-teta/ovtrack_r50_no_dynamic_threshold.py` is absent.
-  The present VOV config is
-  `configs/ovtrack-teta/ovtrack_r50_reverse_without_inference.py`; the VOV
-  cache manifest instead declares an `adding_spatial` config. COV uses
-  `configs/uncertainty-ovtrack-teta/ovtrack_r50_ctao_train.py` and its
-  uncertainty ROI head. These facts were recorded, not guessed away.
+- Static reasons: `DIFF_CHECKPOINT`, `DIFF_CONFIG`, `DIFF_RPN_HEAD`,
+  `DIFF_HEAD`.
+- The corrected audit intentionally does not promote the historical
+  `external_ovmot/VOVTrack` cache or COV native cache to a common stream.
 
-## A5/A6 status
+## A5/A6 status (corrected)
 
-No common canonical stream or MASA public-detection conversion was created:
-the exact official no-dynamic VOV config named by the task is missing, and
-the available cache is configuration-mismatched. This is recorded as
-`BLOCKED_EXTERNAL_CONFIG`; generating a fake common stream would invalidate
-the audit. The immutable report contains the available repo/config/checkpoint
-and cache manifest hashes needed to resume A5 once the exact external config
-is supplied.
+The former `BLOCKED_EXTERNAL_CONFIG` conclusion is withdrawn. Existing
+official VOV workers are already running only the pinned official path under
+`/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack`:
+val retry `2308/2312` on GPU0, test retry `2567/2572` on GPU1, and the
+val/test shard supervisor `4522` with workers on GPUs 2--9. No COV detector
+was changed and no native job was stopped. Their output must finish before a
+canonical manifest/hash is claimed; current status is
+`CANONICAL_GENERATION_RUNNING`.
+
+The canonical stream decision is therefore: **available and executable from
+the correct pinned source, pending completion of the already-running official
+VOV jobs**. Conversion remains unrun until that output is complete.
 
 ## Deliverables
 
