@@ -8,6 +8,11 @@ from .masa import (
     MasaTaoPreAssociationAdapter,
     install_masa_overlay,
 )
+from .ovtrack_plus import (
+    CORE_SHA_V10_FULL,
+    OVTrackPlusDecision,
+    OVTrackPlusTempoAdapter,
+)
 
 from .ovtrack import (
     OVTrackTempoAdapter,
@@ -25,4 +30,7 @@ __all__ = [
     "OVTrackTempoAdapter",
     "OVTrackTempoConfig",
     "load_ovtrack_tempo_config",
+    "CORE_SHA_V10_FULL",
+    "OVTrackPlusDecision",
+    "OVTrackPlusTempoAdapter",
 ]

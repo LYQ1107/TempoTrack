@@ -24,6 +24,9 @@ from .adapters import (
     OVTrackTempoConfig,
     install_masa_overlay,
     load_ovtrack_tempo_config,
+    CORE_SHA_V10_FULL,
+    OVTrackPlusDecision,
+    OVTrackPlusTempoAdapter,
 )
 
 __all__ = [
@@ -42,4 +45,7 @@ __all__ = [
     "OVTrackTempoConfig",
     "install_masa_overlay",
     "load_ovtrack_tempo_config",
+    "CORE_SHA_V10_FULL",
+    "OVTrackPlusDecision",
+    "OVTrackPlusTempoAdapter",
 ]
