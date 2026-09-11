@@ -72,7 +72,7 @@ downstream integration boundary.
 ## Shared core gate
 
 The only shared core accepted for this lane is Agent A's
-`CORE_SHA_V10_FULL=b11b601385aaf89e68675c6f478bf70debd39016`. The target
+`CORE_SHA_V10_FULL=c1d4b685a4e8b0863260cb657cd3f5d746285f64`. The target
 worktree already contains the same contract/core content through the V10
 combined history; no second core is created here. The OVTrack+ adapter is only
 state/tensor conversion and hook plumbing.
