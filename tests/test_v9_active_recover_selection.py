@@ -68,7 +68,7 @@ def test_full_binding_verifies_calls_before_routing(tmp_path):
     baseline = tmp_path / 'baseline.json'
     baseline.write_text('[]')
     ready = tmp_path / 'readiness.json'
-    ready.write_text(json.dumps({'status': 'READY', 'calls_root': str(calls),
+    ready.write_text(json.dumps({'status': 'READY', 'equivalence': {'status': 'PASS'}, 'calls_root': str(calls),
         'annotation_hash': recovery.sha(annotation), 'baseline_hash': recovery.sha(baseline),
         'calls': [{'path': str(call), 'sha256': recovery.sha(call)}]}))
     binding = {'status': 'READY', 'replaces_calls_root': str(legacy), 'calls_root': str(calls),
@@ -78,3 +78,9 @@ def test_full_binding_verifies_calls_before_routing(tmp_path):
     call.write_bytes(b'changed')
     with pytest.raises(ValueError, match='call hash mismatch'):
         recovery.resolve_full_input_binding(legacy, annotation, baseline, binding)
+
+
+def test_full_replay_rejects_post_association_input():
+    with pytest.raises(ValueError, match='post-association'):
+        recovery.require_prefilter_call({'track_ids': [-1, 0, 1]})
+    recovery.require_prefilter_call({'track_ids': [-1, -1]})

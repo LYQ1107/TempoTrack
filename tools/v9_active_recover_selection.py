@@ -19,7 +19,7 @@ def resolve_full_input_binding(calls_root, annotation, baseline, binding):
     if sha(annotation) != binding['annotation_hash'] or sha(baseline) != binding['baseline_hash']:
         raise ValueError('full input binding annotation/baseline hash mismatch')
     gate = read(binding['readiness'])
-    if sha(binding['readiness']) != binding['readiness_hash'] or gate.get('status') != 'READY':
+    if sha(binding['readiness']) != binding['readiness_hash'] or gate.get('status') != 'READY' or gate.get('equivalence', {}).get('status') != 'PASS':
         raise ValueError('full input readiness changed or failed')
     if gate['calls_root'] != binding['calls_root'] or gate['annotation_hash'] != binding['annotation_hash'] or gate['baseline_hash'] != binding['baseline_hash']:
         raise ValueError('full input binding differs from audited inputs')
@@ -29,6 +29,11 @@ def resolve_full_input_binding(calls_root, annotation, baseline, binding):
     if any(sha(c['path']) != c['sha256'] for c in gate['calls']):
         raise ValueError('audited full input call hash mismatch')
     return Path(binding['calls_root'])
+
+
+def require_prefilter_call(call):
+    if any(int(track_id) >= 0 for track_id in call['track_ids']):
+        raise ValueError('BLOCKED_INPUT: assigned IDs prove post-association calls; full active replay requires audited pre-filter inputs')
 
 
 def validate_row(row, configs):
@@ -108,7 +113,7 @@ def main():
         return 0
     if args.materialize_selected:
         from v9_active_tracker_search import (_load_released_components, _replay, _equivalence,
-            _image_index, _subset_video_ids)
+            _image_index, _subset_video_ids, _calls)
         selected = read(args.materialize_selected)
         validate_row(selected, configs)
         sys.path.insert(0, args.external_root)
@@ -119,6 +124,8 @@ def main():
             calls = resolve_full_input_binding(calls, annotation, args.baseline_prediction, read(binding_path))
             print(json.dumps({'status': 'AUDITED_FULL_INPUT_BOUND', 'calls_root': str(calls),
                 'binding': str(binding_path), 'binding_hash': sha(binding_path)}), flush=True)
+        first_nonempty = next(call for call in _calls(calls) if len(call['track_ids']))
+        require_prefilter_call(first_nonempty)
         call_hashes = {str(f): sha(f) for f in sorted(calls.glob('match_calls_*')) if f.is_file()}
         if not call_hashes:
             raise ValueError('missing native recorder calls')
@@ -131,7 +138,10 @@ def main():
             'model_config_hash': sha(source['model_config']), 'checkpoint_hash': sha(source['model_checkpoint']),
             'replay_code_hash': sha(Path(__file__).with_name('v9_active_tracker_search.py')),
             'tracker_code_hash': sha(Path(args.external_root) / 'ovtrack/models/trackers/ovtracker.py')}
-        prior = read(args.equivalence_evidence) if args.equivalence_evidence else None
+        evidence_path = args.equivalence_evidence
+        if binding_path.exists():
+            evidence_path = read(binding_path).get('equivalence_evidence', evidence_path)
+        prior = read(evidence_path) if evidence_path else None
         if prior and prior.get('status') == 'PASS' and prior.get('input_binding') == binding:
             gate = prior
         else:
