@@ -90,11 +90,13 @@ class OverlayProposal:
 @dataclass
 class _MemoryRecord:
     state: MemoryState
+    first_frame: int
     last_frame: int
     history: list[np.ndarray]
     evidence_history: list[np.ndarray] = field(default_factory=list)
     root_id: int = 0
     lineage: tuple[int, ...] = field(default_factory=tuple)
+    last_box: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +233,7 @@ class TempoTrackOverlay:
                 state = self._dual.initialize(prototype, frame=int(snapshot.memory_last_frame[index]))
                 self._records[key] = _MemoryRecord(
                     state=state,
+                    first_frame=int(snapshot.memory_last_frame[index]),
                     last_frame=int(snapshot.memory_last_frame[index]),
                     history=history[-self.config.memory_capacity :],
                     evidence_history=evidence[-self.config.memory_capacity :],
@@ -308,7 +311,11 @@ class TempoTrackOverlay:
         if self.config.reranker_weight > 0.0:
             if reranker_score is None:
                 raise SnapshotContractError("BLOCKED_QUERY_RERANKER_EVIDENCE_MISSING")
-            score += self.config.reranker_weight * float(reranker_score)
+            # V9's production replay uses the query-conditioned model logit as
+            # the decision score.  A positive weight is an explicit opt-in to
+            # that exact path; it must not silently blend the V9 model with
+            # V10's heuristic score.
+            return float(self.config.reranker_weight * float(reranker_score))
         return float(score)
 
     def _query_sequence(self, snapshot: PreAssociationSnapshot, observation_index: int) -> np.ndarray:
@@ -520,6 +527,62 @@ class TempoTrackOverlay:
             return value[index]
         raise SnapshotContractError(f"{name} must be aligned with observations")
 
+    @staticmethod
+    def _observation_value_present(snapshot: PreAssociationSnapshot, name: str, index: int) -> bool:
+        """Distinguish an explicit ``None`` evidence row from an absent field."""
+        value = snapshot.metadata.get(name)
+        if value is None:
+            return False
+        if isinstance(value, Mapping):
+            uid = snapshot.observation_uids[index]
+            return uid in value or str(index) in value
+        if isinstance(value, np.ndarray) and value.ndim >= 1 and len(value) == snapshot.observation_count:
+            return True
+        if isinstance(value, (list, tuple)) and len(value) == snapshot.observation_count:
+            return True
+        raise SnapshotContractError(f"{name} must be aligned with observations")
+
+    def _causal_observation_evidence(
+        self,
+        snapshot: PreAssociationSnapshot,
+        observation_index: int,
+        record: _MemoryRecord | None,
+    ) -> np.ndarray:
+        """Emit the exact seven fields before updating an identity state.
+
+        This is the online counterpart of V9's
+        ``build_anchor_evidence_sequence``.  Evidence is attached to the
+        logical identity at commit time, so a dormant candidate can later be
+        scored without reading post-association IDs or future observations.
+        """
+        frame = int(snapshot.frame_id)
+        score = float(snapshot.det_scores[observation_index])
+        if record is None:
+            return np.asarray([score, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        current = np.asarray(snapshot.embeddings[observation_index], dtype=np.float32)
+        fast = record.state.fast.detach().cpu().numpy()
+        slow = record.state.slow.detach().cpu().numpy()
+        box = np.asarray(snapshot.boxes_xyxy[observation_index], dtype=np.float32)
+        old_box = record.last_box
+        if old_box is None:
+            area_ratio = 0.0
+        else:
+            area = max(float(max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])), 1e-6)
+            old_area = max(float(max(0.0, old_box[2] - old_box[0]) * max(0.0, old_box[3] - old_box[1])), 1e-6)
+            area_ratio = float(np.clip(np.log(area / old_area), -2.0, 2.0) / 2.0)
+        return np.asarray(
+            [
+                score,
+                _cosine(current, fast),
+                _cosine(current, slow),
+                _cosine(fast, slow),
+                min(1.0, max(0, frame - int(record.first_frame)) / 100.0),
+                min(1.0, max(0, frame - int(record.last_frame)) / max(int(self.config.max_gap), 1)),
+                area_ratio,
+            ],
+            dtype=np.float32,
+        )
+
     def commit(self, snapshot: PreAssociationSnapshot, final_ids: Any) -> None:
         """Commit native final IDs and update causal memory after assignment."""
         key = (self._video_key(snapshot.video_id), int(snapshot.frame_id))
@@ -545,6 +608,7 @@ class TempoTrackOverlay:
                 current = self._records.get(memory_key)
                 proposal_id = proposal.assignments[index]
                 proposal_record = self._records.get((video, int(proposal_id))) if proposal_id is not None else None
+                was_new = current is None
                 if current is None:
                     prototype = torch.as_tensor(_normalize(snapshot.embeddings[index]), dtype=torch.float32)
                     state = self._dual.initialize(prototype, frame=int(snapshot.frame_id))
@@ -557,11 +621,21 @@ class TempoTrackOverlay:
                         lineage = (root_id,)
                     current = _MemoryRecord(
                         state=state,
+                        first_frame=int(snapshot.frame_id),
                         last_frame=int(snapshot.frame_id),
                         history=[],
                         evidence_history=[],
                         root_id=root_id,
                         lineage=lineage,
+                    )
+                evidence_value = self._observation_value(snapshot, "observation_evidence", index)
+                evidence_explicit = self._observation_value_present(snapshot, "observation_evidence", index)
+                if evidence_value is None and not evidence_explicit:
+                    evidence_value = self._observation_value(snapshot, "evidence_by_observation", index)
+                    evidence_explicit = self._observation_value_present(snapshot, "evidence_by_observation", index)
+                if evidence_value is None and not evidence_explicit:
+                    evidence_value = self._causal_observation_evidence(
+                        snapshot, index, None if was_new else current
                     )
                 state, _ = self._dual.update(
                     current.state,
@@ -573,13 +647,11 @@ class TempoTrackOverlay:
                 current.last_frame = int(snapshot.frame_id)
                 current.history.append(_normalize(snapshot.embeddings[index]))
                 current.history = current.history[-self.config.memory_capacity :]
-                evidence_value = self._observation_value(snapshot, "observation_evidence", index)
-                if evidence_value is None:
-                    evidence_value = self._observation_value(snapshot, "evidence_by_observation", index)
                 evidence = self._evidence_value(evidence_value, "observation_evidence")
                 if evidence:
                     current.evidence_history.extend(evidence)
                     current.evidence_history = current.evidence_history[-self.config.memory_capacity :]
+                current.last_box = np.asarray(snapshot.boxes_xyxy[index], dtype=np.float32).copy()
                 self._records[memory_key] = current
         self._pending.pop(key, None)
 

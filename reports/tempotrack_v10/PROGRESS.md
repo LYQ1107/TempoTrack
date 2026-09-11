@@ -301,3 +301,30 @@ failure.
 - The focused production suite was rerun after the shared-core integration:
   `38 passed in 8.26s` covering the V10 contract, COV/MASA/OVTrack+ adapters,
   native parity/pre-association guards, and V9 reactivation behavior.
+
+## V10.3 correction and live execution update — 2026-09-12 06:00 CST
+
+- A follow-up core fix is now locally verified: each committed identity keeps
+  `first_frame`/`last_box` and receives one causal seven-field evidence row;
+  the exact V9 query-conditioned reranker is used as the decision score when
+  explicitly enabled, rather than being silently blended into the heuristic.
+  `ovtrack_full_tempo.yaml` and `ovtrack_plus_tempo.yaml` now pin
+  `CORE_SHA_V10_FULL=c1d4b685a4e8b0863260cb657cd3f5d746285f64`, the reviewed
+  V9 checkpoint, and its reviewed threshold. The native disabled config is
+  unchanged.
+- The affected production suite now passes `40 passed in 2.52s`; exact full
+  config load also passed with checkpoint SHA
+  `36e7bbfc80d70fbe3fd6bec4830b9df419d6b9a05ca94fabc1ccfa0fa156c82b` and the
+  audited 24-feature schema. This checkpoint remains marked
+  `VAL_BASE_PILOT/NOT_PAPER_VALID`; no paper-valid claim is made.
+- The COV exact-override Val replay remains active at PID `25090` (child
+  `25177`), around `9,012/36,375` images at the last read. A detached,
+  low-resource supervisor PID `29558` will invoke the official evaluator only
+  after the final stream is complete; it does not signal the model process.
+- Official OVTrack recovery remains active under supervisor `11051`: Val
+  shards are around `8.27k--8.48k/9.1k`, while Test shards are around
+  `8.35k--8.71k/13.0k`. No official metrics are claimed before the finalizer.
+- OVTrack+ Test PID `20428` exited after reaching `17,754/52,155` without a
+  prediction artifact and without a traceback in its log. It is recorded as
+  `FAILED_NO_ARTIFACT_NO_TRACEBACK`, not as a result; no restart has been
+  issued while the current recovery/COV jobs occupy the available resources.
