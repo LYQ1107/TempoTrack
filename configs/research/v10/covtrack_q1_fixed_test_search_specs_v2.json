@@ -18,7 +18,7 @@
     "external_cov_commit": "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b",
     "external_checkpoint_sha256": "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c",
     "external_config_sha256": "282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a",
-    "base_config_sha256": "62aead641cedbdf8889d3e61a22e570acbbce50762bd7949c38f4a9844797eb5"
+    "base_config_sha256": "90c5ba01793725157cf2e58e1bf3cd62c6ecfc00f39fcd04f70c0aa52adeeded"
   },
   "trials": [
     {"trial_id": "q1_full_no_gate", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 0.0, "margin_threshold": 0.0},
