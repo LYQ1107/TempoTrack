@@ -56,6 +56,9 @@ def _runtime_contract_sha_from_config(path: Path) -> str | None:
     value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(value, dict):
         return None
+    raw = value.get("runtime_contract_sha")
+    if raw is not None:
+        return str(raw)
     tempo = value.get("tempo", value)
     if not isinstance(tempo, dict):
         return None

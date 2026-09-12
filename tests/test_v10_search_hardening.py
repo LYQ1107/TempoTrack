@@ -165,6 +165,19 @@ def test_hardened_gate_requires_teta_provenance_after_bootstrap(tmp_path):
         module._validate_contract_gate(plan)
 
 
+def test_validator_reads_top_level_runtime_contract_sha(tmp_path):
+    module = _load(
+        "q1_contract_validator_config_binding",
+        ROOT / "tools" / "v10_validate_q1_contract_smoke.py",
+    )
+    config = tmp_path / "hardened.yaml"
+    config.write_text(
+        "runtime_contract_sha: top-level-revision\ntempo:\n  max_gap: 360\n",
+        encoding="utf-8",
+    )
+    assert module._runtime_contract_sha_from_config(config) == "top-level-revision"
+
+
 def test_teta_source_root_requires_real_importable_package(tmp_path):
     module = _plan_module()
     with pytest.raises(RuntimeError, match="TETA_SOURCE_ROOT_INVALID"):
