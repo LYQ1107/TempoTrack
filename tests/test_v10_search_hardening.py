@@ -425,8 +425,18 @@ def _audit_receipt_fixture(
 def test_legacy_receipt_without_base_config_reconstructs_materialized_config(tmp_path):
     audit = _load("legacy_audit", ROOT / "tools" / "v10_audit_covtrack_postcontract_search.py")
     fixture = _audit_receipt_fixture(tmp_path, audit)
+    receipt = fixture["receipt"]
+    diagnostics_path = Path(receipt["outputs"]["diagnostics"])
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    diagnostics.pop("reranker_native_memo_bootstrap_count")
+    diagnostics_path.write_text(json.dumps(diagnostics), encoding="utf-8")
+    receipt["outputs"]["diagnostics_sha256"] = hashlib.sha256(
+        diagnostics_path.read_bytes()
+    ).hexdigest()
+    fixture["receipt_path"].write_text(json.dumps(receipt), encoding="utf-8")
     result = audit._audit_trial(**fixture["audit_kwargs"])
     assert result["status"] == "PASS", result
+    assert result["contract_classification"] == "SEARCH_SELECTION_LEGACY_CONTRACT"
     assert result["base_config_binding"]["legacy_reconstructed"] is True
     assert result["base_config_binding"]["reconstruction_status"] == "PASS"
 

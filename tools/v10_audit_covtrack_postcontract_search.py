@@ -277,6 +277,11 @@ def _audit_trial(
     audit = {
         "status": "PASS" if not reasons else "FAIL",
         "usage": "SEARCH_SELECTION" if not reasons else "REJECT_FROM_SELECTION",
+        "contract_classification": (
+            "SEARCH_SELECTION_LEGACY_CONTRACT"
+            if "reranker_native_memo_bootstrap_count" not in diagnostics
+            else "SEARCH_SELECTION_HARDENED_CONTRACT"
+        ),
         "trial_id": trial_id,
         "requested_trial_id": requested_trial_id if receipt else trial_id,
         "effective_trial_id": effective_trial_id if receipt else None,
@@ -393,6 +398,14 @@ def audit(args: argparse.Namespace) -> int:
         "artifact": "tempotrack_v10_postcontract_search_audit",
         "status": global_status,
         "usage": global_usage,
+        "contract_classification": (
+            "SEARCH_SELECTION_LEGACY_CONTRACT"
+            if any(
+                value.get("contract_classification") == "SEARCH_SELECTION_LEGACY_CONTRACT"
+                for value in trials.values()
+            )
+            else "SEARCH_SELECTION_HARDENED_CONTRACT"
+        ),
         "search_root": str(search_root),
         "search_plan": {"path": str(plan_path), "sha256": plan.sha256},
         "contract_gate": {"path": plan.contract_gate, "sha256": plan.contract_gate_sha256, "status": gate.get("status")},
