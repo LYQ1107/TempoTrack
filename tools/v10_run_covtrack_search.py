@@ -108,7 +108,11 @@ def run(args: argparse.Namespace) -> int:
             trial_id = pending.pop(0)
             gpu = gpus[len(running) % len(gpus)]
             spec = jobs[trial_id]["spec"]
-            trial_log = root / trial_id / "coordinator.log"
+            # The one-trial harness owns ``root/trial_id`` and deliberately
+            # refuses a pre-existing partial directory.  Keep coordinator
+            # logs outside that namespace so a launch cannot look like an
+            # output artifact or trip the safety check.
+            trial_log = root / "worker_logs" / f"{trial_id}.log"
             trial_log.parent.mkdir(parents=True, exist_ok=True)
             command = _build_command(args, spec, gpu)
             log = trial_log.open("w", encoding="utf-8")
