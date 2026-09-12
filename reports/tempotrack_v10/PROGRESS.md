@@ -434,3 +434,57 @@ failure.
   therefore retained as diagnostic evidence and will not be labeled
   paper-qualified unless the effective runtime is independently proven or a
   corrected replay is completed.
+
+## V10.3 live correction — 2026-09-12 09:13 CST
+
+- COV's first full Test paper-override evaluation completed. The measured
+  TETA50 rows are Base=`37.779 / 54.598 / 42.107 / 16.633` and
+  Novel=`28.686 / 50.966 / 31.960 / 3.130` in
+  `[TETA,LocA,AssocA,ClsA]` order. Because that old stream did not explicitly
+  capture `vis=False`, it remains diagnostic and is not the corrected V10
+  result.
+- The new COV runtime hook is pushed at `420f70e` after focused tests,
+  Python compilation, and a real 32-frame smoke. The smoke produced a PASS
+  stream manifest using the official COV cwd and explicit
+  `only_test_categories=True`, `.37/50/.4`, `confused_features=True`,
+  `vis=False`, `max_per_img=80`, and `max_fusion_ratio=2.0`.
+- A corrected full COV Test is now running from that hook as PID `22665` on
+  GPU9. Complete-video shards are also running independently as PIDs
+  `23261`, `23218`, `23365`, and `23353` on GPUs1/5/6/7. The shard outputs
+  are not considered complete until all `52,155` frame keys are covered and
+  one official TETA summary is generated.
+- OVTrack Tempo (four Val and four Test workers) and OVTrack+ Tempo (six Test
+  workers) remain healthy and continue writing independent stream parts; no
+  worker was signalled or restarted.
+
+## V10.3 online checkpoint correction — 2026-09-12 10:00 CST
+
+- The required pre-stop provenance receipt is
+  `reports/tempotrack_v10/LIVE_JOB_PROVENANCE_20260912_0950.md`. It records
+  the actual PID, PPID, start time, cwd, command, CUDA assignment, source,
+  config, checkpoint, output, and hashes for every active OVTrack/COV/OVTrack+
+  parent and DataLoader child observed before the correction.
+- OVTrack+ logs for all six Test shards explicitly loaded
+  `ovtrack_clip_distillation.pth` and listed 16 missing
+  `roi_head.track_head.*` parameters. The controlled checkpoint search found
+  no `epoch_6.pth`, `latest.pth`, or other complete OVTrack+ candidate.
+- `tools/v10_audit_ovtrack_plus_checkpoint.py` was run against the real pinned
+  OVT-B model architecture. Receipt:
+  `reports/tempotrack_v10/provenance/ovtrack_plus_checkpoint_audit.json`.
+  Result is `FAIL`, with `missing_track_head_keys` length 16 and checkpoint
+  SHA256 `36f10026e86d0310c08dac941bea7f68ec4c4d6d3693d38f99bdc3a90e7dc872`.
+- After saving the evidence, only the OVTrack+ six shard parents, their six
+  DataLoader children, and coordinator `17125` received graceful `SIGTERM`;
+  all 13 exited. No OVTrack or COV process was signalled and no partial
+  artifact was deleted. The stopped lane is
+  `INVALID_OVTRACK_PLUS_PRETRAIN_CHECKPOINT / DIAGNOSTIC_ONLY`.
+- Added fail-closed final-checkpoint gates to both OVTrack+ runtime configs
+  and both OVTrack+ wrappers. Added explicit OVTrack/COV diagnostic and
+  paper-valid memory-only configs. The new focused regression suite passed
+  `31 passed` in the `ovtr` environment after installing only the missing
+  pytest runner; compile and `git diff --check` also passed.
+- Corrected formal statuses are now: OVTrack native `REPRO_PASS`; current
+  OVTrack Tempo `DIAGNOSTIC_V9_RERANKER_NOT_PAPER_VALID`; COV Val
+  `REPRO_PASS`, COV Test `REPRO_GAP`; OVTrack+ official reproduction
+  `REPRO_BLOCKED_FINAL_CHECKPOINT`; OVTrack+ memory-only `BLOCKED` until a
+  valid final checkpoint is found or trained.

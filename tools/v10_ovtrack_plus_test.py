@@ -23,7 +23,33 @@ def _required_path(name: str) -> Path:
     return path
 
 
+def _require_final_checkpoint_argument() -> Path:
+    value = os.environ.get("V10_OVTRACK_PLUS_FINAL_CHECKPOINT")
+    if not value:
+        raise RuntimeError(
+            "V10_OVTRACK_PLUS_FINAL_CHECKPOINT is required for OVTrack+ inference"
+        )
+    checkpoint = Path(value).expanduser().resolve()
+    if checkpoint.name == "ovtrack_clip_distillation.pth":
+        raise RuntimeError(
+            "OVTRACK_PLUS_INVALID_PRETRAIN_CHECKPOINT: "
+            "ovtrack_clip_distillation.pth is not a final OVTrack+ checkpoint"
+        )
+    if not checkpoint.is_file():
+        raise FileNotFoundError(checkpoint)
+    if len(sys.argv) >= 3:
+        requested = Path(sys.argv[2]).expanduser().resolve()
+        if requested != checkpoint:
+            raise RuntimeError(
+                "OVTRACK_PLUS_CHECKPOINT_MISMATCH: positional checkpoint must "
+                "equal V10_OVTRACK_PLUS_FINAL_CHECKPOINT"
+            )
+        sys.argv[2] = str(checkpoint)
+    return checkpoint
+
+
 def main() -> None:
+    _require_final_checkpoint_argument()
     source = _required_path("V10_OVTRACK_SOURCE")
     work_dir = _required_path("V10_WORK_DIR")
     test_script = source / "tools" / "test.py"

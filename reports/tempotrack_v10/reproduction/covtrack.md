@@ -1,8 +1,8 @@
 # COVTrack native reproduction — V10.3 Agent C
 
-**Status:** `REPRO_GAP` (hash-backed native artifacts exist, but the effective
-paper override/runtime safety gate was not captured in the old run logs; Test
-is not accepted as paper-override-qualified)
+**Status:** `Val=REPRO_PASS; Test=REPRO_GAP` (the fresh exact-override Val
+replay and official TETA receipt are complete; the retained old Test remains
+below the published AssocA and a corrected Test replay is still required)
 
 **Audit date:** 2026-09-12
 
@@ -94,7 +94,7 @@ focused test, but the old native prediction artifact is not retroactively
 requalified. The GT visualization branch is therefore forbidden for any new
 run.
 
-### Exact Val replay gate and external blocker
+### Historical exact Val replay preflight (superseded)
 
 Because the old log does not prove the effective override vector, the next
 eligible Val replay is the following command. It was **not launched** in this
@@ -121,7 +121,7 @@ bash tools/dist_test.sh \
   model.roi_head.only_validation_categories=True
 ```
 
-The intended COV inference environment is
+The intended COV inference environment at that earlier preflight was
 `/home/lwr/anaconda3/envs/ovtr/bin/python` (Python 3.8.20, torch
 `1.10.1+cu113`, mmcv 1.3.17, mmdet 2.23.0); official TETA evaluation uses
 `/home/lwr/anaconda3/envs/masaenv/bin/python` and the evaluator SHA recorded
@@ -135,12 +135,10 @@ ovtr torch.cuda.device_count()=0
 torch.cuda.init() -> RuntimeError: No CUDA GPUs are available
 ```
 
-No model command was entered, so there is no model traceback to conceal; the
-failure occurs at the driver/CUDA preflight. This is the precise external
-blocker for the required exact-override Val replay. If the driver recovers,
-Val must run first and only its paper-qualified result can determine whether
-Test is released. Until then Test remains held and the old metrics remain
-`REPRO_GAP`, not `REPRO_PASS`.
+No model command was entered in that earlier attempt; the failure occurred at
+the driver/CUDA preflight. This historical blocker was superseded by the
+fresh exact-override Val replay documented below, which completed and passed
+the official evaluator. It does not requalify the old Test artifact.
 
 ## Native predictions and official evaluation artifacts
 
@@ -243,3 +241,29 @@ does not include an explicit `model.tracker.vis=False` override. Its stream
 is retained as diagnostic evidence and is not promoted to a paper-qualified
 result unless the effective visualization setting is proven or a corrected
 replay is completed.
+
+## V10.3 corrected runtime path — 2026-09-12
+
+The pinned COV frontend was not edited. Commit `420f70e` adds an in-memory
+runtime hook at the verified post-MCF/pre-ID and post-`update_memo` boundaries,
+plus a dataset-derived causal video-key fallback for the lazy frame-0 tracker.
+The hook passed Python compilation, focused contract/runtime tests, and a real
+32-frame smoke whose stream manifest has `status=PASS`. The smoke command used
+the official COV working directory and explicitly set
+`only_test_categories=True`, `match_score_thr=0.37`, `memo_frames=50`,
+`momentum_embed=0.4`, `confused_features=True`, `vis=False`,
+`max_per_img=80`, and `max_fusion_ratio=2.0`.
+
+The corrected full Test run is active at
+`/data2/usr_for_deadline/tempotrack_v10_unified/tempo_full/covtrack/`
+`test_v10_runtime_gate/` (single full stream PID `22665`; independent
+complete-video shard PIDs `23261`, `23218`, `23365`, `23353`). The old
+paper-override Test evaluator did complete, but is diagnostic only because
+its captured command omitted explicit `vis=False`. Its measured rows were:
+
+| split | Base | Novel |
+|---|---:|---:|
+| Test (old diagnostic) | `37.779 / 54.598 / 42.107 / 16.633` | `28.686 / 50.966 / 31.960 / 3.130` |
+
+No corrected full COV Test metric is claimed until the new stream is complete,
+merged, and evaluated by the official evaluator.

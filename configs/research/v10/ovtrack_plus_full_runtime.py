@@ -7,6 +7,7 @@ pre-association hook.
 """
 
 import ast
+import os
 from pathlib import Path
 
 
@@ -25,7 +26,7 @@ for _node in _CLASS_TREE.body:
         break
 if LVIS_CLASSES is None:
     raise RuntimeError(f"LVIS_CLASSES not found in pinned source: {_CLASS_SOURCE}")
-del ast, Path, _CLASS_SOURCE, _CLASS_TREE, _node
+del ast, _CLASS_SOURCE, _CLASS_TREE, _node
 
 _base_ = [
     "/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus_full_source/"
@@ -72,7 +73,21 @@ data = dict(
     )
 )
 
-load_from = (
-    "/data2/usr_for_deadline/tempotrack_v10_unified/checkpoints/"
-    "ovtrack_plus/ovtrack_clip_distillation.pth"
-)
+_FINAL_CHECKPOINT = os.environ.get("V10_OVTRACK_PLUS_FINAL_CHECKPOINT")
+
+if not _FINAL_CHECKPOINT:
+    raise RuntimeError(
+        "V10_OVTRACK_PLUS_FINAL_CHECKPOINT is required for OVTrack+."
+    )
+
+load_from = str(Path(_FINAL_CHECKPOINT).resolve())
+
+if Path(load_from).name == "ovtrack_clip_distillation.pth":
+    raise RuntimeError(
+        "OVTRACK_PLUS_INVALID_PRETRAIN_CHECKPOINT: "
+        "ovtrack_clip_distillation.pth is the upstream training initializer, "
+        "not an accepted final OVTrack+ reproduction checkpoint."
+    )
+
+if not Path(load_from).is_file():
+    raise FileNotFoundError(load_from)

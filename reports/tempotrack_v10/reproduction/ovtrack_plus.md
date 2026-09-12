@@ -1,10 +1,14 @@
 # OV-TAO-Val native reproduction — OVTrack+
 
-Status: `RUNNING_NATIVE_VAL`
+Status: `REPRO_BLOCKED_FINAL_CHECKPOINT`
 
-The exact released checkpoint is now present and verified. A real native Val
-run is active from the pinned OVT-B-Dataset source. No metric is claimed until
-the output is completely written and evaluated.
+The only checkpoint found at the active experiment root is the upstream
+`ovtrack_clip_distillation.pth` initializer. The fail-closed audit at
+`reports/tempotrack_v10/provenance/ovtrack_plus_checkpoint_audit.json` found
+all 16 expected `roi_head.track_head.*` parameters missing, so no final
+OVTrack+ checkpoint is accepted and no official reproduction is claimed.
+The previously launched native/Tempo streams using this candidate are
+retained as invalid diagnostics only.
 
 ## Audited inputs
 
@@ -47,17 +51,16 @@ format remain the native paths. These compatibility errors and their
 tracebacks are retained in the execution log; they are not silently counted as
 an exact unmodified-upstream PASS.
 
-At the latest observed snapshot, the native loop was at approximately
-`2034/36375` frames after `421s` (about `4.8 frame/s`, estimated remaining
-time about `2h`). The process was left running and was not signalled.
+The historical native-Val attempt reached approximately `2034/36375` frames
+after `421s` before this checkpoint audit was completed. It is not a current
+run and its partial output remains retained; no metric is promoted from it.
 
 ## Checkpoint load observation
 
-The real checkpoint loads, but the pinned loader reports missing track-head
-keys (`roi_head.track_head.convs/fcs/fc_embed.*`). This is recorded as a
-checkpoint/source compatibility observation. The native run is not promoted to
-a complete baseline until its final output and official evaluation are
-available; the missing-key warning will remain in the final result section.
+The candidate initializer loaded with a warning listing missing track-head
+keys (`roi_head.track_head.convs/fcs/fc_embed.*`). This is a hard checkpoint
+failure, not a harmless compatibility observation. It is recorded in the
+audit receipt and prevents official Val/Test reproduction.
 
 ## Initial failed attempts (retained evidence)
 
@@ -70,16 +73,17 @@ available; the missing-key warning will remain in the final result section.
 - Fourth attempt: `AttributeError: 'OVTrack' object has no attribute 'motion'`
   after checkpoint load and dataloader construction.
 
-These are pin-local runtime failures, not missing checkpoint evidence. The
-previous `BLOCKED_RELEASED_CHECKPOINT` status is superseded by this running
-real attempt.
+These are pin-local runtime failures surrounding the historical attempt, but
+the missing track-head parameters are independent hard checkpoint evidence.
+The previous running-attempt status is superseded by the current
+`REPRO_BLOCKED_FINAL_CHECKPOINT` disposition.
 
 ## Evaluation
 
-Pending native output completion. No TETA, LocA, AssocA, ClsA, Base, or Novel
-number is filled from another source or from the task-book target.
+Official native Val remains blocked by the missing final checkpoint. No Val
+metric is promoted from the invalid candidate or from a task-book target.
 
-## Completed Test native receipt — 2026-09-12
+## Retained invalid Test diagnostic receipt — 2026-09-12
 
 The six complete-video Test shards were merged and passed the official TETA
 evaluator. At TETA50, the measured rows are `Base=28.063/53.714/16.029/14.446`
@@ -90,6 +94,7 @@ and `Novel=20.289/45.359/13.596/1.914`, in
 Summary:
 `/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus/test_merged/`
 `evaluation_native/OVTrackPlus_Test_native/teta_summary_results.pth`.
-This is the OVTrack+ native baseline, not a TempoTrack result. The Val native
-pickle conversion remains blocked by the preserved OOM attempt; the original
-pickle was not deleted.
+This is an `INVALID_CHECKPOINT_DIAGNOSTIC`, not an OVTrack+ native baseline or
+paper reproduction, because the initializer lacks the track head. The Val
+native pickle conversion remains blocked by the preserved OOM attempt; the
+original pickle was not deleted.

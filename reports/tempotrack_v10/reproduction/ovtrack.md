@@ -1,6 +1,6 @@
 # OVTrack native reproduction (V10.3 Agent B)
 
-Status: **NATIVE RUNNING — 10-video prediction parity receipt PASS; full Val/Test metrics pending.**
+Status: **REPRO_PASS — official native Val/Test outputs and TETA summaries are complete.**
 
 This is the OVTrack lane only.  No TempoTrack code, shared core, detector,
 embedding, or native tracker source was changed.  The V10.3 task specification
@@ -164,7 +164,9 @@ and `Novel=27.825/48.367/33.620/1.490`; Test is
 `Base=32.681/45.630/35.501/16.912` and
 `Novel=24.431/42.407/29.118/1.767`, in
 `TETA/LocA/AssocA/ClsA` order. These are native OVTrack receipts only;
-TempoTrack full-stream evaluation is still pending.
+TempoTrack full-stream evaluation is still pending; the running V10 Tempo
+streams are separate diagnostic experiments and do not change this native
+baseline status.
 
 Test merge manifest:
 `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/`

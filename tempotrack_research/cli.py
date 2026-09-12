@@ -830,6 +830,16 @@ def _csv_floats(value: str) -> list[float]:
     return [float(item.strip()) for item in str(value).split(",") if item.strip()]
 
 
+def _add_keep_going_argument(parser: argparse.ArgumentParser) -> None:
+    """Expose the same boolean option on Python 3.8 and newer runtimes."""
+    action = getattr(argparse, "BooleanOptionalAction", None)
+    if action is not None:
+        parser.add_argument("--keep-going", action=action, default=True)
+    else:
+        parser.add_argument("--keep-going", dest="keep_going", action="store_true", default=True)
+        parser.add_argument("--no-keep-going", dest="keep_going", action="store_false")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tempotrack-repair")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -844,7 +854,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("evaluate"); p.add_argument("--repo", default="."); p.add_argument("--manifest", required=True); p.add_argument("--observations", dest="manifest"); p.add_argument("--prediction", required=True); p.add_argument("--annotation"); p.add_argument("--annotations", dest="annotation"); p.add_argument("--gt"); p.add_argument("--category-protocol"); p.add_argument("--output"); p.add_argument("--run-root"); p.add_argument("--name", required=True); p.add_argument("--evaluator-python"); p.add_argument("--cores", type=int, default=1); p.set_defaults(func=_evaluate)
     p = sub.add_parser("audit-repairs"); p.add_argument("--repo", default="."); p.add_argument("--level", choices=["static", "integration", "trial", "full", "pretrial", "prefull"], default="static"); p.add_argument("--source-manifest"); p.add_argument("--observations", dest="source_manifest"); p.add_argument("--output"); p.add_argument("--skip-passed", action="store_true"); p.add_argument("--methods", default="all"); p.add_argument("--local"); p.add_argument("--run-root"); p.set_defaults(func=_audit)
     p = sub.add_parser("build-check"); p.add_argument("--repo", default="."); p.add_argument("--changed-only", action="store_true"); p.add_argument("--skip-passed", action="store_true"); p.add_argument("--smoke", action="store_true"); p.set_defaults(func=_build_check)
-    p = sub.add_parser("suite"); p.add_argument("--repo", default="."); p.add_argument("--config"); p.add_argument("--local"); p.add_argument("--stage", choices=["static", "build", "integration", "trial", "full", "all"], default="all"); p.add_argument("--verification", default="build"); p.add_argument("--require-gates"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); p.add_argument("--keep-going", action=argparse.BooleanOptionalAction, default=True); p.add_argument("--max-steps", type=int); p.set_defaults(func=_suite)
+    p = sub.add_parser("suite"); p.add_argument("--repo", default="."); p.add_argument("--config"); p.add_argument("--local"); p.add_argument("--stage", choices=["static", "build", "integration", "trial", "full", "all"], default="all"); p.add_argument("--verification", default="build"); p.add_argument("--require-gates"); p.add_argument("--run-root"); p.add_argument("--resume", default="auto"); _add_keep_going_argument(p); p.add_argument("--max-steps", type=int); p.set_defaults(func=_suite)
     p = sub.add_parser("status"); p.add_argument("--repo", default="."); p.add_argument("--run-root"); p.set_defaults(func=_status)
     p = sub.add_parser("report"); p.add_argument("--repo", default="."); p.add_argument("--run-root"); p.add_argument("--output"); p.set_defaults(func=_report)
     p = sub.add_parser("repair-v3")
