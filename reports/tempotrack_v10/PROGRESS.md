@@ -583,3 +583,39 @@ failure.
   `6,417/52,155` and `17,999/52,155` files respectively. The mixed root and
   the failed gate logs remain diagnostic only. Source commits through
   `02f4d7e` are pushed to `origin/codex/tempotrack-v10-ov-cov-tract-masa`.
+
+## V10.3 FAST PATH closure and MASA Val launch — 2026-09-12 13:02 CST
+
+- The direct Val writer finished all `36,375` frames and exited naturally.
+  A first 74-frame replay was run with the wrong cwd and failed with the
+  real COV-relative-class-file traceback (`data/lvis/annotations/lvis_classes_v1.txt`);
+  the failure is retained as a diagnostic and wrote no detection files.
+- The corrected replay initially completed 74/74 frames but wrote no public
+  files because pinned `OVTrack.simple_test` skips `tracker.match` when
+  `track_feats is None`.  The production runtime now adds a model boundary
+  immediately after the official detector output: it calls the pinned
+  `OVTrackerUncertainty.remove_distractor(..., nms='inter')` with zero-width
+  indexing-only feature tensors and serializes only the returned bboxes and
+  labels.  It does not alter the native result or external COV checkout.
+  The patched runtime passed the existing COV export/runtime suite (`8 passed`)
+  and the real AST installation gate (`match_boundaries=True`,
+  `model_boundaries=True`).
+- Replay2 used the exact pinned COV config/checkpoint, explicit TAO frames root,
+  and the two-video annotation artifact
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_exports_v10_3/val_missing_videos.json`
+  (74 frames; SHA `4d0bee4fdacc6efa967bae93c88b73f209fe0eb8855db0881c863972c1410873`).
+  It exited `0`, filled all three missing paths with valid empty arrays, and
+  the final Val audit passed: `36,375` frames, `missing=0`, `extra=0`,
+  `1,596,319` detections.  The pass manifest is
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa/receipts/manifest_val_pass.json`
+  (SHA `1979d6a013445d66f30d72ebf06079914e94ffe45f44e4e0e9b000894f1ee0f8`);
+  bbox/score/label hashes are stored there.
+- The completed Test sharded root independently passed the same audit for
+  `52,155` frames and `2,353,689` detections; its manifest SHA is
+  `08fd8b64c5f0c5d797b3f4b5a86d807af47ef4cac9e6205d286fdbf5fc757039`.
+  Test reference direct remains a separate active producer for the required
+  exact comparison and has not been merged into the sharded root.
+- After the Val audit, MASA-R50 Native Val was launched with
+  `masa_r50.pth` on physical GPU1 using
+  `configs/research/v10/masa_r50_covdet_native.py`; parent PID `28641`
+  (DataLoader children `28836`, `28837`) is healthy at the latest snapshot.

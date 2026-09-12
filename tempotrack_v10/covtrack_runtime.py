@@ -158,6 +158,63 @@ def _capture_no_embed(
     )
 
 
+def _capture_no_track_features(
+    model: Any,
+    bboxes: Any,
+    labels: Any,
+    frame_id: Any,
+    filename: Any,
+) -> None:
+    """Export a frame for the pinned model branch that skips ``match``.
+
+    The pinned ``OVTrack.simple_test`` does not call the tracker at all when
+    the ROI head returns ``track_feats is None``.  In that branch the native
+    frontend still has detector bboxes/labels, but there is no later ID
+    allocation boundary at which the exporter could run.  Reuse the pinned
+    ``remove_distractor`` implementation with zero-width feature tensors:
+    that method's validity mask is defined only by bboxes/labels, while the
+    dummy tensors preserve its exact indexing contract.  The result is then
+    serialized at the same pre-ID boundary without changing the model result.
+    """
+
+    if not os.environ.get("V10_COV_DET_EXPORT_ROOT"):
+        return
+    tracker = getattr(model, "tracker", None)
+    if tracker is None:
+        raise SnapshotContractError(
+            "COV_DETECTION_EXPORT_FAILED: no tracker for track_feats=None"
+        )
+    current_video = getattr(tracker, "_v10_current_video_id", None)
+    if current_video is None:
+        current_video = getattr(model, "_v10_dataset_video_id", None)
+    if current_video is None:
+        raise SnapshotContractError(
+            "COV_DETECTION_EXPORT_FAILED: track_feats=None has no video_id"
+        )
+    if not hasattr(bboxes, "size") or not hasattr(bboxes, "device"):
+        raise SnapshotContractError(
+            "COV_DETECTION_EXPORT_FAILED: detector bboxes must be a tensor"
+        )
+    count = int(bboxes.size(0))
+    dummy_feats = torch.empty(
+        (count, 0), dtype=torch.float32, device=bboxes.device
+    )
+    filtered_bboxes, filtered_labels, _, _, _ = tracker.remove_distractor(
+        bboxes,
+        labels,
+        track_feats=dummy_feats,
+        cls_feats=dummy_feats,
+        nms="inter",
+    )
+    _maybe_export_cov_detections(
+        bboxes=filtered_bboxes,
+        labels=filtered_labels,
+        frame_id=frame_id,
+        kwargs={"filename": str(filename)},
+        video_id=int(current_video),
+    )
+
+
 def _prepare(
     tracker: Any,
     bboxes: Any,
@@ -292,6 +349,14 @@ __v10_cov_capture_no_embed(self, bboxes, labels, frame_id, kwargs)
     return ast.parse(textwrap.dedent(source)).body[0]
 
 
+def _capture_no_track_features_statement() -> ast.stmt:
+    source = """
+__v10_cov_capture_no_track_features(
+    self, det_bboxes, det_labels, frame_id, img_name)
+"""
+    return ast.parse(textwrap.dedent(source)).body[0]
+
+
 def _is_embeds_none(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Compare)
@@ -299,6 +364,19 @@ def _is_embeds_none(node: ast.AST) -> bool:
         and node.left.id == "embeds"
         and len(node.ops) == 1
         and isinstance(node.ops[0], ast.Is)
+        and len(node.comparators) == 1
+        and isinstance(node.comparators[0], ast.Constant)
+        and node.comparators[0].value is None
+    )
+
+
+def _is_track_features_not_none(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Name)
+        and node.left.id == "track_feats"
+        and len(node.ops) == 1
+        and isinstance(node.ops[0], ast.IsNot)
         and len(node.comparators) == 1
         and isinstance(node.comparators[0], ast.Constant)
         and node.comparators[0].value is None
@@ -330,6 +408,18 @@ class _BoundaryInjector(ast.NodeTransformer):
         if not self.post_inserted and _is_self_call(node.value, "update_memo"):
             self.post_inserted = True
             return [node, ast.parse("__v10_cov_commit(self, ids)").body[0]]
+        return node
+
+
+class _ModelBoundaryInjector(ast.NodeTransformer):
+    def __init__(self) -> None:
+        self.capture_inserted = False
+
+    def visit_If(self, node: ast.If) -> Any:
+        node = self.generic_visit(node)
+        if not self.capture_inserted and _is_track_features_not_none(node.test):
+            self.capture_inserted = True
+            return [_capture_no_track_features_statement(), node]
         return node
 
 
@@ -372,6 +462,39 @@ def _patch_match(cls: Any) -> None:
     cls._v10_match_boundaries = True
 
 
+def _patch_model_simple_test(cls: Any) -> None:
+    if getattr(cls, "_v10_model_boundaries", False):
+        return
+    original = cls.simple_test
+    source = textwrap.dedent(inspect.getsource(original))
+    tree = ast.parse(source, filename=inspect.getsourcefile(original) or "ovtrack.py")
+    injector = _ModelBoundaryInjector()
+    tree = injector.visit(tree)
+    ast.fix_missing_locations(tree)
+    if not injector.capture_inserted:
+        raise RuntimeError("COV V10 model boundary injection failed")
+    namespace = dict(original.__globals__)
+    namespace["__v10_cov_capture_no_track_features"] = _capture_no_track_features
+    local_namespace: dict[str, Any] = {}
+    exec(
+        compile(
+            tree,
+            inspect.getsourcefile(original) or "ovtrack.py",
+            "exec",
+        ),
+        namespace,
+        local_namespace,
+    )
+    patched = local_namespace.get("simple_test")
+    if patched is None:
+        raise RuntimeError("COV V10 model boundary did not define simple_test")
+    patched.__module__ = original.__module__
+    patched.__qualname__ = original.__qualname__
+    patched.__doc__ = original.__doc__
+    cls.simple_test = patched
+    cls._v10_model_boundaries = True
+
+
 def install_covtrack_runtime(config: TempoTrackConfig) -> Any:
     """Patch the pinned COV classes in memory and return the tracker class."""
 
@@ -379,6 +502,7 @@ def install_covtrack_runtime(config: TempoTrackConfig) -> Any:
     from ovtrack.models.trackers.ovtracker import OVTrackerUncertainty
 
     _patch_match(OVTrackerUncertainty)
+    _patch_model_simple_test(OVTrack)
     if not getattr(OVTrackerUncertainty, "_v10_init_boundaries", False):
         original_init = OVTrackerUncertainty.__init__
         original_reset = OVTrackerUncertainty.reset
