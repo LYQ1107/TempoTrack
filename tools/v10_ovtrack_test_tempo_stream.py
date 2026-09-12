@@ -201,6 +201,15 @@ def streaming_single_gpu_test(model: Any, data_loader: Any, show: bool = False,
         for local_index, data in enumerate(data_loader):
             info = dataset.data_infos[local_index]
             _inject_dataset_video_id(data, int(info["video_id"]))
+            # COVTrack's legacy model path drops this field after collation.
+            # Preserve the exact dataset key on the experiment-owned tracker
+            # as a causal fallback; OVTrack's native path is unaffected.
+            target_model = getattr(model, "module", model)
+            target_model._v10_dataset_video_id = int(info["video_id"])
+            target_tracker = getattr(target_model, "tracker", None)
+            if target_tracker is not None and getattr(target_tracker, "_v10_cov_adapter", None) is not None:
+                target_tracker._v10_dataset_video_id = int(info["video_id"])
+                target_tracker._v10_current_video_id = int(info["video_id"])
             with torch.no_grad():
                 result = model(return_loss=False, rescale=True, **data)
             handle.write(json.dumps(_stream_frame(dataset, info, result), separators=(",", ":")))

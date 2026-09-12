@@ -38,12 +38,34 @@ def _metadata_mapping(value: Any) -> Mapping[str, Any] | None:
 def _set_video_id_from_meta(model: Any, img_metas: Any) -> None:
     metadata = _metadata_mapping(img_metas)
     video_id = None if metadata is None else metadata.get("video_id")
+    tracker = getattr(model, "tracker", None)
     if video_id is None:
+        # The pinned COV ``VideoCollect`` drops the dataset video key before
+        # the model-facing legacy metadata path.  The streaming transport
+        # sets this value directly from the same ``dataset.data_infos`` entry
+        # immediately before the model call; accept that audited fallback.
+        dataset_video = getattr(model, "_v10_dataset_video_id", None)
+        if dataset_video is not None:
+            if tracker is not None:
+                tracker._v10_dataset_video_id = int(dataset_video)
+                tracker._v10_current_video_id = int(dataset_video)
+            else:
+                # COV constructs its tracker lazily in frame-0 init_tracker.
+                # The init_tracker hook below transfers this pending dataset
+                # key to the newly-created tracker before the first match.
+                model._v10_pending_video_id = int(dataset_video)
+            return
+        if tracker is not None:
+            dataset_video = getattr(tracker, "_v10_dataset_video_id", None)
+            if dataset_video is not None:
+                tracker._v10_current_video_id = int(dataset_video)
+                return
+        if tracker is not None and getattr(tracker, "_v10_current_video_id", None) is not None:
+            return
         raise SnapshotContractError(
             "COV V10 hook requires the existing dataset video_id in img_metas"
         )
     current = getattr(video_id, "item", lambda: video_id)()
-    tracker = getattr(model, "tracker", None)
     if tracker is not None:
         tracker._v10_current_video_id = int(current)
 
@@ -90,6 +112,11 @@ def _prepare(
     if adapter is None:
         return ids
     current_video = getattr(tracker, "_v10_current_video_id", None)
+    if current_video is None:
+        dataset_video = getattr(tracker, "_v10_dataset_video_id", None)
+        if dataset_video is not None:
+            current_video = int(dataset_video)
+            tracker._v10_current_video_id = current_video
     if current_video is None:
         raise SnapshotContractError("COV V10 hook has no causal video_id")
     memory_ids = () if memo_ids is None else memo_ids
@@ -260,6 +287,24 @@ def install_covtrack_runtime(config: TempoTrackConfig) -> Any:
 
     if not getattr(OVTrack, "_v10_video_hook", False):
         original_simple_test = OVTrack.simple_test
+        original_init_tracker = OVTrack.init_tracker
+
+        def init_tracker_with_v10(self: Any, *args: Any, **kwargs: Any) -> Any:
+            result = original_init_tracker(self, *args, **kwargs)
+            tracker = getattr(self, "tracker", None)
+            dataset_video = getattr(self, "_v10_pending_video_id", None)
+            if dataset_video is None:
+                dataset_video = getattr(self, "_v10_dataset_video_id", None)
+            if tracker is not None and dataset_video is not None:
+                tracker._v10_dataset_video_id = int(dataset_video)
+                tracker._v10_current_video_id = int(dataset_video)
+                if not hasattr(tracker, "fusion_head"):
+                    tracker.set_fusion_head(self.roi_head.fusion_head, self.roi_head.track_head.loss_cyc)
+                test_cfg = getattr(self, "test_cfg", None)
+                tracker._v10_rcnn_test_cfg = getattr(test_cfg, "rcnn", test_cfg)
+            return result
+
+        OVTrack.init_tracker = init_tracker_with_v10
 
         def simple_test_with_v10(self: Any, img: Any, img_metas: Any, rescale: bool = False) -> Any:
             _set_video_id_from_meta(self, img_metas)
