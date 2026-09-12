@@ -12,17 +12,19 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ..models.query_conditioned_reranker import CandidateReranker, FEATURE_NAMES, group_ranking_loss
+from .query_conditioned_reranker import CandidateReranker, FEATURE_NAMES, group_ranking_loss
 
 
 def train(features_dir, output, *, device="cpu", epochs=12, seed=0):
-    from ..orchestration.v9_oracle import sha256,write_json,memory_guard
+    from .v9_reranker import sha256,write_json,memory_guard
+    from .reranker import validate_feature_config
     root=Path(features_dir); out=Path(output)
     meta=json.loads((root/"features.json").read_text())
     if meta["split"] not in ("train","val","dev") or meta["split"].lower().startswith("test"):
         raise ValueError("Test features are forbidden for optimizer and normalization")
     if not meta.get("base_only_supervision") or meta["feature_names"] != list(FEATURE_NAMES):
         raise ValueError("unverified supervision/feature schema")
+    feature_config = validate_feature_config(meta.get("feature_config"))
     for name,digest in meta["array_hashes"].items():
         if sha256(root/(name+".npy")) != digest: raise ValueError(f"feature hash mismatch: {name}")
     x=np.load(root/"features.npy",mmap_mode="r"); labels=np.load(root/"labels.npy",mmap_mode="r")
@@ -93,7 +95,7 @@ def train(features_dir, output, *, device="cpu", epochs=12, seed=0):
                 best=val; best_step=optimizer_steps
                 torch.save(dict(model_state=model.state_dict(),feature_names=FEATURE_NAMES,features_hash=sha256(root/"features.json"),
                     epoch=epoch+1,optimizer_steps=optimizer_steps,seed=seed,training_split=meta["split"],protocol=meta["protocol"],base_only_supervision=True,
-                    test_weights_forbidden=True,feature_config=meta["feature_config"]),out/"best.pt")
+                    test_weights_forbidden=True,feature_config=feature_config),out/"best.pt")
     result=dict(status="COMPLETED",protocol=meta["protocol"],diagnostic_only=meta["protocol"]=="VAL_BASE_PILOT",
         paper_valid=meta["protocol"]!="VAL_BASE_PILOT",training_split=meta["split"],training_groups=len(train_groups),holdout_groups=len(holdout),
         train_video_ids=sorted({int(videos[g]) for g in train_groups}),holdout_video_ids=sorted({int(videos[g]) for g in holdout}),
@@ -104,7 +106,12 @@ def train(features_dir, output, *, device="cpu", epochs=12, seed=0):
         NOT_PAPER_VALID=meta['protocol']=='VAL_BASE_PILOT',
         environment=dict(python=sys.executable,python_version=platform.python_version(),torch_version=torch.__version__,
             variables={k:os.environ.get(k) for k in ('CUDA_VISIBLE_DEVICES','OMP_NUM_THREADS','MKL_NUM_THREADS','OPENBLAS_NUM_THREADS','LD_PRELOAD')}),
-        repo_head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=Path(__file__).resolve().parents[2],text=True).strip(),
-        source_hashes={str(p):sha256(p) for p in (Path(__file__),Path(__file__).resolve().parents[1]/'models/query_conditioned_reranker.py',Path(__file__).resolve().parents[1]/'orchestration/v9_reranker.py')})
+        feature_config=feature_config,
+        repo_head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=Path(__file__).resolve().parents[1],text=True).strip(),
+        source_hashes={str(p):sha256(p) for p in (
+            Path(__file__).resolve(),
+            Path(__file__).resolve().with_name('query_conditioned_reranker.py'),
+            Path(__file__).resolve().with_name('v9_reranker.py'),
+        )})
     write_json(out/"training.json",result)
     return result

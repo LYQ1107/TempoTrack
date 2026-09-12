@@ -94,6 +94,11 @@ class _MemoryRecord:
     last_frame: int
     history: list[np.ndarray]
     evidence_history: list[np.ndarray] = field(default_factory=list)
+    # This bank is independent of the heuristic ``history``.  It is the
+    # checkpoint-contract bank: causal cosine deduplication and synchronized
+    # evidence are applied before the checkpoint's capacity truncation.
+    reranker_history: list[np.ndarray] = field(default_factory=list)
+    reranker_evidence_history: list[np.ndarray] = field(default_factory=list)
     root_id: int = 0
     lineage: tuple[int, ...] = field(default_factory=tuple)
     last_box: np.ndarray | None = None
@@ -131,8 +136,21 @@ class TempoTrackOverlay:
             if not callable(getattr(reranker, "score_event", None)):
                 raise SnapshotContractError("BLOCKED_QUERY_RERANKER_SOURCE_MISSING: score_event")
             provenance = getattr(reranker, "provenance", None)
-            if not isinstance(provenance, Mapping) or provenance.get("status") != "EXACT_V9_MODEL_AND_FEATURES":
+            if not isinstance(provenance, Mapping) or provenance.get("status") != "EXACT_V9_MODEL_CODE_AND_WEIGHTS":
                 raise SnapshotContractError("BLOCKED_QUERY_RERANKER_SOURCE_MISSING: exact provenance")
+            feature_config = provenance.get("feature_config")
+            if not isinstance(feature_config, Mapping):
+                raise SnapshotContractError("BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_MISSING")
+            for key, expected in (("alpha_fast", self.config.alpha_fast), ("alpha_slow", self.config.alpha_slow)):
+                if key not in feature_config or not np.isclose(
+                    float(feature_config[key]), float(expected), rtol=0.0, atol=1e-8
+                ):
+                    raise SnapshotContractError(f"BLOCKED_QUERY_RERANKER_ALPHA_MISMATCH: {key}")
+            if int(self.config.candidate_top_k) > int(feature_config["candidate_top_k"]):
+                raise SnapshotContractError("BLOCKED_QUERY_RERANKER_CONTEXT_K_TOO_SMALL")
+            self._reranker_feature_config = dict(feature_config)
+        else:
+            self._reranker_feature_config = {}
         self._reranker = reranker
         self._dual = FixedDualMemory(
             mode="fixed_dual",
@@ -141,6 +159,7 @@ class TempoTrackOverlay:
         )
         self._records: dict[tuple[str, int], _MemoryRecord] = {}
         self._pending: dict[tuple[str, int], tuple[str, OverlayProposal]] = {}
+        self._last_query_observations: int | None = None
 
     @staticmethod
     def _video_key(video_id: int | str) -> str:
@@ -199,6 +218,66 @@ class TempoTrackOverlay:
             raise SnapshotContractError(f"{name} must be finite [L,D]")
         return [_normalize(row) for row in array]
 
+    @staticmethod
+    def _raw_history_value(value: Any | None, dimension: int, name: str) -> list[np.ndarray]:
+        if value is None:
+            return []
+        array = np.asarray(value, dtype=np.float32)
+        if array.ndim == 1:
+            array = array[None, :]
+        if array.ndim != 2 or array.shape[1] != dimension or not np.isfinite(array).all():
+            raise SnapshotContractError(f"{name} must be finite [L,D]")
+        return [np.asarray(row, dtype=np.float32).copy() for row in array]
+
+    def _canonical_reranker_bank(
+        self,
+        history: Sequence[np.ndarray],
+        evidence: Sequence[np.ndarray],
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+        """Rebuild the causal V9 bank with synchronized feature/evidence rows."""
+        if self._reranker is None or not history or not evidence:
+            return [], []
+        length = min(len(history), len(evidence))
+        if length < 1:
+            return [], []
+        bank_features: list[np.ndarray] = []
+        bank_evidence: list[np.ndarray] = []
+        threshold = float(self._reranker_feature_config["memory_dedup_cos"])
+        capacity = int(self._reranker_feature_config["memory_capacity"])
+        for feature, row in zip(history[-length:], evidence[-length:]):
+            feature_value = np.asarray(feature, dtype=np.float32).copy()
+            evidence_value = np.asarray(row, dtype=np.float32).reshape(-1)
+            if evidence_value.shape != (7,) or not np.isfinite(evidence_value).all():
+                raise SnapshotContractError("reranker evidence rows must be finite [7]")
+            if not bank_features or max(_cosine(feature_value, old) for old in bank_features) < threshold:
+                bank_features.append(feature_value.copy())
+                bank_evidence.append(evidence_value.copy())
+        return bank_features[-capacity:], bank_evidence[-capacity:]
+
+    def _append_reranker_rows(
+        self,
+        record: _MemoryRecord,
+        feature: np.ndarray,
+        evidence: Sequence[np.ndarray],
+    ) -> None:
+        """Append one causal observation and keep feature/evidence aligned."""
+        if self._reranker is None or not evidence:
+            return
+        threshold = float(self._reranker_feature_config["memory_dedup_cos"])
+        capacity = int(self._reranker_feature_config["memory_capacity"])
+        feature_value = np.asarray(feature, dtype=np.float32).copy()
+        for row in evidence:
+            evidence_value = np.asarray(row, dtype=np.float32).reshape(-1)
+            if evidence_value.shape != (7,) or not np.isfinite(evidence_value).all():
+                raise SnapshotContractError("reranker evidence rows must be finite [7]")
+            if not record.reranker_history or max(
+                _cosine(feature_value, old) for old in record.reranker_history
+            ) < threshold:
+                record.reranker_history.append(feature_value.copy())
+                record.reranker_evidence_history.append(evidence_value.copy())
+        record.reranker_history = record.reranker_history[-capacity:]
+        record.reranker_evidence_history = record.reranker_evidence_history[-capacity:]
+
     def _ensure_snapshot_memory(self, snapshot: PreAssociationSnapshot) -> None:
         video = self._video_key(snapshot.video_id)
         if snapshot.memory_embeddings is None:
@@ -208,9 +287,12 @@ class TempoTrackOverlay:
             explicit_history = self._indexed_metadata(
                 snapshot, "memory_embedding_history", index, int(memory_id), len(snapshot.memory_ids)
             )
-            history = self._history_value(explicit_history, snapshot.feature_dim, "memory_embedding_history")
-            if not history:
-                history = [_normalize(snapshot.memory_embeddings[index])]
+            raw_history = self._raw_history_value(
+                explicit_history, snapshot.feature_dim, "memory_embedding_history"
+            )
+            if not raw_history:
+                raw_history = [np.asarray(snapshot.memory_embeddings[index], dtype=np.float32).copy()]
+            history = [_normalize(row) for row in raw_history]
             evidence_value = self._indexed_metadata(
                 snapshot, "memory_evidence", index, int(memory_id), len(snapshot.memory_ids)
             )
@@ -231,12 +313,15 @@ class TempoTrackOverlay:
             if current is None:
                 prototype = torch.as_tensor(history[-1], dtype=torch.float32)
                 state = self._dual.initialize(prototype, frame=int(snapshot.memory_last_frame[index]))
+                reranker_history, reranker_evidence = self._canonical_reranker_bank(raw_history, evidence)
                 self._records[key] = _MemoryRecord(
                     state=state,
                     first_frame=int(snapshot.memory_last_frame[index]),
                     last_frame=int(snapshot.memory_last_frame[index]),
                     history=history[-self.config.memory_capacity :],
                     evidence_history=evidence[-self.config.memory_capacity :],
+                    reranker_history=reranker_history,
+                    reranker_evidence_history=reranker_evidence,
                     root_id=root_id,
                     lineage=lineage,
                 )
@@ -246,6 +331,11 @@ class TempoTrackOverlay:
                     current.history = history[-self.config.memory_capacity :]
                 if evidence_value is not None:
                     current.evidence_history = evidence[-self.config.memory_capacity :]
+                if self._reranker is not None and explicit_history is not None and evidence_value is not None:
+                    (
+                        current.reranker_history,
+                        current.reranker_evidence_history,
+                    ) = self._canonical_reranker_bank(raw_history, evidence)
 
     def _candidate_union(self, snapshot: PreAssociationSnapshot) -> list[_Candidate]:
         video = self._video_key(snapshot.video_id)
@@ -319,9 +409,17 @@ class TempoTrackOverlay:
         return float(score)
 
     def _query_sequence(self, snapshot: PreAssociationSnapshot, observation_index: int) -> np.ndarray:
+        expected = int(self._reranker_feature_config.get("query_observations", 1))
         value = snapshot.metadata.get("query_embeddings")
         if value is None:
-            return snapshot.embeddings[observation_index : observation_index + 1]
+            if expected > 1:
+                raise SnapshotContractError(
+                    "BLOCKED_QUERY_PROTOCOL_MISMATCH: checkpoint requires "
+                    f"Q={expected} but snapshot has no query_embeddings"
+                )
+            result = snapshot.embeddings[observation_index : observation_index + 1]
+            self._last_query_observations = int(result.shape[0])
+            return result
         if isinstance(value, Mapping):
             value = value.get(snapshot.observation_uids[observation_index], value.get(str(observation_index)))
         else:
@@ -333,28 +431,34 @@ class TempoTrackOverlay:
         array = np.asarray(value, dtype=np.float32)
         if array.ndim != 2 or array.shape[1] != snapshot.feature_dim or not np.isfinite(array).all():
             raise SnapshotContractError("query_embeddings must be [N,L,D] or aligned [N,D]")
+        if array.shape[0] != expected:
+            raise SnapshotContractError(
+                f"BLOCKED_QUERY_PROTOCOL_MISMATCH: expected Q={expected}, got Q={array.shape[0]}"
+            )
+        self._last_query_observations = int(array.shape[0])
         return array
 
     def _reranker_scores(
         self,
         snapshot: PreAssociationSnapshot,
         observation_index: int,
-        candidates: Sequence[tuple[float, _Candidate]],
+        context_candidates: Sequence[tuple[float, _Candidate]],
+        decision_candidates: Sequence[tuple[float, _Candidate]],
     ) -> tuple[np.ndarray | None, int]:
         if self.config.reranker_weight <= 0.0:
             return None, 0
         if self._reranker is None:
             raise SnapshotContractError("BLOCKED_QUERY_RERANKER_SOURCE_MISSING")
-        if not candidates:
+        if not context_candidates:
             return None, 0
         query = self._query_sequence(snapshot, observation_index)
         query = query / np.maximum(np.linalg.norm(query, axis=1, keepdims=True), 1e-8)
         payload: list[tuple[np.ndarray, np.ndarray, int, int]] = []
-        valid_positions: list[int] = []
+        candidate_ids: list[int] = []
         missing = 0
-        for rank, (_, candidate) in enumerate(candidates, start=1):
-            history = candidate.record.history[-self.config.memory_capacity :]
-            evidence = candidate.record.evidence_history[-self.config.memory_capacity :]
+        for rank, (_, candidate) in enumerate(context_candidates, start=1):
+            history = candidate.record.reranker_history
+            evidence = candidate.record.reranker_evidence_history
             length = min(len(history), len(evidence))
             if length < 1:
                 missing += 1
@@ -363,18 +467,16 @@ class TempoTrackOverlay:
             memory = memory / np.maximum(np.linalg.norm(memory, axis=1, keepdims=True), 1e-8)
             evidence_array = np.stack(evidence[-length:], axis=0).astype(np.float32)
             payload.append((query @ memory.T, evidence_array, int(snapshot.frame_id - candidate.record.last_frame), rank))
-            valid_positions.append(rank - 1)
-        if missing:
-            # Missing-evidence candidates are omitted. They are never scored
-            # by the heuristic substitute; valid positions retain alignment.
-            if not payload:
-                return None, missing
-            logits, _ = self._reranker.score_event(payload, top_r=self.config.top_r, max_gap=self.config.max_gap)
-            aligned = np.full(len(candidates), np.nan, dtype=np.float32)
-            aligned[valid_positions] = logits
-            return aligned, missing
-        logits, _ = self._reranker.score_event(payload, top_r=self.config.top_r, max_gap=self.config.max_gap)
-        return logits, 0
+            candidate_ids.append(int(candidate.memory_id))
+        if not payload:
+            return None, missing
+        logits, _ = self._reranker.score_event(payload)
+        by_memory_id = {memory_id: float(logit) for memory_id, logit in zip(candidate_ids, logits)}
+        aligned = np.full(len(decision_candidates), np.nan, dtype=np.float32)
+        for index, (_, candidate) in enumerate(decision_candidates):
+            if int(candidate.memory_id) in by_memory_id:
+                aligned[index] = by_memory_id[int(candidate.memory_id)]
+        return aligned, missing
 
     def propose(self, snapshot: PreAssociationSnapshot) -> OverlayProposal:
         """Produce a deterministic candidate assignment before native IDs commit."""
@@ -430,7 +532,12 @@ class TempoTrackOverlay:
                 legal.append((float(prefilter), candidate))
             legal.sort(key=lambda item: (-item[0], item[1].memory_id, item[1].root_id))
             selected = legal[: self.config.candidate_top_k]
-            logits, missing = self._reranker_scores(snapshot, observation_index, selected)
+            context = legal[: int(self._reranker_feature_config.get(
+                "candidate_top_k", self.config.candidate_top_k
+            ))] if self.config.reranker_weight > 0.0 else selected
+            logits, missing = self._reranker_scores(
+                snapshot, observation_index, context, selected
+            )
             reranker_missing_total += missing
             for rank, (_, candidate) in enumerate(selected, start=1):
                 if self.config.reranker_weight > 0.0:
@@ -500,6 +607,15 @@ class TempoTrackOverlay:
                 "native_candidate_count": int(native_count),
                 "dormant_candidate_count": int(len(candidates) - native_count),
                 "legal_candidate_count": int(sum(len(values) for values in all_candidates)),
+                "reranker_context_candidate_top_k": int(self._reranker_feature_config.get(
+                    "candidate_top_k", self.config.candidate_top_k
+                )),
+                "reranker_decision_candidate_top_k": int(self.config.candidate_top_k),
+                "reranker_feature_config": dict(self._reranker_feature_config),
+                "reranker_expected_query_observations": int(
+                    self._reranker_feature_config.get("query_observations", 1)
+                ),
+                "reranker_actual_query_observations": self._last_query_observations,
                 "competition_losers": int(competition_losers),
                 "frame_collision_rejections": int(sum(value == "frame_collision" for value in reasons)),
                 "reranker_status": self._reranker.provenance if self._reranker is not None else "DISABLED_NOT_FULL",
@@ -570,6 +686,7 @@ class TempoTrackOverlay:
             area = max(float(max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])), 1e-6)
             old_area = max(float(max(0.0, old_box[2] - old_box[0]) * max(0.0, old_box[3] - old_box[1])), 1e-6)
             area_ratio = float(np.clip(np.log(area / old_area), -2.0, 2.0) / 2.0)
+        feature_max_gap = int(self._reranker_feature_config.get("max_gap", self.config.max_gap))
         return np.asarray(
             [
                 score,
@@ -577,7 +694,7 @@ class TempoTrackOverlay:
                 _cosine(current, slow),
                 _cosine(fast, slow),
                 min(1.0, max(0, frame - int(record.first_frame)) / 100.0),
-                min(1.0, max(0, frame - int(record.last_frame)) / max(int(self.config.max_gap), 1)),
+                min(1.0, max(0, frame - int(record.last_frame)) / max(feature_max_gap, 1)),
                 area_ratio,
             ],
             dtype=np.float32,
@@ -651,6 +768,11 @@ class TempoTrackOverlay:
                 if evidence:
                     current.evidence_history.extend(evidence)
                     current.evidence_history = current.evidence_history[-self.config.memory_capacity :]
+                self._append_reranker_rows(
+                    current,
+                    snapshot.embeddings[index],
+                    evidence,
+                )
                 current.last_box = np.asarray(snapshot.boxes_xyxy[index], dtype=np.float32).copy()
                 self._records[memory_key] = current
         self._pending.pop(key, None)

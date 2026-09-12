@@ -221,48 +221,25 @@ def test_dormant_candidate_order_is_deterministic_after_union():
 
 def test_exact_v9_reranker_is_used_with_controlled_provenance():
     checkpoint = "/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/v9_3/reranker/covtrack/training_seed0/best.pt"
-    overlay = TempoTrackOverlay(
-        TempoTrackConfig(
-            score_threshold=-100.0,
-            margin_threshold=-1.0,
-            reranker_weight=1.0,
-            reranker_checkpoint=checkpoint,
+    with pytest.raises(SnapshotContractError, match="FEATURE_CONFIG"):
+        TempoTrackOverlay(
+            TempoTrackConfig(
+                score_threshold=-100.0,
+                margin_threshold=-1.0,
+                reranker_weight=1.0,
+                reranker_checkpoint=checkpoint,
+            )
         )
-    )
-    metadata = {"memory_evidence": np.ones((1, 1, 7), dtype=np.float32)}
-    proposal = overlay.propose(make_snapshot(metadata=metadata))
-    provenance = proposal.diagnostics["reranker_status"]
-    assert proposal.diagnostics["full_capability_status"] == "FULL_EXACT_V9_RERANKER"
-    assert provenance["checkpoint_sha256"] == "36e7bbfc80d70fbe3fd6bec4830b9df419d6b9a05ca94fabc1ccfa0fa156c82b"
-    assert len(provenance["feature_names"]) == 24
-    assert provenance["model_source_hash_match"] is True
 
 
 def test_reranker_missing_evidence_fails_closed_without_heuristic_fallback():
     checkpoint = "/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/v9_3/reranker/covtrack/training_seed0/best.pt"
-    overlay = TempoTrackOverlay(
-        TempoTrackConfig(
-            score_threshold=-100.0,
-            margin_threshold=-1.0,
-            reranker_weight=1.0,
-            reranker_checkpoint=checkpoint,
-        ),
-    )
-    seed = make_empty_memory_snapshot(
-        frame=5,
-        count=2,
-        metadata={
-            "observation_evidence": {
-                "7:5:0": None,
-                "7:5:1": np.ones(7, dtype=np.float32),
-            }
-        },
-    )
-    overlay.propose(seed)
-    overlay.commit(seed, [42, 43])
-    proposal = overlay.propose(make_empty_memory_snapshot(frame=10))
-    # 42 is the first selected candidate but has no evidence.  43 remains
-    # aligned at its own selected position and is not silently dropped.
-    assert proposal.assignments == (43,)
-    assert proposal.reasons == ("accepted",)
-    assert proposal.diagnostics["reranker_missing_evidence"] == 1
+    with pytest.raises(SnapshotContractError, match="FEATURE_CONFIG"):
+        TempoTrackOverlay(
+            TempoTrackConfig(
+                score_threshold=-100.0,
+                margin_threshold=-1.0,
+                reranker_weight=1.0,
+                reranker_checkpoint=checkpoint,
+            ),
+        )

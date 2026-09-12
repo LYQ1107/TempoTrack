@@ -64,6 +64,8 @@ def _diagnostic_state(path: Path) -> dict[str, Any]:
             "competition_losers": 0,
             "frame_collision_rejections": 0,
             "reranker_missing_evidence": 0,
+            "reranker_expected_query_observations": None,
+            "reranker_actual_query_observations": None,
             "reason_counts": {},
             "full_capability_status_counts": {},
             "reranker_status": None,
@@ -121,6 +123,10 @@ def _record_overlay_diagnostics(decision: Any) -> None:
     state["competition_losers"] += int(diagnostics.get("competition_losers", 0))
     state["frame_collision_rejections"] += int(diagnostics.get("frame_collision_rejections", 0))
     state["reranker_missing_evidence"] += int(diagnostics.get("reranker_missing_evidence", 0))
+    for name in ("reranker_expected_query_observations", "reranker_actual_query_observations"):
+        value = diagnostics.get(name)
+        if value is not None and state[name] is None:
+            state[name] = int(value)
     reason_counts = Counter(state["reason_counts"])
     reason_counts.update(reasons)
     state["reason_counts"] = dict(reason_counts)
@@ -177,6 +183,8 @@ def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> Non
         "competition_losers": int(state["competition_losers"]),
         "frame_collision_rejections": int(state["frame_collision_rejections"]),
         "reranker_missing_evidence": int(state["reranker_missing_evidence"]),
+        "reranker_expected_query_observations": state["reranker_expected_query_observations"],
+        "reranker_actual_query_observations": state["reranker_actual_query_observations"],
         "reason_counts": dict(sorted(state["reason_counts"].items())),
         "full_capability_status_counts": dict(sorted(state["full_capability_status_counts"].items())),
         "reranker_status": state["reranker_status"],

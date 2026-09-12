@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import torch
@@ -21,9 +21,14 @@ from . import query_conditioned_reranker as _feature_module
 
 
 DEFAULT_V9_ROOT = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9")
-REVIEWED_MODEL_SHA = "2390d4049090c26c3af5be54035671be9d91512b4cf74e3ea6230035712a60da"
-REVIEWED_TRAINER_SHA = "fb896e0efca9c356c24cc2c92d14365472d58352ba71cfebd2d7dd6c05868c83"
-REVIEWED_ORCHESTRATION_SHA = "fac6059ca080a62c8c6f406b8ef44d88a6eb39ee8a12ffbce3e5d6bd3ffba6b9"
+REQUIRED_FEATURE_CONFIG = (
+    "query_observations", "top_r", "max_gap", "min_gap",
+    "candidate_top_k", "memory_capacity", "alpha_fast", "alpha_slow",
+    "memory_dedup_cos",
+)
+CANONICAL_ALPHA_FAST = 0.70
+CANONICAL_ALPHA_SLOW = 0.15
+CANONICAL_MEMORY_DEDUP_COS = 0.95
 
 
 def _sha256(path: Path) -> str:
@@ -45,6 +50,7 @@ class ExactV9Reranker:
     source_hashes: dict[str, str]
     receipt_source_hashes: dict[str, str]
     device: str
+    feature_config: dict[str, Any]
 
     @property
     def feature_names(self) -> tuple[str, ...]:
@@ -72,22 +78,20 @@ class ExactV9Reranker:
             (value for key, value in self.receipt_source_hashes.items() if key.endswith("v9_reranker.py")),
             None,
         )
-        controlled_complete = (
-            current_model == REVIEWED_MODEL_SHA
-            and any(key.endswith("reranker_trainer.py") and value == REVIEWED_TRAINER_SHA
-                    for key, value in self.source_hashes.items())
-            and current_orchestration == REVIEWED_ORCHESTRATION_SHA
-        )
         return {
-            "status": "EXACT_V9_MODEL_AND_FEATURES",
+            "status": "EXACT_V9_MODEL_CODE_AND_WEIGHTS",
             "checkpoint": str(self.checkpoint),
             "checkpoint_sha256": self.checkpoint_hash,
             "feature_names": list(self.feature_names),
+            "feature_config": dict(self.feature_config),
             "source_hashes": dict(self.source_hashes),
             "receipt_source_hashes": dict(self.receipt_source_hashes),
             "model_source_hash_match": current_model == receipt_model,
-            "controlled_source_hash_match": controlled_complete,
-            "orchestration_source_hash_match": current_orchestration == REVIEWED_ORCHESTRATION_SHA,
+            "controlled_source_hash_match": all(
+                _receipt_hash_for(self.receipt_source_hashes, Path(key).name) == value
+                for key, value in self.source_hashes.items()
+            ),
+            "orchestration_source_hash_match": current_orchestration == receipt_orchestration,
             "receipt_orchestration_hash_match": current_orchestration == receipt_orchestration,
             "training_protocol": self.receipt.get("protocol"),
             "paper_valid": bool(self.receipt.get("paper_valid", False)),
@@ -99,9 +103,6 @@ class ExactV9Reranker:
     def score_event(
         self,
         candidates: Sequence[tuple[np.ndarray, np.ndarray, int, int]],
-        *,
-        top_r: int,
-        max_gap: int,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Score one event using V9's exact candidate + event-context path.
 
@@ -112,7 +113,14 @@ class ExactV9Reranker:
         if not candidates:
             raise ValueError("exact reranker requires at least one candidate")
         base = [
-            self.feature_module.candidate_features(cosine, evidence, gap, rank, top_r=top_r, max_gap=max_gap)
+            self.feature_module.candidate_features(
+                cosine,
+                evidence,
+                gap,
+                rank,
+                top_r=int(self.feature_config["top_r"]),
+                max_gap=int(self.feature_config["max_gap"]),
+            )
             for cosine, evidence, gap, rank in candidates
         ]
         features = self.feature_module.add_event_context(base)
@@ -124,6 +132,61 @@ class ExactV9Reranker:
         if len(logits) != len(candidates) or not np.isfinite(logits).all():
             raise FloatingPointError("nonfinite exact V9 reranker logits")
         return logits, features
+
+
+def _receipt_hash_for(receipt_hashes: Mapping[str, Any], basename: str) -> str | None:
+    return next(
+        (str(value) for key, value in receipt_hashes.items() if Path(str(key)).name == basename),
+        None,
+    )
+
+
+def validate_feature_config(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Validate the immutable train/inference feature contract."""
+    if not isinstance(value, Mapping):
+        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_MISSING")
+    missing = [key for key in REQUIRED_FEATURE_CONFIG if key not in value]
+    if missing:
+        raise SnapshotContractError(
+            "BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_MISSING: " + ",".join(missing)
+        )
+    result = dict(value)
+    for key in (
+        "query_observations", "top_r", "max_gap", "min_gap",
+        "candidate_top_k", "memory_capacity",
+    ):
+        number = result[key]
+        try:
+            integer = int(number)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SnapshotContractError(
+                f"BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_INVALID: {key}"
+            ) from exc
+        if isinstance(number, bool) or integer != number:
+            raise SnapshotContractError(f"BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_INVALID: {key}")
+        result[key] = integer
+    if result["query_observations"] not in (1, 2, 4) or result["top_r"] < 1:
+        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_INVALID: query/top_r")
+    if result["min_gap"] < 0 or result["max_gap"] < result["min_gap"]:
+        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_INVALID: gap")
+    if result["candidate_top_k"] < 1 or result["memory_capacity"] < 1:
+        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_INVALID: capacity")
+    for key, expected in (
+        ("alpha_fast", CANONICAL_ALPHA_FAST),
+        ("alpha_slow", CANONICAL_ALPHA_SLOW),
+        ("memory_dedup_cos", CANONICAL_MEMORY_DEDUP_COS),
+    ):
+        try:
+            result[key] = float(result[key])
+        except (TypeError, ValueError) as exc:
+            raise SnapshotContractError(
+                f"BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_INVALID: {key}"
+            ) from exc
+        if not np.isfinite(result[key]) or not np.isclose(result[key], expected, rtol=0.0, atol=1e-8):
+            raise SnapshotContractError(
+                f"BLOCKED_QUERY_RERANKER_NONCANONICAL_FEATURE: {key}={result[key]}"
+            )
+    return result
 
 
 def load_exact_v9_reranker(
@@ -156,22 +219,23 @@ def load_exact_v9_reranker(
 
     module = _feature_module
     current_hashes = {str(path): _sha256(path) for path in (model_path, trainer_path, orchestration_path)}
-    if current_hashes[str(model_path)] != REVIEWED_MODEL_SHA:
-        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_MODEL_SOURCE_HASH_MISMATCH")
-    if current_hashes[str(trainer_path)] != REVIEWED_TRAINER_SHA:
-        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_TRAINER_SOURCE_HASH_MISMATCH")
-    if current_hashes[str(orchestration_path)] != REVIEWED_ORCHESTRATION_SHA:
-        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_ORCHESTRATION_SOURCE_HASH_MISMATCH")
     receipt_hashes = {str(key): str(value) for key, value in receipt.get("source_hashes", {}).items()}
-    receipt_model_hash = next(
-        (value for key, value in receipt_hashes.items() if key.endswith("query_conditioned_reranker.py")), None
-    )
-    if receipt_model_hash != current_hashes[str(model_path)]:
-        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_MODEL_SOURCE_HASH_MISMATCH")
 
     state = torch.load(checkpoint_path, map_location=device)
+    feature_config = validate_feature_config(state.get("feature_config"))
+    receipt_feature_config = receipt.get("feature_config")
+    if receipt_feature_config is not None and validate_feature_config(receipt_feature_config) != feature_config:
+        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_FEATURE_CONFIG_MISMATCH")
+    for path in (model_path, trainer_path, orchestration_path):
+        expected = _receipt_hash_for(receipt_hashes, path.name)
+        if expected != current_hashes[str(path)]:
+            raise SnapshotContractError(
+                f"BLOCKED_QUERY_RERANKER_{path.stem.upper()}_SOURCE_HASH_MISMATCH"
+            )
     if tuple(state.get("feature_names", ())) != tuple(module.FEATURE_NAMES):
         raise SnapshotContractError("BLOCKED_QUERY_RERANKER_FEATURE_SCHEMA_MISMATCH")
+    if "model_state" not in state:
+        raise SnapshotContractError("BLOCKED_QUERY_RERANKER_MODEL_STATE_MISSING")
     model = module.CandidateReranker().to(device)
     model.load_state_dict(state["model_state"], strict=True)
     model.eval()
@@ -183,7 +247,11 @@ def load_exact_v9_reranker(
         source_hashes=current_hashes,
         receipt_source_hashes=receipt_hashes,
         device=device,
+        feature_config=feature_config,
     )
 
 
-__all__ = ["DEFAULT_V9_ROOT", "ExactV9Reranker", "load_exact_v9_reranker"]
+__all__ = [
+    "DEFAULT_V9_ROOT", "ExactV9Reranker", "load_exact_v9_reranker",
+    "validate_feature_config", "REQUIRED_FEATURE_CONFIG",
+]

@@ -10,20 +10,41 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import sqlite3
 from types import SimpleNamespace
 
 import numpy as np
 
-from ..models.query_conditioned_reranker import (
+from .query_conditioned_reranker import (
     CandidateReranker, EVIDENCE_COLUMNS, FEATURE_NAMES, add_event_context, candidate_features,
 )
-from .v9_oracle import sha256, write_json, memory_guard
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(8 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def write_json(path, value):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(value, indent=2, default=str) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def memory_guard(spare_gib=12):
+    values = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
+    available = int(values["MemAvailable"].split()[0]) * 1024
+    if available < spare_gib * 2**30:
+        raise MemoryError(f"Available RAM {available / 2**30:.2f} GiB below {spare_gib} GiB reserve")
 
 
 def self_check(output):
     import torch
-    from ..models.query_conditioned_reranker import group_ranking_loss
+    from .query_conditioned_reranker import group_ranking_loss
     torch.manual_seed(0); rng=np.random.default_rng(0)
     cosine=rng.uniform(-1,1,(4,7)).astype(np.float32); evidence=rng.uniform(0,1,(7,7)).astype(np.float32)
     first=candidate_features(cosine,evidence,10,1)
@@ -68,8 +89,15 @@ def self_check(output):
 
 
 def source_hashes():
-    base=Path(__file__).resolve().parents[1]
-    return {str(p):sha256(p) for p in (Path(__file__),base/'models/query_conditioned_reranker.py',base/'training/reranker_trainer.py')}
+    base = Path(__file__).resolve().parent
+    return {
+        str(p): sha256(p)
+        for p in (
+            Path(__file__).resolve(),
+            base / "query_conditioned_reranker.py",
+            base / "reranker_trainer.py",
+        )
+    }
 
 
 def native_video_scores(records, embeddings, model, config, *, capture_features=False):
@@ -79,9 +107,9 @@ def native_video_scores(records, embeddings, model, config, *, capture_features=
     Production event-frame root competition/collision is applied downstream.
     """
     import torch
-    from ..streaming.psmr_dataset import fragment_rows
-    from ..streaming.partial_support import build_memory_anchor
-    from .v9_parameter_search import _rank_candidates
+    from tempotrack_research.streaming.psmr_dataset import fragment_rows
+    from tempotrack_research.streaming.partial_support import build_memory_anchor
+    from tempotrack_research.orchestration.v9_parameter_search import _rank_candidates
     frames=np.asarray([r['frame_index'] for r in records]); ids=np.asarray([r['track_id'] for r in records])
     rows=fragment_rows(ids,frames); boxes=np.asarray([r['_box_xyxy'] for r in records],dtype=np.float32); det=np.asarray([r['score'] for r in records],dtype=np.float32)
     video=int(records[0]['video_id']); anchors=[]; info=[]
@@ -115,7 +143,7 @@ def native_video_scores(records, embeddings, model, config, *, capture_features=
 
 
 def replay_scores(records, fragment_rows, events, threshold, margin):
-    from ..streaming.partial_support import _frame_occupancy,_has_frame_collision,_apply_fragment_target
+    from tempotrack_research.streaming.partial_support import _frame_occupancy,_has_frame_collision,_apply_fragment_target
     result=[dict(r) for r in records]; occupancy=_frame_occupancy(result); roots={s:int(records[rows[0]]['track_id']) for s,rows in enumerate(fragment_rows)}
     groups=defaultdict(list); stats=Counter()
     for event in events: groups[event['decision_frame']].append(event)
@@ -141,18 +169,20 @@ def replay_scores(records, fragment_rows, events, threshold, margin):
 
 def load_checkpoint(checkpoint, device='cpu'):
     import torch
+    from .reranker import validate_feature_config
     cp=Path(checkpoint); receipt=json.loads((cp.parent/'training.json').read_text())
     if receipt['training_split']=='test' or receipt.get('test_weights_used') or not receipt['base_only_supervision']:
         raise ValueError('invalid optimizer provenance')
     if sha256(cp)!=receipt['checkpoint_hash']: raise ValueError('checkpoint hash mismatch')
     state=torch.load(cp,map_location=device)
     if state['training_split']=='test' or tuple(state['feature_names'])!=FEATURE_NAMES: raise ValueError('invalid checkpoint')
+    config = validate_feature_config(state.get('feature_config'))
     model=CandidateReranker().to(device); model.load_state_dict(state['model_state']); model.eval()
-    return model,state['feature_config'],receipt
+    return model,config,receipt
 
 
 def read_native_video(shard, source_by_uid):
-    from ..v6_cli import _frames_for_shard,_native_uid
+    from tempotrack_research.v6_cli import _frames_for_shard,_native_uid
     if sha256(shard['path'])!=shard['sha256']: raise ValueError('native shard hash mismatch')
     records=[]; embeddings=[]
     for frame in _frames_for_shard(shard):
@@ -207,7 +237,7 @@ def native_parity(cache, features_dir, checkpoint, output, videos_limit=3):
 
 def _validate_score_shard(doc, video, source, shard, config):
     """Validate saved inference without running the model or rebuilding features."""
-    from ..streaming.psmr_dataset import fragment_rows
+    from tempotrack_research.streaming.psmr_dataset import fragment_rows
     if doc['video_id'] != video:
         raise ValueError('saved score video mismatch')
     records, embeddings = read_native_video(shard, {uid: json.loads(payload) for _, uid, payload in source})
@@ -249,6 +279,7 @@ def _validate_score_shard(doc, video, source, shard, config):
 def score_dataset(cache, checkpoint, source_index, subset_manifest, output, *, resume=False, legacy_validation=None):
     """Read original frontend payloads only; oracle IDs/labels are never read."""
     import fcntl
+    import sqlite3
     out=Path(output)
     # Old workers predate the advisory lock. Refuse a duplicate by exact argv,
     # not by an ambiguous process name or a potentially recycled PID.
@@ -355,6 +386,7 @@ def score_dataset(cache, checkpoint, source_index, subset_manifest, output, *, r
 
 def calibrate(scores_dir, cache, output):
     """At most four operating points; labels affect thresholds, never weights."""
+    import sqlite3
     root=Path(scores_dir); score_meta=json.loads((root/'scores.json').read_text()); metadata=json.loads((Path(cache)/'metadata.json').read_text())
     if metadata['split']!='test': raise ValueError('this operating-point protocol requires Test Base')
     if metadata['frontend_prediction_hash']!=score_meta['source_prediction_hash']: raise ValueError('calibration source mismatch')
@@ -543,8 +575,8 @@ def full_test(scores_dir, cache, selection, output):
 
 
 def build_features(cache, output, *, query_observations=4, top_r=3):
-    from .v9_parameter_search import _load_event_cache
-    from ..streaming.partial_support import build_anchor_evidence_sequence
+    from tempotrack_research.orchestration.v9_parameter_search import _load_event_cache
+    from tempotrack_research.streaming.partial_support import build_anchor_evidence_sequence
     import inspect
     root=Path(cache); out=Path(output)
     if out.exists(): raise FileExistsError(out)
@@ -556,6 +588,7 @@ def build_features(cache, output, *, query_observations=4, top_r=3):
         verified[key]={'path':meta[key],'sha256':actual}
     if sha256(meta['rows_path'])!=meta['rows_hash']: raise ValueError('event rows hash mismatch')
     if query_observations not in (1,2,4): raise ValueError('schema10 supports B1/B2/B4')
+    if int(top_r) < 1: raise ValueError('top_r must be positive')
     out.mkdir(parents=True); n=int(meta['events'])
     maps={name:np.lib.format.open_memmap(out/(name+'.npy'),mode='w+',dtype=dtype,shape=shape)
           for name,dtype,shape in [('features','float32',(n,len(FEATURE_NAMES))),('labels','int8',(n,)),
@@ -598,10 +631,21 @@ def build_features(cache, output, *, query_observations=4, top_r=3):
         prohibited_inputs=['label','target_base','candidate_base','gt_identity','Base/Novel_flag'],padding='valid query_rows and mem_len only',
         singleton_context='best_other=self; margin=0; rank_percentile=0')
     write_json(out/'feature_schema.json',schema)
+    feature_config = dict(
+        query_observations=int(query_observations),
+        top_r=int(top_r),
+        max_gap=int(meta['max_gap']),
+        min_gap=int(meta['min_gap']),
+        candidate_top_k=64,
+        memory_capacity=64,
+        alpha_fast=0.70,
+        alpha_slow=0.15,
+        memory_dedup_cos=0.95,
+    )
     result=dict(status='COMPLETED',artifact='v9_3_candidate_features',split=meta['split'],frontend=meta['frontend'],protocol=protocol,
         paper_valid=protocol=='BASE_TRAIN',paper_status='NOT_PAPER_VALID' if protocol=='VAL_BASE_PILOT' else protocol,
         base_only_supervision=True,supervision_rule='target_base AND candidate_base AND label in {0,1}',
-        feature_names=list(FEATURE_NAMES),feature_config=dict(query_observations=query_observations,top_r=top_r,max_gap=meta['max_gap'],min_gap=meta['min_gap'],candidate_top_k=64,memory_capacity=64),
+        feature_names=list(FEATURE_NAMES),feature_config=feature_config,
         row_count=written,allocated_rows=n,groups=len(videos),counts=dict(counts),event_cache=str(root),event_cache_hash=sha256(root/'metadata.json'),
         rows_hash=meta['rows_hash'],source_inputs=verified,feature_schema_hash=sha256(out/'feature_schema.json'),
         array_hashes={p.stem:sha256(p) for p in out.glob('*.npy')})
@@ -612,6 +656,7 @@ def build_features(cache, output, *, query_observations=4, top_r=3):
 def main():
     parser=argparse.ArgumentParser(__doc__); sub=parser.add_subparsers(dest='action',required=True)
     p=sub.add_parser('features'); p.add_argument('--event-cache',required=True); p.add_argument('--output',required=True)
+    p.add_argument('--query-observations',type=int,default=4); p.add_argument('--top-r',type=int,default=3)
     p=sub.add_parser('train'); p.add_argument('--features',required=True); p.add_argument('--output',required=True); p.add_argument('--device',default='cpu'); p.add_argument('--epochs',type=int,default=12)
     p=sub.add_parser('check'); p.add_argument('--output',required=True)
     p=sub.add_parser('parity'); p.add_argument('--event-cache',required=True); p.add_argument('--features',required=True); p.add_argument('--checkpoint',required=True); p.add_argument('--output',required=True)
@@ -619,9 +664,9 @@ def main():
     p=sub.add_parser('pilot'); p.add_argument('--scores',required=True); p.add_argument('--event-cache',required=True); p.add_argument('--pareto',required=True); p.add_argument('--output',required=True)
     p=sub.add_parser('full-test'); p.add_argument('--scores',required=True); p.add_argument('--event-cache',required=True); p.add_argument('--selection',required=True); p.add_argument('--output',required=True)
     args=parser.parse_args()
-    if args.action=='features': result=build_features(args.event_cache,args.output)
+    if args.action=='features': result=build_features(args.event_cache,args.output,query_observations=args.query_observations,top_r=args.top_r)
     elif args.action=='train':
-        from ..training.reranker_trainer import train
+        from .reranker_trainer import train
         result=train(args.features,args.output,device=args.device,epochs=args.epochs)
     elif args.action=='check': result=self_check(args.output)
     elif args.action=='parity': result=native_parity(args.event_cache,args.features,args.checkpoint,args.output)

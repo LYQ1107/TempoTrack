@@ -26,8 +26,6 @@ from typing import Any, Mapping
 
 
 SEARCH_FIELDS = (
-    "alpha_fast",
-    "alpha_slow",
     "max_gap",
     "candidate_top_k",
     "top_r",
@@ -111,13 +109,14 @@ def default_trial_specs() -> list[dict[str, Any]]:
     """A bounded coordinate set selected from the real smoke score range."""
 
     anchor = {
-        "alpha_fast": 0.70,
-        "alpha_slow": 0.15,
         "max_gap": 60,
         "candidate_top_k": 8,
         "top_r": 3,
         "memory_capacity": 64,
-        "score_threshold": 0.9490030407905579,
+        # Thresholds are regenerated from the post-contract Q1 smoke.  This
+        # zero is only a structural placeholder and is never a replacement
+        # for the smoke-derived quantiles.
+        "score_threshold": 0.0,
         "margin_threshold": 0.0,
     }
     rows: list[dict[str, Any]] = []
@@ -129,11 +128,6 @@ def default_trial_specs() -> list[dict[str, Any]]:
         rows.append(row)
 
     add("anchor")
-    add("score_p05", score_threshold=2.047424829006195)
-    add("score_p25", score_threshold=2.830277442932129)
-    add("score_p50", score_threshold=3.793378472328186)
-    add("margin_p25", margin_threshold=0.4247480034828186)
-    add("margin_p50", margin_threshold=0.9515769481658936)
     add("gap_30", max_gap=30)
     add("gap_120", max_gap=120)
     add("gap_240", max_gap=240)
@@ -144,10 +138,6 @@ def default_trial_specs() -> list[dict[str, Any]]:
     add("topr_5", top_r=5)
     add("memory_32", memory_capacity=32)
     add("memory_128", memory_capacity=128)
-    add("alpha_fast_55", alpha_fast=0.55)
-    add("alpha_fast_85", alpha_fast=0.85)
-    add("alpha_slow_05", alpha_slow=0.05)
-    add("alpha_slow_30", alpha_slow=0.30)
     add("topk16_margin25", candidate_top_k=16, margin_threshold=0.4247480034828186)
     add("gap120_topk16", max_gap=120, candidate_top_k=16)
     add("memory128_topr5", memory_capacity=128, top_r=5)
@@ -296,6 +286,52 @@ def _hash_if_file(path: Path) -> str | None:
     return _sha256(path) if path.is_file() else None
 
 
+def _parse_summary_with_evaluator(
+    args: argparse.Namespace,
+    summary: Path,
+    annotation: Path,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    """Parse with the same masaenv that ran the official TETA evaluator."""
+
+    code = r'''
+import hashlib
+import json
+import sys
+from pathlib import Path
+from tempotrack_research.evaluation.teta_parser import parse_teta_summary
+
+class Protocol:
+    def __init__(self, categories):
+        self.benchmark_categories = tuple(categories)
+        self.base_ids = frozenset(int(item["id"]) for item in categories if item.get("frequency", "f") != "r")
+        self.novel_ids = frozenset(int(item["id"]) for item in categories if item.get("frequency", "f") == "r")
+    def content_hash(self):
+        value = {"categories": list(self.benchmark_categories), "base_ids": sorted(self.base_ids), "novel_ids": sorted(self.novel_ids)}
+        return hashlib.sha256(json.dumps(value, sort_keys=True).encode("utf-8")).hexdigest()
+
+annotation = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+protocol = Protocol(annotation.get("categories", []))
+print(json.dumps(parse_teta_summary(Path(sys.argv[1]), category_protocol=protocol)))
+'''
+    result = subprocess.run(
+        [args.evaluator_python, "-c", code, str(summary), str(annotation)],
+        cwd=str(Path(args.repo).resolve()),
+        env=dict(env),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "summary parsing failed in evaluator environment: "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"summary parser returned non-JSON output: {result.stdout[-1000:]}") from exc
+
+
 def run_trial(args: argparse.Namespace) -> int:
     repo = Path(args.repo).resolve()
     source = Path(args.source).resolve()
@@ -406,9 +442,7 @@ def run_trial(args: argparse.Namespace) -> int:
         summary = trial_root / "evaluation" / args.evaluator_name / "teta_summary_results.pth"
         if not summary.is_file():
             raise FileNotFoundError(f"official TETA summary missing: {summary}")
-        from tempotrack_research.evaluation.teta_parser import parse_teta_summary
-
-        parsed = parse_teta_summary(summary, category_protocol=protocol)
+        parsed = _parse_summary_with_evaluator(args, summary, annotation, env)
         diagnostics = trial_root / "diagnostics.json"
         receipt["outputs"] = {
             "stream_manifest": str(stream_manifest),

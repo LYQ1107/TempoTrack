@@ -12,7 +12,22 @@ import sys
 import time
 from typing import Any
 
-from v10_search_covtrack_full_test import _load_specs, default_trial_specs, _write_json
+try:
+    from v10_search_covtrack_full_test import _load_specs, default_trial_specs, _write_json
+except ModuleNotFoundError:  # import-safe when loaded as tools.v10_run_covtrack_search
+    import importlib.util
+
+    _spec = importlib.util.spec_from_file_location(
+        "_v10_search_covtrack_full_test", Path(__file__).with_name("v10_search_covtrack_full_test.py")
+    )
+    if _spec is None or _spec.loader is None:
+        raise ImportError("cannot load sibling v10_search_covtrack_full_test.py")
+    _module = importlib.util.module_from_spec(_spec)
+    sys.modules[_spec.name] = _module
+    _spec.loader.exec_module(_module)
+    _load_specs = _module._load_specs
+    default_trial_specs = _module.default_trial_specs
+    _write_json = _module._write_json
 
 
 def _load_requested_specs(path: Path | None, trial_ids: set[str] | None) -> list[dict[str, Any]]:
@@ -68,6 +83,42 @@ def _write_status(path: Path, status: dict[str, Any]) -> None:
     _write_json(path, status)
 
 
+def _next_retry_id(root: Path, trial_id: str) -> str:
+    """Return a new directory name; failed/partial trials are immutable."""
+    index = 1
+    while (root / f"{trial_id}__retry{index:02d}").exists():
+        index += 1
+    return f"{trial_id}__retry{index:02d}"
+
+
+def _trial_needs_retry(root: Path, trial_id: str, old_job: dict[str, Any] | None) -> bool:
+    if old_job is not None and old_job.get("state") == "COMPLETED":
+        return False
+    trial_root = root / trial_id
+    receipt = trial_root / "receipt.json"
+    if receipt.is_file():
+        try:
+            status = json.loads(receipt.read_text(encoding="utf-8")).get("status")
+        except json.JSONDecodeError:
+            status = "PARTIAL"
+        return status != "COMPLETED"
+    return trial_root.exists() and any(trial_root.iterdir())
+
+
+def _acquire_free_gpu(free_gpus: list[str]) -> str:
+    """Pop one genuinely free device; never derive allocation from count."""
+    if not free_gpus:
+        raise RuntimeError("no free GPU lease")
+    return free_gpus.pop(0)
+
+
+def _release_gpu(free_gpus: list[str], gpu: str, order: list[str]) -> None:
+    if gpu in free_gpus:
+        raise RuntimeError(f"GPU {gpu} released twice")
+    free_gpus.append(gpu)
+    free_gpus.sort(key=order.index)
+
+
 def run(args: argparse.Namespace) -> int:
     requested = {value for value in args.trial_ids.split(",") if value} if args.trial_ids else None
     specs = _load_requested_specs(Path(args.spec_file) if args.spec_file else None, requested)
@@ -82,31 +133,40 @@ def run(args: argparse.Namespace) -> int:
     if status_path.exists() and not args.resume:
         raise FileExistsError(f"coordinator status already exists; use --resume: {status_path}")
 
-    jobs = {
-        str(item["trial_id"]): {
-            "trial_id": str(item["trial_id"]),
-            "spec": item,
-            "state": "PENDING",
+    old: dict[str, Any] = {}
+    if args.resume and status_path.is_file():
+        old = json.loads(status_path.read_text(encoding="utf-8")).get("jobs", {})
+    jobs: dict[str, dict[str, Any]] = {}
+    for item in specs:
+        requested_id = str(item["trial_id"])
+        old_job = old.get(requested_id)
+        effective_id = requested_id
+        if _trial_needs_retry(root, requested_id, old_job):
+            effective_id = _next_retry_id(root, requested_id)
+        spec = dict(item)
+        spec["trial_id"] = effective_id
+        jobs[effective_id] = {
+            "trial_id": effective_id,
+            "requested_trial_id": requested_id,
+            "retry_of": requested_id if effective_id != requested_id else None,
+            "spec": spec,
+            "state": "COMPLETED" if old_job and old_job.get("state") == "COMPLETED" else "PENDING",
             "gpu": None,
             "pid": None,
             "returncode": None,
         }
-        for item in specs
-    }
-    if args.resume and status_path.is_file():
-        old = json.loads(status_path.read_text(encoding="utf-8"))
-        for trial_id, value in old.get("jobs", {}).items():
-            if trial_id in jobs and value.get("state") == "COMPLETED":
-                jobs[trial_id].update(value)
+        if old_job and old_job.get("state") == "COMPLETED":
+            jobs[effective_id].update(old_job)
 
     pending = [trial_id for trial_id, job in jobs.items() if job["state"] != "COMPLETED"]
     running: dict[str, tuple[subprocess.Popen[Any], str, Any]] = {}
+    free_gpus = list(gpus)
     completed = sum(job["state"] == "COMPLETED" for job in jobs.values())
     failed = 0
     while pending or running:
-        while pending and len(running) < min(args.max_workers, len(gpus)):
+        while pending and free_gpus and len(running) < min(args.max_workers, len(gpus)):
             trial_id = pending.pop(0)
-            gpu = gpus[len(running) % len(gpus)]
+            gpu = _acquire_free_gpu(free_gpus)
             spec = jobs[trial_id]["spec"]
             # The one-trial harness owns ``root/trial_id`` and deliberately
             # refuses a pre-existing partial directory.  Keep coordinator
@@ -141,6 +201,7 @@ def run(args: argparse.Namespace) -> int:
                 completed += 1
             else:
                 failed += 1
+            _release_gpu(free_gpus, gpu, gpus)
             _write_status(status_path, {"schema_version": 1, "status": "RUNNING", "jobs": jobs, "completed": completed, "failed": failed})
         _write_status(status_path, {"schema_version": 1, "status": "RUNNING", "jobs": jobs, "completed": completed, "failed": failed})
         if pending or running:

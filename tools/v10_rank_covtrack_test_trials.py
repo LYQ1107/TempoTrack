@@ -22,7 +22,12 @@ def _metric(receipt: dict[str, Any], split: str, name: str) -> float | None:
     value = receipt.get("metrics", {}).get(split)
     if not isinstance(value, dict) or name not in value:
         return None
-    number = float(value[name])
+    if value[name] is None:
+        return None
+    try:
+        number = float(value[name])
+    except (TypeError, ValueError):
+        return None
     return number if number == number and abs(number) != float("inf") else None
 
 
@@ -55,7 +60,9 @@ def rank(args: argparse.Namespace) -> int:
         base_assoc = _metric(receipt, "base", "AssocA")
         base_teta = _metric(receipt, "base", "TETA")
         novel_assoc = _metric(receipt, "novel", "AssocA")
-        if base_assoc is None or base_teta is None:
+        # A missing Novel metric is an evaluator/provenance failure, never a
+        # ranking advantage. Keep the receipt on disk but fail closed here.
+        if base_assoc is None or base_teta is None or novel_assoc is None:
             continue
         row = {
             "trial_id": receipt.get("trial_id"),
@@ -66,6 +73,7 @@ def rank(args: argparse.Namespace) -> int:
             "prediction_sha256": receipt.get("outputs", {}).get("prediction_sha256"),
             "base": receipt.get("metrics", {}).get("base"),
             "novel": receipt.get("metrics", {}).get("novel"),
+            "novel_assoc_for_ranking": novel_assoc,
             "base_assoc_delta_vs_control": base_assoc - control_base_assoc,
             "base_teta_delta_vs_control": base_teta - control_base_teta,
             "eligible": base_assoc >= control_base_assoc - 1.0 and base_teta >= control_base_teta - 1.0,
@@ -74,7 +82,7 @@ def rank(args: argparse.Namespace) -> int:
     rows.sort(
         key=lambda row: (
             bool(row["eligible"]),
-            -float(row["novel"].get("AssocA", float("-inf"))) if isinstance(row.get("novel"), dict) else float("inf"),
+            -float(row["novel_assoc_for_ranking"]),
             -float(row["base"].get("AssocA", float("-inf"))),
             -float(row["base"].get("TETA", float("-inf"))),
             str(row.get("trial_id")),
@@ -87,6 +95,11 @@ def rank(args: argparse.Namespace) -> int:
         "selection_protocol": "TEST_TUNED_MODEL_SPECIFIC",
         "unbiased_test": False,
         "selection_note": "Test subset is used for model-specific diagnostics; this is not a paper-unbiased Test result.",
+        "subset_provenance": {
+            "novel_gt_used_for_subset_selection": True,
+            "test_gt_used_for_hyperparameter_selection": True,
+            "novel_gt_used_for_inference": False,
+        },
         "control_receipt": str(control_path),
         "control_receipt_sha256": _sha256(control_path),
         "control_base": control.get("metrics", {}).get("base"),
