@@ -704,3 +704,48 @@ failure.
 - No MASA, OVTrack, or COV external process was signalled. At closure the
   MASA Test process had exited naturally; the pre-existing COV Tempo Test
   process `22665/22689` remained healthy and untouched.
+
+## V10.4 COV full Tempo Test search — 2026-09-12 18:00 CST
+
+- Val writer gate is closed and frozen. `tempotrack_v10/cov_detection_export.py`
+  uses `mkstemp`, pickle flush, `os.fsync`, and `os.replace`; the PASS receipt
+  is `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa/receipts/manifest_val_pass.json`
+  (SHA `1979d6a013445d66f30d72ebf06079914e94ffe45f44e4e0e9b000894f1ee0f8`).
+  It covers 36,375/36,375 Val frames with missing=0, extra=0, exact
+  `det_labels`/`det_bboxes` schema, finite checks, and saved frame/bbox/score/
+  label hashes. No COV writer remains on that root. The earlier shared-root
+  Val overlap is retained only as diagnostic history and is not an overwrite
+  consistency proof.
+- The independent Test direct/sharded public-detection comparison remains
+  exact (52,155 frames, missing/extra=0, max bbox/score diff=0, label diff=0);
+  the frozen sharded root is used for prior MASA results. No Test writer was
+  restarted or allowed to overlap that frozen root.
+- Production source snapshot is pushed on
+  `codex/tempotrack-v10-ov-cov-tract-masa`: `e84820d` adds real bounded
+  overlay diagnostics and the one-trial search harness; `6e95cd9` fixes the
+  coordinator trial-directory ownership race; `726aa6b` adds receipt ranking.
+  The working source HEAD at this entry is `726aa6b` and the remote branch
+  matches it. The required `data` symlink remains local and is not staged.
+- The real 103-frame anchor smoke completed with
+  `FULL_EXACT_V9_RERANKER`: 4,531 observations, 3,878 accepted, zero missing
+  evidence. Diagnostics SHA is `0da99d81539642dfced4ea544eecfb59ae0c9280f2a6256fe802b01517206353`;
+  stream prediction SHA is
+  `cdb5bf6b74cf03e9cfd4c42417795f592dcd1399aedd4a84066369c97648237e`.
+  Its official smoke TETA was Base `27.813/42.094/21.382/19.964` and is
+  explicitly not a full-result claim. A same-input disabled-overlay control
+  harness also completed and was recorded separately.
+- The fixed Test-tuned subset is
+  `/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_test/subset/annotation.json`
+  (306 complete videos, 11,500 frames; annotation SHA
+  `6a1245c5bcc2e9838caf3c5f545256a216ff52003eafd9c47f64c95de3118938`).
+  It is marked `TEST_TUNED_MODEL_SPECIFIC`, `unbiased_test=false`; no Val or
+  Novel GT is used for training. Every trial owns an independent stream,
+  diagnostics, prediction, evaluator directory, and receipt.
+- Current running jobs are the native disabled-overlay control on physical
+  GPU8 and the first four COV trials (`anchor`, `score_p05`, `score_p25`,
+  `score_p50`) on physical GPUs 0,1,6,7. The available resource snapshot at
+  launch was about 105 GB MemAvailable and ~36–37 GB free VRAM per used GPU;
+  the OVTrack Val supervisor remains untouched and its reserved GPUs 2–5,
+  while the old V9 supervisor's GPU9, were not claimed. The four earlier
+  immediate failures are retained as invalid coordinator-start evidence; they
+  did not run detector inference.
