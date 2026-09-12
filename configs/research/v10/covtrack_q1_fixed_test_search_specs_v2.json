@@ -3,7 +3,7 @@
   "unbiased_test": false,
   "contract_mode": "hardened",
   "contract_gate": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_hardened_contract_smoke_FINAL_20260913/contract_gate.json",
-  "contract_gate_sha256": "985672626057364363eddee51966596cf0a98a157fd21baca4f38fea4fc8ef8f",
+  "contract_gate_sha256": "7fd0167fc57a54a82fbca9c5ff32b1b9aebff62bcded86efff40a94dd704bc1f",
   "previous_contract_gate": {
     "path": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_hardened_contract_smoke_20260912_retry03/contract_gate.json",
     "sha256": "3688bd039b3352cc206d0da93734f4498621da3222063ebb4e3d0bd1a8aefff2",
