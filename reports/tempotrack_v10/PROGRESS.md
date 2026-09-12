@@ -749,3 +749,27 @@ failure.
   while the old V9 supervisor's GPU9, were not claimed. The four earlier
   immediate failures are retained as invalid coordinator-start evidence; they
   did not run detector inference.
+
+## V10.4 Q1 prefilter contract repair — 2026-09-12 21:22 CST
+
+- The pre-existing 10-shard complete-video Q1 full smoke was started before
+  the latest prefilter contract fix. Its logical root and all ten shard
+  trials are marked `INVALID_PRE_PREFILTER_CONTRACT_FIX` /
+  `DIAGNOSTIC_ONLY`; healthy workers remain untouched and are allowed to
+  finish naturally. Their outputs cannot enter Test selection or paper
+  results.
+- Commit A `7beb96527e2cd3ba386bb161c4031403b7de9aab` was pushed to
+  `codex/tempotrack-v10-ov-cov-tract-masa`. It makes the FULL Q1 online
+  candidate prefilter the exact cosine against each candidate's last real
+  observation, keeps `last_embedding` causal through snapshot/commit, binds
+  context K to the checkpoint while keeping decision K runtime-controlled,
+  and adds retry, complete-video shard, merge provenance, and diagnostic
+  propagation checks.
+- High-value validation after the patch: 38 targeted tests passed and
+  `tempotrack_research.cli build-check --changed-only` passed. The Q1 pilot
+  checkpoint remains `VAL_BASE_PILOT` / `NOT_PAPER_VALID`; its SHA256 is
+  `ed2524af31c22d17b6fcb61dd118095274b1bb56ad9329b993f9cdc4579aa80f`.
+- Commit B binds the fixed smoke config to Commit A and records the real
+  checkpoint/training/event-cache/source provenance. The next execution gate
+  is a new 2–5 complete-video Q1 contract smoke; the old 10-shard run is not
+  reused for threshold generation.

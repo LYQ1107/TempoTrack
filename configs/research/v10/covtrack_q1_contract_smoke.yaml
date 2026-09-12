@@ -1,7 +1,7 @@
 # V10.4 Q1 feature-contract smoke only.
 # This is a validation configuration, not a paper-valid Test selection point.
 frontend: covtrack
-core_sha: c1d4b685a4e8b0863260cb657cd3f5d746285f64
+core_sha: 7beb96527e2cd3ba386bb161c4031403b7de9aab
 protocol: COV_Q1_FEATURE_CONTRACT_SMOKE
 tempo:
   enabled: true

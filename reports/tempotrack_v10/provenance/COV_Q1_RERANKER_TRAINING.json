@@ -1,0 +1,34 @@
+{
+  "v104_commit_a": "7beb96527e2cd3ba386bb161c4031403b7de9aab",
+  "repo_branch": "codex/tempotrack-v10-ov-cov-tract-masa",
+  "generated_at": "2026-09-12T21:22:17+08:00",
+  "checkpoint": "/data2/usr_for_deadline/tempotrack_v10_unified/reranker/covtrack_q1_val_base_training_v104/best.pt",
+  "checkpoint_sha256": "ed2524af31c22d17b6fcb61dd118095274b1bb56ad9329b993f9cdc4579aa80f",
+  "training_receipt": "/data2/usr_for_deadline/tempotrack_v10_unified/reranker/covtrack_q1_val_base_training_v104/training.json",
+  "training_receipt_sha256": "1b9161f107806a36b0909492bfd587f15fc890b9bff35da56253d97637d9b93e",
+  "features_json": "/data2/usr_for_deadline/tempotrack_v10_unified/reranker/covtrack_q1_val_base_features_v104/features.json",
+  "features_sha256": "1a34f1d5a04b75313c94000d1a296a6b91ee8bc9da82bbbc03c3d9c3bfa4f15f",
+  "protocol": "VAL_BASE_PILOT",
+  "paper_valid": false,
+  "paper_status": "NOT_PAPER_VALID",
+  "training_split": "val",
+  "base_only_supervision": true,
+  "novel_gt_used": false,
+  "test_weights_used": false,
+  "feature_config": {
+    "query_observations": 1,
+    "top_r": 3,
+    "max_gap": 360,
+    "min_gap": 0,
+    "candidate_top_k": 64,
+    "memory_capacity": 64,
+    "alpha_fast": 0.70,
+    "alpha_slow": 0.15,
+    "memory_dedup_cos": 0.95
+  },
+  "source_hashes": {
+    "query_conditioned_reranker.py": "2390d4049090c26c3af5be54035671be9d91512b4cf74e3ea6230035712a60da",
+    "reranker_trainer.py": "192bb4cda6ad4899d9f7c8789ce385d7067bf1dcc6e6b4186e01909d1b40cbd6",
+    "v9_reranker.py": "b3b320c2622c2830c4f40cf9ab6301fefec9b6b2ab0e770071a1d469669c6599"
+  }
+}
