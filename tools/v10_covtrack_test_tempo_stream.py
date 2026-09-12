@@ -13,9 +13,17 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from tempotrack_v10.covtrack_runtime import install_covtrack_runtime
+from tempotrack_v10.covtrack_runtime import install_covtrack_runtime, write_covtrack_diagnostics
 from tempotrack_v10.overlay import TempoTrackConfig
-from v10_ovtrack_test_tempo_stream import streaming_single_gpu_test
+from v10_ovtrack_test_tempo_stream import streaming_single_gpu_test as _streaming_single_gpu_test
+
+
+def streaming_single_gpu_test(*args: Any, **kwargs: Any) -> dict[str, list[Any]]:
+    """Run the shared official transport, then flush COV overlay evidence."""
+
+    result = _streaming_single_gpu_test(*args, **kwargs)
+    write_covtrack_diagnostics("COMPLETED")
+    return result
 
 
 def _config() -> TempoTrackConfig:

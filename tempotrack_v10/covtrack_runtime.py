@@ -10,9 +10,14 @@ affinity calculation, and greedy fallback remain the pinned implementation.
 from __future__ import annotations
 
 import ast
+import atexit
+from collections import Counter
+import json
 import inspect
 import os
+from pathlib import Path
 import textwrap
+import time
 from typing import Any, Mapping
 
 import numpy as np
@@ -22,6 +27,192 @@ from .adapters.covtrack import COVTrackTempoAdapter
 from .contract import SnapshotContractError
 from .cov_detection_export import export_masa_public_detection
 from .overlay import TempoTrackConfig
+
+
+_DIAGNOSTIC_STATES: dict[str, dict[str, Any]] = {}
+_DIAGNOSTIC_REGISTERED = False
+_DIAGNOSTIC_RESERVOIR_SIZE = 200_000
+
+
+def _diagnostic_path() -> Path | None:
+    value = os.environ.get("V10_COV_TEMPO_DIAGNOSTICS")
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise SnapshotContractError(
+            "V10_COV_TEMPO_DIAGNOSTICS must be an absolute experiment path"
+        )
+    return path
+
+
+def _diagnostic_state(path: Path) -> dict[str, Any]:
+    global _DIAGNOSTIC_REGISTERED
+    key = str(path)
+    state = _DIAGNOSTIC_STATES.get(key)
+    if state is None:
+        state = {
+            "status": "RUNNING",
+            "started_at_unix": time.time(),
+            "frames": 0,
+            "observations": 0,
+            "accepted": 0,
+            "rejected": 0,
+            "native_candidate_count_sum": 0,
+            "dormant_candidate_count_sum": 0,
+            "legal_candidate_count_sum": 0,
+            "competition_losers": 0,
+            "frame_collision_rejections": 0,
+            "reranker_missing_evidence": 0,
+            "reason_counts": {},
+            "full_capability_status_counts": {},
+            "reranker_status": None,
+            "observation_hashes": [],
+            "score_samples": [],
+            "margin_samples": [],
+            "accepted_score_samples": [],
+            "score_seen": 0,
+            "margin_seen": 0,
+            "accepted_score_seen": 0,
+            "score_rng": 0x12345678,
+            "margin_rng": 0x23456789,
+            "accepted_score_rng": 0x3456789A,
+        }
+        _DIAGNOSTIC_STATES[key] = state
+    if not _DIAGNOSTIC_REGISTERED:
+        atexit.register(_write_all_covtrack_diagnostics)
+        _DIAGNOSTIC_REGISTERED = True
+    return state
+
+
+def _reservoir_add(state: dict[str, Any], name: str, value: float) -> None:
+    if not np.isfinite(value):
+        return
+    values = state[f"{name}_samples"]
+    seen_name = f"{name}_seen"
+    rng_name = f"{name}_rng"
+    state[seen_name] = int(state[seen_name]) + 1
+    if len(values) < _DIAGNOSTIC_RESERVOIR_SIZE:
+        values.append(float(value))
+        return
+    # A fixed LCG gives a reproducible bounded reservoir without retaining
+    # every observation in a long Test run.
+    state[rng_name] = (int(state[rng_name]) * 1664525 + 1013904223) & 0xFFFFFFFF
+    slot = int(state[rng_name] % state[seen_name])
+    if slot < _DIAGNOSTIC_RESERVOIR_SIZE:
+        values[slot] = float(value)
+
+
+def _record_overlay_diagnostics(decision: Any) -> None:
+    path = _diagnostic_path()
+    if path is None:
+        return
+    proposal = decision.proposal
+    state = _diagnostic_state(path)
+    diagnostics = dict(proposal.diagnostics)
+    reasons = [str(value) for value in proposal.reasons]
+    state["frames"] += 1
+    state["observations"] += len(reasons)
+    state["accepted"] += sum(bool(value) for value in proposal.accepted)
+    state["rejected"] += sum(not bool(value) for value in proposal.accepted)
+    state["native_candidate_count_sum"] += int(diagnostics.get("native_candidate_count", 0))
+    state["dormant_candidate_count_sum"] += int(diagnostics.get("dormant_candidate_count", 0))
+    state["legal_candidate_count_sum"] += int(diagnostics.get("legal_candidate_count", 0))
+    state["competition_losers"] += int(diagnostics.get("competition_losers", 0))
+    state["frame_collision_rejections"] += int(diagnostics.get("frame_collision_rejections", 0))
+    state["reranker_missing_evidence"] += int(diagnostics.get("reranker_missing_evidence", 0))
+    reason_counts = Counter(state["reason_counts"])
+    reason_counts.update(reasons)
+    state["reason_counts"] = dict(reason_counts)
+    capability = str(diagnostics.get("full_capability_status", "UNKNOWN"))
+    capability_counts = Counter(state["full_capability_status_counts"])
+    capability_counts[capability] += 1
+    state["full_capability_status_counts"] = dict(capability_counts)
+    if state["reranker_status"] is None and diagnostics.get("reranker_status") is not None:
+        state["reranker_status"] = diagnostics.get("reranker_status")
+    observation_hash = diagnostics.get("observation_hash")
+    if observation_hash and len(state["observation_hashes"]) < 16:
+        state["observation_hashes"].append(str(observation_hash))
+    for value in proposal.scores:
+        _reservoir_add(state, "score", float(value))
+    for value in proposal.margins:
+        _reservoir_add(state, "margin", float(value))
+    for value, accepted in zip(proposal.scores, proposal.accepted):
+        if accepted:
+            _reservoir_add(state, "accepted_score", float(value))
+
+
+def _quantiles(values: list[float]) -> dict[str, float] | None:
+    if not values:
+        return None
+    array = np.asarray(values, dtype=np.float64)
+    return {
+        name: float(np.percentile(array, percentile))
+        for name, percentile in (("p01", 1), ("p05", 5), ("p25", 25), ("p50", 50), ("p75", 75), ("p95", 95), ("p99", 99))
+    }
+
+
+def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> None:
+    state = _DIAGNOSTIC_STATES.get(str(path))
+    if state is None:
+        return
+    state["status"] = status
+    state["ended_at_unix"] = time.time()
+    frame_count = int(state["frames"])
+    output = {
+        "schema_version": 1,
+        "artifact": "covtrack_v10_tempo_diagnostics",
+        "status": state["status"],
+        "started_at_unix": state["started_at_unix"],
+        "ended_at_unix": state["ended_at_unix"],
+        "duration_seconds": state["ended_at_unix"] - state["started_at_unix"],
+        "frames": frame_count,
+        "observations": int(state["observations"]),
+        "accepted": int(state["accepted"]),
+        "rejected": int(state["rejected"]),
+        "acceptance_rate": (float(state["accepted"]) / max(int(state["observations"]), 1)),
+        "native_candidate_count_mean": float(state["native_candidate_count_sum"] / max(frame_count, 1)),
+        "dormant_candidate_count_mean": float(state["dormant_candidate_count_sum"] / max(frame_count, 1)),
+        "legal_candidate_count_mean": float(state["legal_candidate_count_sum"] / max(frame_count, 1)),
+        "competition_losers": int(state["competition_losers"]),
+        "frame_collision_rejections": int(state["frame_collision_rejections"]),
+        "reranker_missing_evidence": int(state["reranker_missing_evidence"]),
+        "reason_counts": dict(sorted(state["reason_counts"].items())),
+        "full_capability_status_counts": dict(sorted(state["full_capability_status_counts"].items())),
+        "reranker_status": state["reranker_status"],
+        "sample_hashes": list(state["observation_hashes"]),
+        "score_quantiles": _quantiles(state["score_samples"]),
+        "margin_quantiles": _quantiles(state["margin_samples"]),
+        "accepted_score_quantiles": _quantiles(state["accepted_score_samples"]),
+        "reservoir_size": _DIAGNOSTIC_RESERVOIR_SIZE,
+        "score_seen": int(state["score_seen"]),
+        "margin_seen": int(state["margin_seen"]),
+        "accepted_score_seen": int(state["accepted_score_seen"]),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def _write_all_covtrack_diagnostics() -> None:
+    for value, state in list(_DIAGNOSTIC_STATES.items()):
+        if state.get("status") in {"COMPLETED", "FAILED"}:
+            continue
+        try:
+            _write_covtrack_diagnostics(Path(value), status="PROCESS_EXIT")
+        except Exception:
+            # An atexit diagnostic must never mask the official runner's
+            # original exception or change its return code.
+            pass
+
+
+def write_covtrack_diagnostics(status: str = "COMPLETED") -> None:
+    """Flush the bounded real-overlay diagnostics for the current process."""
+
+    path = _diagnostic_path()
+    if path is not None:
+        _write_covtrack_diagnostics(path, status=status)
 
 
 def _metadata_mapping(value: Any) -> Mapping[str, Any] | None:
@@ -293,6 +484,7 @@ def _prepare(
             "native_affinity_stage": "post_mcf_pre_id_commit",
         },
     )
+    _record_overlay_diagnostics(decision)
     tracker._v10_cov_pending = decision
     seed = np.asarray(adapter.native_seed(decision), dtype=np.int64).reshape(-1)
     updated = ids.clone()
@@ -563,4 +755,4 @@ def install_covtrack_runtime(config: TempoTrackConfig) -> Any:
     return OVTrackerUncertainty
 
 
-__all__ = ["install_covtrack_runtime"]
+__all__ = ["install_covtrack_runtime", "write_covtrack_diagnostics"]
