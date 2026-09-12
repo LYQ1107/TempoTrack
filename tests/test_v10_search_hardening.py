@@ -125,6 +125,13 @@ def _diagnostics(**updates):
         "reranker_missing_evidence": 0,
         "reranker_native_memo_bootstrap_count": 0,
         "full_capability_status_counts": {"FULL_Q1_RERANKER_RUNTIME_ACTIVE": 2},
+        "reranker_status": {
+            "status": "EXACT_V9_MODEL_CODE_AND_WEIGHTS",
+            "checkpoint_sha256": "checkpoint",
+            "base_only_supervision": True,
+            "novel_gt_used": False,
+            "test_weights_used": False,
+        },
     }
     value.update(updates)
     return value
@@ -158,6 +165,46 @@ def test_trial_runtime_contract_context_k_mismatch_fails(tmp_path):
     result = module._validate_runtime_contract(diagnostics_path=path, spec={"candidate_top_k": 8})
     assert result["status"] == "FAIL"
     assert "context_k" in result["failures"]
+
+
+def test_trial_runtime_contract_missing_bootstrap_counter_fails(tmp_path):
+    module = _plan_module()
+    path = tmp_path / "diagnostics.json"
+    diagnostics = _diagnostics()
+    diagnostics.pop("reranker_native_memo_bootstrap_count")
+    path.write_text(json.dumps(diagnostics), encoding="utf-8")
+    result = module._validate_runtime_contract(
+        diagnostics_path=path,
+        spec={"candidate_top_k": 8},
+    )
+    assert result["status"] == "FAIL"
+    assert "native_memo_bootstrap_counter_missing" in result["failures"]
+
+
+def test_trial_runtime_contract_reranker_provenance_is_fail_closed(tmp_path):
+    module = _plan_module()
+    path = tmp_path / "diagnostics.json"
+    diagnostics = _diagnostics(
+        reranker_status={
+            "status": "LEGACY",
+            "checkpoint_sha256": "checkpoint",
+            "base_only_supervision": False,
+            "novel_gt_used": True,
+            "test_weights_used": True,
+        }
+    )
+    path.write_text(json.dumps(diagnostics), encoding="utf-8")
+    result = module._validate_runtime_contract(
+        diagnostics_path=path,
+        spec={"candidate_top_k": 8},
+    )
+    assert result["status"] == "FAIL"
+    assert {
+        "reranker_provenance_status",
+        "reranker_not_base_only",
+        "reranker_novel_gt_used",
+        "reranker_test_weights_used",
+    }.issubset(result["failures"])
 
 
 def test_ram_guard_blocks_new_launch_but_not_running_workers(monkeypatch):
@@ -216,6 +263,10 @@ def _rank_fixture(tmp_path: Path, *, control_annotation: str = "ann", trial_anno
     root = tmp_path / "trials"
     trial = root / "anchor"
     trial.mkdir(parents=True)
+    external_checkpoint = tmp_path / "external.pth"
+    external_config = tmp_path / "external.py"
+    external_checkpoint.write_text("external checkpoint", encoding="utf-8")
+    external_config.write_text("external config", encoding="utf-8")
     prediction = trial / "prediction.json"
     diagnostics = trial / "diagnostics.json"
     summary = trial / "summary.pth"
@@ -225,8 +276,10 @@ def _rank_fixture(tmp_path: Path, *, control_annotation: str = "ann", trial_anno
         return {
             "annotation_sha256": annotation,
             "external_source_commit": "source",
-            "external_checkpoint_sha256": "checkpoint",
-            "external_config_sha256": "config",
+            "external_checkpoint_sha256": hashlib.sha256(external_checkpoint.read_bytes()).hexdigest(),
+            "external_config_sha256": hashlib.sha256(external_config.read_bytes()).hexdigest(),
+            "external_checkpoint": str(external_checkpoint),
+            "external_config": str(external_config),
         }
     receipt = {
         "status": "COMPLETED",
@@ -248,11 +301,23 @@ def _rank_fixture(tmp_path: Path, *, control_annotation: str = "ann", trial_anno
         },
     }
     (trial / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+    control_prediction = tmp_path / "control_prediction.json"
+    control_summary = tmp_path / "control_summary.pth"
+    control_prediction.write_text("control prediction", encoding="utf-8")
+    control_summary.write_text("control summary", encoding="utf-8")
     control = tmp_path / "control.json"
     control.write_text(
         json.dumps({
+            "status": "COMPLETED",
+            "protocol": {"disabled_overlay_control": True},
             "inputs": binding(control_annotation),
             "external_source": {"commit": "source"},
+            "outputs": {
+                "prediction": str(control_prediction),
+                "prediction_sha256": hashlib.sha256(control_prediction.read_bytes()).hexdigest(),
+                "summary": str(control_summary),
+                "summary_sha256": hashlib.sha256(control_summary.read_bytes()).hexdigest(),
+            },
             "metrics": {"base": {"AssocA": 10.0, "TETA": 10.0}},
         }),
         encoding="utf-8",
@@ -275,7 +340,7 @@ def _rank_fixture(tmp_path: Path, *, control_annotation: str = "ann", trial_anno
 
 def test_rank_rejects_trial_without_selection_audit(tmp_path):
     module, args = _rank_fixture(tmp_path)
-    assert module.rank(args) == 0
+    assert module.rank(args) == 2
     output = json.loads(Path(args.output).read_text(encoding="utf-8"))
     assert any("SELECTION_AUDIT_MISSING" in row["reason"] for row in output["rejected_trials"])
 
@@ -286,14 +351,14 @@ def test_rank_rejects_control_annotation_mismatch(tmp_path):
     (trial_dir / "selection_audit.json").write_text(
         json.dumps({"status": "PASS", "usage": "SEARCH_SELECTION"}), encoding="utf-8"
     )
-    assert module.rank(args) == 0
+    assert module.rank(args) == 2
     output = json.loads(Path(args.output).read_text(encoding="utf-8"))
     assert any("INPUT_BINDING_MISMATCH:annotation_sha256" in row["reason"] for row in output["rejected_trials"])
 
 
 def test_rank_rejects_prediction_hash_mismatch(tmp_path):
     module, args = _rank_fixture(tmp_path, bad_prediction_hash=True)
-    assert module.rank(args) == 0
+    assert module.rank(args) == 2
     output = json.loads(Path(args.output).read_text(encoding="utf-8"))
     assert any("PREDICTION_HASH_MISMATCH" in row["reason"] for row in output["rejected_trials"])
 
@@ -452,6 +517,23 @@ def test_legacy_receipt_bad_reconstructed_config_fails(tmp_path):
     result = audit._audit_trial(**fixture["audit_kwargs"])
     assert result["status"] == "FAIL"
     assert "LEGACY_BASE_CONFIG_RECONSTRUCTION_MISMATCH" in result["failure_reasons"]
+
+
+def test_hardened_audit_requires_bootstrap_counter(tmp_path):
+    audit = _load("hardened_contract_audit", ROOT / "tools" / "v10_audit_covtrack_postcontract_search.py")
+    fixture = _audit_receipt_fixture(tmp_path, audit)
+    receipt = fixture["receipt"]
+    diagnostics_path = Path(receipt["outputs"]["diagnostics"])
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    diagnostics.pop("reranker_native_memo_bootstrap_count")
+    diagnostics_path.write_text(json.dumps(diagnostics), encoding="utf-8")
+    receipt["outputs"]["diagnostics_sha256"] = hashlib.sha256(
+        diagnostics_path.read_bytes()
+    ).hexdigest()
+    fixture["receipt_path"].write_text(json.dumps(receipt), encoding="utf-8")
+    result = audit._audit_trial(**fixture["audit_kwargs"], contract_mode="hardened")
+    assert result["status"] == "FAIL"
+    assert "HARDENED_BOOTSTRAP_COUNTER_MISSING" in result["failure_reasons"]
 
 
 def test_audit_prefers_completed_retry_over_failed_direct(tmp_path):
@@ -620,6 +702,97 @@ def test_disabled_overlay_does_not_require_q1_contract_gate(tmp_path):
     assert binding["contract_gate"] is None
 
 
+def test_disabled_overlay_stream_success_reaches_evaluator_and_completes(tmp_path, monkeypatch):
+    module = _plan_module()
+    repo = ROOT
+    source = tmp_path / "source"
+    source.mkdir()
+    annotation = tmp_path / "annotation.json"
+    annotation.write_text(
+        json.dumps({"images": [{"id": 1}], "categories": [{"id": 1}]}),
+        encoding="utf-8",
+    )
+    external_config = tmp_path / "external.py"
+    external_checkpoint = tmp_path / "external.pth"
+    external_config.write_text("config", encoding="utf-8")
+    external_checkpoint.write_text("checkpoint", encoding="utf-8")
+    base_config = tmp_path / "base.yaml"
+    base_config.write_text(
+        "frontend: covtrack\ntempo:\n  enabled: true\n  reranker_weight: 1.0\n",
+        encoding="utf-8",
+    )
+    output_root = tmp_path / "out"
+    evaluator_calls: list[str] = []
+
+    def fake_run_logged(command, *, cwd, env, log_path):
+        if log_path.name == "stream.log":
+            trial_root = log_path.parent
+            stream_root = trial_root / "stream"
+            stream_root.mkdir(parents=True)
+            (stream_root / "stream_manifest.json").write_text(
+                json.dumps({"status": "PASS", "frames": 1}),
+                encoding="utf-8",
+            )
+            (stream_root / "tao_track.json").write_text("[]", encoding="utf-8")
+        else:
+            evaluator_calls.append(log_path.name)
+            summary = log_path.parent / "evaluation" / "COV_V10_TEMPO" / "teta_summary_results.pth"
+            summary.parent.mkdir(parents=True)
+            summary.write_text("summary", encoding="utf-8")
+        return 123, 0, 0.0
+
+    monkeypatch.setattr(module, "_run_logged", fake_run_logged)
+    monkeypatch.setattr(module, "_resource_snapshot", lambda gpu: {"gpu": gpu})
+    monkeypatch.setattr(
+        module,
+        "_parse_summary_with_evaluator",
+        lambda *args, **kwargs: {
+            "status": "PARSED",
+            "base": {"TETA": 1.0, "AssocA": 1.0},
+            "novel": {"TETA": 1.0, "AssocA": 1.0},
+        },
+    )
+    args = SimpleNamespace(
+        repo=str(repo),
+        source=str(source),
+        annotation=str(annotation),
+        img_prefix=str(tmp_path),
+        external_config=str(external_config),
+        external_checkpoint=str(external_checkpoint),
+        base_config=str(base_config),
+        output_root=str(output_root),
+        trial_id="native_control",
+        requested_trial_id=None,
+        spec_file=None,
+        spec_json=json.dumps(
+            {
+                "trial_id": "native_control",
+                "max_gap": 360,
+                "candidate_top_k": 8,
+                "score_threshold": 0.0,
+                "margin_threshold": 0.0,
+            }
+        ),
+        stage="subset",
+        gpu="0",
+        stream_python="python",
+        evaluator_python="python",
+        evaluator_name="COV_V10_TEMPO",
+        evaluator_cores=1,
+        disabled_overlay=True,
+        search_plan=None,
+        search_plan_sha256=None,
+        contract_gate=None,
+        contract_gate_sha256=None,
+        threshold_source=None,
+    )
+    assert module.run_trial(args) == 0
+    receipt = json.loads((output_root / "native_control" / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["status"] == "COMPLETED"
+    assert receipt["runtime_contract"]["status"] == "NOT_APPLICABLE"
+    assert evaluator_calls == ["evaluation.log"]
+
+
 def _expected_input_plan(tmp_path: Path, *, updates: dict[str, str]):
     scheduler = _scheduler_module()
     annotation = tmp_path / "annotation.json"
@@ -634,13 +807,23 @@ def _expected_input_plan(tmp_path: Path, *, updates: dict[str, str]):
         "external_cov_commit": "source-commit",
         "external_checkpoint_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
     }
-    expected.update(updates)
     plan = SimpleNamespace(expected_inputs=expected)
     args = SimpleNamespace(
         annotation=str(annotation),
         source=str(source),
         external_checkpoint=str(checkpoint),
+        external_config=str(tmp_path / "external.py"),
+        base_config=str(tmp_path / "base.yaml"),
     )
+    Path(args.external_config).write_text("external", encoding="utf-8")
+    Path(args.base_config).write_text("base", encoding="utf-8")
+    expected["external_config_sha256"] = hashlib.sha256(
+        Path(args.external_config).read_bytes()
+    ).hexdigest()
+    expected["base_config_sha256"] = hashlib.sha256(
+        Path(args.base_config).read_bytes()
+    ).hexdigest()
+    expected.update(updates)
     return scheduler, plan, args
 
 
@@ -655,6 +838,28 @@ def _expected_input_plan(tmp_path: Path, *, updates: dict[str, str]):
 )
 def test_search_plan_expected_inputs_mismatch_fails(monkeypatch, tmp_path, field, value, error):
     scheduler, plan, args = _expected_input_plan(tmp_path, updates={field: value})
-    monkeypatch.setattr(scheduler, "_git_value", lambda *args: "source-commit")
+    monkeypatch.setattr(
+        scheduler,
+        "_git_value",
+        lambda _path, *git_args: "" if git_args == ("status", "--porcelain") else "source-commit",
+    )
+    with pytest.raises(RuntimeError, match=f"SEARCH_EXPECTED_INPUT_{error}_MISMATCH"):
+        scheduler._validate_expected_inputs(plan, args, reranker_checkpoint_sha256="reranker")
+
+
+@pytest.mark.parametrize(
+    ("field", "error"),
+    [
+        ("external_config_sha256", "EXTERNAL_CONFIG"),
+        ("base_config_sha256", "BASE_CONFIG"),
+    ],
+)
+def test_search_plan_expected_config_hash_mismatch_fails(monkeypatch, tmp_path, field, error):
+    scheduler, plan, args = _expected_input_plan(tmp_path, updates={field: "wrong"})
+    monkeypatch.setattr(
+        scheduler,
+        "_git_value",
+        lambda _path, *git_args: "" if git_args == ("status", "--porcelain") else "source-commit",
+    )
     with pytest.raises(RuntimeError, match=f"SEARCH_EXPECTED_INPUT_{error}_MISMATCH"):
         scheduler._validate_expected_inputs(plan, args, reranker_checkpoint_sha256="reranker")

@@ -145,10 +145,63 @@ def _binding_reasons(
     return reasons
 
 
+def _validate_control_receipt(
+    control_path: Path,
+    expected_annotation_sha256: str | None,
+) -> dict[str, Any]:
+    """Validate the native disabled-overlay control before using its guard."""
+    try:
+        control = json.loads(control_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"CONTROL_RECEIPT_INVALID: {type(exc).__name__}") from exc
+    if not isinstance(control, dict):
+        raise ValueError("CONTROL_RECEIPT_INVALID")
+    if control.get("status") != "COMPLETED":
+        raise ValueError("CONTROL_NOT_COMPLETED")
+    protocol = control.get("protocol")
+    if not isinstance(protocol, dict) or protocol.get("disabled_overlay_control") is not True:
+        raise ValueError("CONTROL_IS_NOT_DISABLED_OVERLAY")
+
+    binding = _input_binding(control)
+    required_binding = (
+        "annotation_sha256",
+        "external_source_commit",
+        "external_checkpoint_sha256",
+        "external_config_sha256",
+    )
+    if any(binding.get(key) in (None, "") for key in required_binding):
+        raise ValueError("CONTROL_INPUT_BINDING_MISSING")
+    if expected_annotation_sha256 is not None and binding.get("annotation_sha256") != expected_annotation_sha256:
+        raise ValueError("CONTROL_ANNOTATION_MISMATCH")
+
+    inputs = control.get("inputs", {})
+    for key in ("external_checkpoint", "external_config"):
+        raw_path = inputs.get(key)
+        expected_hash = inputs.get(f"{key}_sha256")
+        if not raw_path or not expected_hash or not Path(raw_path).is_file():
+            raise ValueError(f"CONTROL_INPUT_{key.upper()}_MISSING")
+        if _sha256(Path(raw_path)) != expected_hash:
+            raise ValueError(f"CONTROL_INPUT_{key.upper()}_HASH_MISMATCH")
+
+    outputs = control.get("outputs", {})
+    for key in ("prediction", "summary"):
+        raw_path = outputs.get(key)
+        expected_hash = outputs.get(f"{key}_sha256")
+        if not raw_path or not expected_hash or not Path(raw_path).is_file():
+            raise ValueError(f"CONTROL_{key.upper()}_MISSING")
+        if _sha256(Path(raw_path)) != expected_hash:
+            raise ValueError(f"CONTROL_{key.upper()}_HASH_MISMATCH")
+    return control
+
+
 def rank(args: argparse.Namespace) -> int:
     roots = [Path(value).resolve() for value in args.root]
     control_path = Path(args.control_receipt).resolve()
-    control = json.loads(control_path.read_text(encoding="utf-8"))
+    expected_annotation_arg = getattr(args, "expected_annotation", None)
+    expected_annotation_sha256 = (
+        _sha256(Path(expected_annotation_arg).resolve()) if expected_annotation_arg else None
+    )
+    control = _validate_control_receipt(control_path, expected_annotation_sha256)
     control_base_assoc = _metric(control, "base", "AssocA")
     control_base_teta = _metric(control, "base", "TETA")
     if control_base_assoc is None or control_base_teta is None:
@@ -162,10 +215,6 @@ def rank(args: argparse.Namespace) -> int:
             or global_audit.get("usage") != "SEARCH_SELECTION"
         ):
             raise ValueError("search audit is not selectable")
-    expected_annotation_arg = getattr(args, "expected_annotation", None)
-    expected_annotation_sha256 = (
-        _sha256(Path(expected_annotation_arg).resolve()) if expected_annotation_arg else None
-    )
     rows: list[dict[str, Any]] = []
     receipts, rejected = _receipts(roots, global_audit=global_audit)
     control_binding = _input_binding(control)
@@ -274,6 +323,18 @@ def rank(args: argparse.Namespace) -> int:
             f"`{row['prediction_sha256']}` |"
         )
     Path(args.markdown).resolve().write_text("\n".join(markdown) + "\n", encoding="utf-8")
+    if not selected:
+        print(
+            json.dumps(
+                {
+                    "status": "NO_ELIGIBLE_TRIAL",
+                    "completed": len(rows),
+                    "rejected": len(rejected),
+                    "output": str(output_path),
+                }
+            )
+        )
+        return 2
     print(json.dumps({"completed": len(rows), "selected": [row["trial_id"] for row in selected], "output": str(output_path)}))
     return 0
 

@@ -133,7 +133,10 @@ def _audit_trial(
     external_checkpoint_sha256: str | None = None,
     expected_base_config: Path,
     expected_base_config_sha256: str,
+    contract_mode: str = "auto",
 ) -> dict[str, Any]:
+    if contract_mode not in {"legacy", "hardened", "auto"}:
+        raise ValueError(f"invalid contract mode: {contract_mode}")
     trial_id = str(expected_spec["trial_id"])
     reasons: list[str] = []
     receipt: dict[str, Any] = {}
@@ -241,10 +244,11 @@ def _audit_trial(
                 reasons.append("RUNTIME_CONTEXT_CONTRACT_MISMATCH")
             if int(diagnostics.get("reranker_missing_evidence", -1)) != 0:
                 reasons.append("RUNTIME_MISSING_EVIDENCE")
-            if (
-                "reranker_native_memo_bootstrap_count" in diagnostics
-                and int(diagnostics["reranker_native_memo_bootstrap_count"]) != 0
-            ):
+            bootstrap_key = "reranker_native_memo_bootstrap_count"
+            if bootstrap_key not in diagnostics:
+                if contract_mode == "hardened":
+                    reasons.append("HARDENED_BOOTSTRAP_COUNTER_MISSING")
+            elif int(diagnostics[bootstrap_key]) != 0:
                 reasons.append("RUNTIME_NATIVE_MEMO_BOOTSTRAP")
             counts = dict(diagnostics.get("full_capability_status_counts", {}))
             if not counts or any(key != "FULL_Q1_RERANKER_RUNTIME_ACTIVE" for key in counts):
@@ -277,11 +281,16 @@ def _audit_trial(
     audit = {
         "status": "PASS" if not reasons else "FAIL",
         "usage": "SEARCH_SELECTION" if not reasons else "REJECT_FROM_SELECTION",
-        "contract_classification": (
-            "SEARCH_SELECTION_LEGACY_CONTRACT"
-            if "reranker_native_memo_bootstrap_count" not in diagnostics
-            else "SEARCH_SELECTION_HARDENED_CONTRACT"
-        ),
+        "contract_classification": {
+            "legacy": "SEARCH_SELECTION_LEGACY_CONTRACT",
+            "hardened": "SEARCH_SELECTION_HARDENED_CONTRACT",
+            "auto": (
+                "SEARCH_SELECTION_HARDENED_CONTRACT"
+                if "reranker_native_memo_bootstrap_count" in diagnostics
+                else "SEARCH_SELECTION_LEGACY_CONTRACT"
+            ),
+        }[contract_mode],
+        "contract_mode": contract_mode,
         "trial_id": trial_id,
         "requested_trial_id": requested_trial_id if receipt else trial_id,
         "effective_trial_id": effective_trial_id if receipt else None,
@@ -325,6 +334,9 @@ def _audit_trial(
 
 
 def audit(args: argparse.Namespace) -> int:
+    contract_mode = getattr(args, "contract_mode", "auto")
+    if contract_mode not in {"legacy", "hardened", "auto"}:
+        raise ValueError(f"invalid contract mode: {contract_mode}")
     search_root = Path(args.search_root).resolve()
     plan_path = Path(args.search_plan).resolve()
     plan = _load_search_plan(plan_path)
@@ -376,6 +388,7 @@ def audit(args: argparse.Namespace) -> int:
             external_checkpoint_sha256=external_checkpoint_sha256,
             expected_base_config=base_config,
             expected_base_config_sha256=actual_base_config_sha,
+            contract_mode=contract_mode,
         )
         result["search_plan_sha256"] = plan.sha256
         result["contract_gate_sha256"] = plan.contract_gate_sha256
@@ -398,14 +411,19 @@ def audit(args: argparse.Namespace) -> int:
         "artifact": "tempotrack_v10_postcontract_search_audit",
         "status": global_status,
         "usage": global_usage,
-        "contract_classification": (
-            "SEARCH_SELECTION_LEGACY_CONTRACT"
-            if any(
-                value.get("contract_classification") == "SEARCH_SELECTION_LEGACY_CONTRACT"
-                for value in trials.values()
-            )
-            else "SEARCH_SELECTION_HARDENED_CONTRACT"
-        ),
+        "contract_classification": {
+            "legacy": "SEARCH_SELECTION_LEGACY_CONTRACT",
+            "hardened": "SEARCH_SELECTION_HARDENED_CONTRACT",
+            "auto": (
+                "SEARCH_SELECTION_LEGACY_CONTRACT"
+                if any(
+                    value.get("contract_classification") == "SEARCH_SELECTION_LEGACY_CONTRACT"
+                    for value in trials.values()
+                )
+                else "SEARCH_SELECTION_HARDENED_CONTRACT"
+            ),
+        }[contract_mode],
+        "contract_mode": contract_mode,
         "search_root": str(search_root),
         "search_plan": {"path": str(plan_path), "sha256": plan.sha256},
         "contract_gate": {"path": plan.contract_gate, "sha256": plan.contract_gate_sha256, "status": gate.get("status")},
@@ -436,6 +454,12 @@ def main() -> int:
     parser.add_argument("--checkpoint-sha256")
     parser.add_argument("--external-checkpoint-sha256")
     parser.add_argument("--external-config-sha256")
+    parser.add_argument(
+        "--contract-mode",
+        choices=("legacy", "hardened", "auto"),
+        default="auto",
+        help="Explicit runtime contract expected by this audit.",
+    )
     parser.add_argument("--base-config", required=True)
     parser.add_argument("--base-config-sha256")
     parser.add_argument("--output")

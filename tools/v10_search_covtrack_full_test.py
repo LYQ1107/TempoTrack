@@ -248,6 +248,11 @@ def _validate_contract_gate(plan: SearchPlan) -> dict[str, Any]:
         raise RuntimeError("SEARCH_CONTRACT_CONTEXT_K_NOT_64")
     if int(gate.get("reranker_missing_evidence", -1)) != 0:
         raise RuntimeError("SEARCH_CONTRACT_MISSING_EVIDENCE")
+    if (
+        "reranker_native_memo_bootstrap_count" in gate
+        and int(gate["reranker_native_memo_bootstrap_count"]) != 0
+    ):
+        raise RuntimeError("SEARCH_CONTRACT_NATIVE_MEMO_BOOTSTRAP")
     return gate
 
 
@@ -386,6 +391,7 @@ def _validate_runtime_contract(
     diagnostics_path: Path,
     spec: Mapping[str, Any],
     expected_checkpoint_sha: str | None = None,
+    require_native_memo_bootstrap_counter: bool = True,
 ) -> dict[str, Any]:
     """Validate the runtime contract before allowing official evaluation."""
     if not diagnostics_path.is_file():
@@ -404,16 +410,26 @@ def _validate_runtime_contract(
         failures.append("context_contract")
     if int(diagnostics.get("reranker_missing_evidence", -1)) != 0:
         failures.append("missing_evidence")
-    if (
-        "reranker_native_memo_bootstrap_count" in diagnostics
-        and int(diagnostics["reranker_native_memo_bootstrap_count"]) != 0
-    ):
+    bootstrap_key = "reranker_native_memo_bootstrap_count"
+    if bootstrap_key not in diagnostics:
+        if require_native_memo_bootstrap_counter:
+            failures.append("native_memo_bootstrap_counter_missing")
+    elif int(diagnostics[bootstrap_key]) != 0:
         failures.append("native_memo_bootstrap")
-    if expected_checkpoint_sha is not None:
-        status = diagnostics.get("reranker_status")
-        if not isinstance(status, Mapping):
-            failures.append("reranker_provenance")
-        elif status.get("checkpoint_sha256") != expected_checkpoint_sha:
+
+    status = diagnostics.get("reranker_status")
+    if not isinstance(status, Mapping):
+        failures.append("reranker_provenance")
+    else:
+        if status.get("status") != "EXACT_V9_MODEL_CODE_AND_WEIGHTS":
+            failures.append("reranker_provenance_status")
+        if status.get("base_only_supervision") is not True:
+            failures.append("reranker_not_base_only")
+        if status.get("novel_gt_used") is not False:
+            failures.append("reranker_novel_gt_used")
+        if status.get("test_weights_used") is not False:
+            failures.append("reranker_test_weights_used")
+        if expected_checkpoint_sha is not None and status.get("checkpoint_sha256") != expected_checkpoint_sha:
             failures.append("reranker_checkpoint")
     capability = dict(diagnostics.get("full_capability_status_counts", {}))
     if not capability or any(
@@ -647,13 +663,14 @@ def run_trial(args: argparse.Namespace) -> int:
                     and Path(str(config_data["tempo"]["reranker_checkpoint"])).resolve().is_file()
                     else None
                 ),
+                require_native_memo_bootstrap_counter=True,
             )
         receipt["runtime_contract"] = {
             "status": runtime_contract["status"],
             "failures": runtime_contract["failures"],
         }
         _write_json(receipt_path, receipt)
-        if runtime_contract["status"] != "PASS":
+        if not args.disabled_overlay and runtime_contract["status"] != "PASS":
             raise RuntimeError(
                 "RUNTIME_CONTRACT_FAILED: " + ",".join(runtime_contract["failures"])
             )

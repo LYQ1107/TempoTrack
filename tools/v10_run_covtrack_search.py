@@ -243,6 +243,16 @@ def _validate_expected_inputs(
     expected = dict(plan.expected_inputs)
     if not expected:
         return
+    # A commit hash alone does not prove that the pinned external checkout is
+    # the source that the worker will import.  Hardened plans must launch only
+    # from a clean checkout; the already-running legacy wave has no
+    # expected_inputs block and therefore remains unaffected.
+    if "external_config_sha256" in expected or "base_config_sha256" in expected:
+        dirty = _git_value(Path(args.source).resolve(), "status", "--porcelain")
+        if dirty is None:
+            raise RuntimeError("EXTERNAL_COV_SOURCE_STATUS_UNAVAILABLE")
+        if dirty:
+            raise RuntimeError("EXTERNAL_COV_SOURCE_DIRTY")
     annotation_sha = _sha256(Path(args.annotation).resolve())
     if expected.get("subset_annotation_sha256") != annotation_sha:
         raise RuntimeError("SEARCH_EXPECTED_INPUT_ANNOTATION_MISMATCH")
@@ -252,6 +262,12 @@ def _validate_expected_inputs(
     external_checkpoint_sha = _sha256(Path(args.external_checkpoint).resolve())
     if expected.get("external_checkpoint_sha256") != external_checkpoint_sha:
         raise RuntimeError("SEARCH_EXPECTED_INPUT_EXTERNAL_CHECKPOINT_MISMATCH")
+    external_config_sha = _sha256(Path(args.external_config).resolve())
+    if expected.get("external_config_sha256") != external_config_sha:
+        raise RuntimeError("SEARCH_EXPECTED_INPUT_EXTERNAL_CONFIG_MISMATCH")
+    base_config_sha = _sha256(Path(args.base_config).resolve())
+    if expected.get("base_config_sha256") != base_config_sha:
+        raise RuntimeError("SEARCH_EXPECTED_INPUT_BASE_CONFIG_MISMATCH")
     if (
         not bool(getattr(args, "disabled_overlay", False))
         and expected.get("reranker_checkpoint_sha256") != reranker_checkpoint_sha256

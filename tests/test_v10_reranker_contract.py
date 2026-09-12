@@ -457,12 +457,43 @@ def test_missing_novel_metric_is_not_ranked(tmp_path):
         "metrics": {"base": {"AssocA": 1.0, "TETA": 1.0}, "novel": {"AssocA": None}},
     }
     (trial / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+    external_checkpoint = tmp_path / "external.pth"
+    external_config = tmp_path / "external.py"
+    control_prediction = tmp_path / "control_prediction.json"
+    control_summary = tmp_path / "control_summary.pth"
+    external_checkpoint.write_text("checkpoint", encoding="utf-8")
+    external_config.write_text("config", encoding="utf-8")
+    control_prediction.write_text("prediction", encoding="utf-8")
+    control_summary.write_text("summary", encoding="utf-8")
     control = tmp_path / "control.json"
-    control.write_text(json.dumps({"metrics": {"base": {"AssocA": 1.0, "TETA": 1.0}}}), encoding="utf-8")
+    control.write_text(
+        json.dumps(
+            {
+                "status": "COMPLETED",
+                "protocol": {"disabled_overlay_control": True},
+                "inputs": {
+                    "annotation_sha256": "annotation",
+                    "external_checkpoint": str(external_checkpoint),
+                    "external_checkpoint_sha256": hashlib.sha256(external_checkpoint.read_bytes()).hexdigest(),
+                    "external_config": str(external_config),
+                    "external_config_sha256": hashlib.sha256(external_config.read_bytes()).hexdigest(),
+                },
+                "external_source": {"commit": "source"},
+                "outputs": {
+                    "prediction": str(control_prediction),
+                    "prediction_sha256": hashlib.sha256(control_prediction.read_bytes()).hexdigest(),
+                    "summary": str(control_summary),
+                    "summary_sha256": hashlib.sha256(control_summary.read_bytes()).hexdigest(),
+                },
+                "metrics": {"base": {"AssocA": 1.0, "TETA": 1.0}},
+            }
+        ),
+        encoding="utf-8",
+    )
     args = type("Args", (), {
         "root": [str(root)], "control_receipt": str(control), "output": str(tmp_path / "rank.json"),
         "markdown": str(tmp_path / "rank.md"), "top_k": 4,
     })()
-    assert module.rank(args) == 0
+    assert module.rank(args) == 2
     output = json.loads((tmp_path / "rank.json").read_text(encoding="utf-8"))
     assert output["all_completed"] == []

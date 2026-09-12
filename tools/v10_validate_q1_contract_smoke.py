@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 import torch
+import yaml
 
 from tempotrack_v10.reranker import validate_feature_config
 
@@ -106,6 +107,15 @@ def validate(
         np.isclose(float(np.dot(query, last) / (np.linalg.norm(query) * np.linalg.norm(last))), 0.8)
     )
     capability_counts = diagnostics.get("full_capability_status_counts", {})
+    reranker_status = diagnostics.get("reranker_status")
+    bootstrap_count = diagnostics.get("reranker_native_memo_bootstrap_count")
+    runtime_contract_sha = None
+    tempo_config = receipt.get("inputs", {}).get("tempo_config")
+    if tempo_config and Path(tempo_config).is_file():
+        tempo_doc = yaml.safe_load(Path(tempo_config).read_text(encoding="utf-8")) or {}
+        runtime_contract_sha = tempo_doc.get("runtime_contract_sha")
+    overlay_sha = receipt.get("inputs", {}).get("overlay_sha256")
+    runtime_sha = receipt.get("inputs", {}).get("runtime_sha256")
     gates = {
         "receipt_completed": receipt.get("status") == "COMPLETED",
         "source_head_bound": receipt.get("repo", {}).get("head") == source_head,
@@ -117,6 +127,13 @@ def validate(
         "prefilter_and_memory_and_causality_tests": test_gates["status"] == "PASS",
         "memory_parity_pass": test_gates["status"] == "PASS",
         "reranker_missing_evidence_zero": int(diagnostics.get("reranker_missing_evidence", -1)) == 0,
+        "native_memo_bootstrap_counter_present": bootstrap_count is not None,
+        "native_memo_bootstrap_counter_zero": bootstrap_count == 0,
+        "reranker_provenance_exact": isinstance(reranker_status, dict)
+        and reranker_status.get("status") == "EXACT_V9_MODEL_CODE_AND_WEIGHTS"
+        and reranker_status.get("base_only_supervision") is True
+        and reranker_status.get("novel_gt_used") is False
+        and reranker_status.get("test_weights_used") is False,
         "context_k_64": diagnostics.get("reranker_context_candidate_top_k") == int(feature_config["candidate_top_k"]) == 64,
         "decision_k_runtime_bound": diagnostics.get("reranker_decision_candidate_top_k") == expected_decision_k,
         "context_contract_stable": diagnostics.get("reranker_context_contract_mismatch") is False,
@@ -129,6 +146,9 @@ def validate(
         "diagnostics_binding": receipt.get("outputs", {}).get("diagnostics_sha256") == _sha256(diagnostics_path),
         "stream_manifest_binding": receipt.get("outputs", {}).get("stream_manifest_sha256") == _sha256(stream_manifest_path),
         "official_evaluator_parsed": receipt.get("metrics", {}).get("status") == "PARSED",
+        "runtime_contract_sha_present": bool(runtime_contract_sha),
+        "overlay_sha_present": bool(overlay_sha),
+        "runtime_sha_present": bool(runtime_sha),
     }
     result = {
         "schema_version": 1,
@@ -148,6 +168,10 @@ def validate(
         "context_candidate_top_k": diagnostics.get("reranker_context_candidate_top_k"),
         "decision_candidate_top_k": diagnostics.get("reranker_decision_candidate_top_k"),
         "reranker_missing_evidence": int(diagnostics.get("reranker_missing_evidence", -1)),
+        "reranker_native_memo_bootstrap_count": bootstrap_count,
+        "runtime_contract_sha": runtime_contract_sha,
+        "overlay_sha256": overlay_sha,
+        "runtime_sha256": runtime_sha,
         "score_quantiles": diagnostics.get("score_quantiles"),
         "margin_quantiles": diagnostics.get("margin_quantiles"),
         "prediction_sha256": _sha256(prediction),
@@ -184,4 +208,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
