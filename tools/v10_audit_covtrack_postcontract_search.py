@@ -299,8 +299,17 @@ def _audit_trial(
         "contract_gate_sha256": None,
         "launch_head": launch_head,
         "runtime_contract": {
-            "status": "PASS" if not any(reason.startswith("RUNTIME_") for reason in reasons) else "FAIL",
-            "failures": [reason for reason in reasons if reason.startswith("RUNTIME_")],
+            "status": "PASS"
+            if not any(
+                reason.startswith("RUNTIME_") or reason.startswith("HARDENED_")
+                for reason in reasons
+            )
+            else "FAIL",
+            "failures": [
+                reason
+                for reason in reasons
+                if reason.startswith("RUNTIME_") or reason.startswith("HARDENED_")
+            ],
         },
         "native_memo_bootstrap": (
             {
