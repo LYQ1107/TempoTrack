@@ -14,6 +14,7 @@ model = dict(
 val_dataloader = dict(
     dataset=dict(
         ann_file='data/tao/annotations/tao_val_lvis_v1_classes.json',
+        data_prefix=dict(img_path='data/tao/frames/'),
     )
 )
 test_dataloader = val_dataloader

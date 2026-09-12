@@ -61,6 +61,10 @@ class MasaTaoTracker(BaseTracker):
         debug_association_trace: bool = False,
         **kwargs
     ):
+        # BaseTracker.__init__ calls reset().  The V10 pre-association bridge
+        # must therefore exist before entering the base constructor; otherwise
+        # the first reset dereferences an attribute that has not been created.
+        self._pre_association_adapter: Any | None = None
         super().__init__(**kwargs)
         assert 0 <= memo_momentum <= 1.0
         assert memo_tracklet_frames >= 0
@@ -82,7 +86,6 @@ class MasaTaoTracker(BaseTracker):
         self.distance_smoothing_factor = 100 / self.fps
         self.debug_association_trace = bool(debug_association_trace)
         self.last_association_trace: AssociationTrace | None = None
-        self._pre_association_adapter: Any | None = None
         self._embedding_dim = 0
         self._last_device = torch.device("cpu")
         self._observation_recorder = None
