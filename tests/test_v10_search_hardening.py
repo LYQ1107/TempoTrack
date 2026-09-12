@@ -314,6 +314,8 @@ def test_teta_import_preflight_records_exact_import_paths(tmp_path):
     assert result["status"] == "PASS"
     assert result["actual_imports"]["teta_file"] == result["expected_teta_init"]
     assert result["actual_imports"]["cov_dataset_file"] == result["expected_cov_dataset_init"]
+    assert not (teta_root / "teta" / "__pycache__").exists()
+    assert not (source / "ovtrack" / "__pycache__").exists()
 
     wrong_init = tmp_path / "wrong_teta_init.py"
     wrong_init.write_text("\n", encoding="utf-8")

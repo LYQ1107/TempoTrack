@@ -181,6 +181,7 @@ print(json.dumps({
         str(expected_cov_dataset_init),
     ]
     env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     path_entries = [str(root), str(source)]
     old = env.get("PYTHONPATH")
     if old:
@@ -484,6 +485,7 @@ def _runtime_env(args: argparse.Namespace, repo: Path, source: Path, trial_root:
             "MKL_NUM_THREADS": "1",
             "OPENBLAS_NUM_THREADS": "1",
             "NUMEXPR_NUM_THREADS": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
             "V10_COV_SOURCE": str(source),
             "V10_WORK_DIR": str(trial_root / "work"),
             "V10_STREAM_RESULTS_DIR": str(trial_root / "stream"),
