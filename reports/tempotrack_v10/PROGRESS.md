@@ -551,3 +551,35 @@ failure.
   it will only be launched after the Val workers finish and resource headroom
   is rechecked. The next hard gate is the full annotation-aware public-file
   audit, followed immediately by MASA-R50 COV-det Native Val.
+
+## V10.3 writer-isolation correction — 2026-09-12 12:16 CST
+
+- The first accelerated Test shard launch was stopped before it could be used:
+  its four workers had targeted the same public root as the direct worker.
+  The partial root was preserved as
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa/test_mixed_diagnostic_20260912_1200/`
+  with `10,798` files and is not a final artifact. The only stopped PIDs were
+  the newly launched shard parent/child processes; Val and existing healthy
+  OVTrack/COV jobs were not signalled.
+- A second launch initially omitted `model.tracker.memo_frames=50` and failed
+  at the first frame with the real
+  `COV_RUNTIME_GATE_FAILED: tracker.memo_frames=10, expected 50` traceback.
+  It produced no usable files. The corrected clean topology was then started:
+  full Test reference direct under
+  `covtrack_public_dets_for_masa/test_reference_direct`, and four disjoint
+  complete-video shards under `test_sharded_reference`. They have no shared
+  writer directory and use the exact same pinned COV checkpoint/config.
+- The Val direct worker exposed three missing files because pinned
+  `OVTrackerUncertainty.match()` returns before `remove_distractor` when
+  `embeds is None`. Commit `02f4d7e` adds a capture-only hook in that real
+  early-return branch and a regression test; it does not change native IDs or
+  association. The current Val direct process is intentionally left running
+  with the pre-existing loaded code; after it exits, the three files will be
+  filled by a minimal real replay and the final audit will require
+  `missing=0`, `extra=0`, exact schema/dtype/finite checks, and saved
+  frame/bbox/score/label hashes.
+- At this snapshot Val has `36,372/36,375` files while its final direct
+  writer is still alive. Clean Test reference direct/sharded roots have
+  `6,417/52,155` and `17,999/52,155` files respectively. The mixed root and
+  the failed gate logs remain diagnostic only. Source commits through
+  `02f4d7e` are pushed to `origin/codex/tempotrack-v10-ov-cov-tract-masa`.
