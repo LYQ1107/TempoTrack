@@ -93,7 +93,7 @@ def _build_command(
         command.append("--disabled-overlay")
     if requested_trial_id and requested_trial_id != str(spec["trial_id"]):
         command.extend(["--requested-trial-id", requested_trial_id])
-    if plan is not None:
+    if plan is not None and plan.path is not None:
         command.extend(
             [
                 "--search-plan",
