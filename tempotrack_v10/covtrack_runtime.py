@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import os
 import textwrap
 from typing import Any, Mapping
 
@@ -19,6 +20,7 @@ import torch
 
 from .adapters.covtrack import COVTrackTempoAdapter
 from .contract import SnapshotContractError
+from .cov_detection_export import export_masa_public_detection
 from .overlay import TempoTrackConfig
 
 
@@ -94,6 +96,35 @@ def _native_affinity(scores: Any, bboxes: Any, memo_ids: Any) -> Any:
     return torch.empty((count, memory_count), dtype=torch.float32, device=bboxes.device)
 
 
+def _maybe_export_cov_detections(
+    *,
+    bboxes: Any,
+    labels: Any,
+    frame_id: Any,
+    kwargs: Mapping[str, Any],
+    video_id: Any,
+) -> None:
+    """Optionally capture COV observations before the TempoTrack decision.
+
+    The environment variable is deliberately opt-in.  With it absent this
+    function returns before touching the filesystem, preserving the behavior
+    of all existing COV jobs.  Only the two tensors needed by MASA are passed
+    to the serializer; native IDs, affinity, embeddings, GT, and overlay state
+    never enter the export payload.
+    """
+
+    root = os.environ.get("V10_COV_DET_EXPORT_ROOT")
+    if not root:
+        return
+    filename = kwargs.get("filename")
+    if not filename:
+        raise SnapshotContractError(
+            "COV_DETECTION_EXPORT_FAILED: missing native kwargs['filename'] "
+            f"for video={video_id!r}, frame={frame_id!r}"
+        )
+    export_masa_public_detection(root, str(filename), bboxes, labels)
+
+
 def _prepare(
     tracker: Any,
     bboxes: Any,
@@ -110,6 +141,10 @@ def _prepare(
 ) -> Any:
     adapter = getattr(tracker, "_v10_cov_adapter", None)
     if adapter is None:
+        if os.environ.get("V10_COV_DET_EXPORT_ROOT"):
+            raise SnapshotContractError(
+                "COV_DETECTION_EXPORT_FAILED: runtime has no COV adapter"
+            )
         return ids
     current_video = getattr(tracker, "_v10_current_video_id", None)
     if current_video is None:
@@ -139,6 +174,17 @@ def _prepare(
             fusion_head=fusion_head,
         )
         tracker._v10_runtime_gate_checked = True
+    # This is the V10 protocol boundary: COV has already completed its native
+    # post-filter/MCF/affinity preparation, but IDs have not yet been
+    # initialized or committed.  Export before adapter.prepare so the output
+    # cannot be affected by TempoTrack assignments.
+    _maybe_export_cov_detections(
+        bboxes=bboxes,
+        labels=labels,
+        frame_id=frame_id,
+        kwargs=kwargs,
+        video_id=current_video,
+    )
     decision = adapter.prepare(
         video_id=int(current_video),
         frame_id=int(frame_id),

@@ -488,3 +488,41 @@ failure.
   `REPRO_PASS`, COV Test `REPRO_GAP`; OVTrack+ official reproduction
   `REPRO_BLOCKED_FINAL_CHECKPOINT`; OVTrack+ memory-only `BLOCKED` until a
   valid final checkpoint is found or trained.
+
+## V10.3 FAST PATH correction — 2026-09-12 11:35 CST
+
+- The audited COV Test cache is
+  `/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/covtrack/test/native_cache_v5/`.
+  Its schema-6 shards contain `boxes_xyxy`/`scores`/`labels`,
+  `video_ids`/`frame_indices`/`image_ids`, and `embeddings_raw`; the sidecar
+  records COV commit `9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b`, config SHA
+  `282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a`, and
+  cache manifest SHA
+  `62f9ebe84e09230a8240b219eccc96827e344ace401ad1e80f2fd8bf0b09c35f`.
+  The capture is the tensors entering `OVTrackerUncertainty.match()` before
+  its `remove_distractor` boundary, so it is not promoted directly to MASA.
+- The pinned `OVTrackerUncertainty.remove_distractor(..., nms='inter')` was
+  imported and called for offline conversion; the serializer writes only
+  `det_labels` int64 and `det_bboxes` float32 `[N,5]`. A 32-frame conversion
+  completed with 1,067 input and 1,067 post-filter rows.
+- The 32-frame exact gate receipt is
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_fastpath/receipts/equivalence_video2_32.json`.
+  Fresh Tempo-disabled COV post-filter capture completed, but the gate is
+  `FAIL`: frame paths/counts are complete, common-shape values have max bbox
+  diff `0.0`, max score diff `0.0`, and label diff `0`; however fresh frame
+  0001 has 40 rows versus 29 in the old cache (the same shape mismatch occurs
+  across the 32 frames). Therefore the old cache is not used as the formal
+  Test MASA stream and a fresh Test export is required.
+- The fresh export had two setup receipts before the successful run: the
+  first lacked the pinned COV entry point's required `--eval-options
+  resfile_path`, and the second exposed absolute COV filenames. Both causes
+  are retained in the fastpath log; the runtime now uses an explicit,
+  containment-checked `V10_TAO_FRAMES_ROOT` mapping to MASA's exact path
+  contract.
+- Fresh COV post-filter exports are now running from the corrected source on
+  shared GPU8 (about 3.4GB per worker): Test PID `32271`/child `32498` and Val
+  PID `33067`/child `33306`. They write Test and Val independently under
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa/`;
+  no existing OVTrack/COV worker was signalled. At the receipt snapshot,
+  Test had 832 files and Val 258 files. MASA-R50 COV-det Native Val remains
+  gated on the complete Val public-detection audit.

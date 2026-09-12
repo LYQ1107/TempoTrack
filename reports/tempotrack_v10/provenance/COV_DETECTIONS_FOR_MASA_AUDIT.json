@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "status": "FAST_PATH_EXACT_GATE_FAILED_FRESH_EXPORT_REQUIRED",
+  "source_frontend": "COVTrack",
+  "pinned_source_commit": "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b",
+  "cache_root": "/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/covtrack/test/native_cache_v5",
+  "cache_manifest_sha256": "62f9ebe84e09230a8240b219eccc96827e344ace401ad1e80f2fd8bf0b09c35f",
+  "cache_schema": 6,
+  "cache_shards": 1419,
+  "cache_frames": 52155,
+  "cache_rows": 1655841,
+  "cache_arrays": {
+    "bboxes": "boxes_xyxy float32 [N,4] plus scores float32 [N] -> exact [N,5] xyxy+score",
+    "labels": "int64 [N]",
+    "identity": "video_ids, frame_indices, image_ids",
+    "auxiliary_input_only": "embeddings_raw float32 [N,256]"
+  },
+  "cache_stage_evidence": {
+    "capture_contract": "TEMPOTRACK_NATIVE_FEATURE_STAGE=pre_filter",
+    "match_boundary": "OVTrackerUncertainty.match() input before remove_distractor",
+    "direct_masa_reuse": false
+  },
+  "filter": {
+    "implementation": "OVTrackerUncertainty.remove_distractor",
+    "nms": "inter",
+    "source_checkout": "/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/COVTrack",
+    "semantics_audit": "pinned method body unchanged; only aligned feature indexing is supplied for offline replay"
+  },
+  "source_config": "/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/COVTrack/configs/uncertainty-ovtrack-teta/ovtrack_r50_ctao_train.py",
+  "source_config_sha256": "282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a",
+  "source_checkpoint": "/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/COVTrack/saved_models/ctao_public_res/ctao_public.pth",
+  "source_checkpoint_sha256": "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c",
+  "source_annotation": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json",
+  "source_annotation_sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+  "fast_path_gate": {
+    "subset": "video_id=2, first 32 frames, image_ids=80..111",
+    "offline_receipt": "/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_fastpath/receipts/offline_video2_32.json",
+    "fresh_receipt_log": "/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_fastpath/receipts/fresh_video2_32_attempt3.log",
+    "comparison_receipt": "/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_fastpath/receipts/equivalence_video2_32.json",
+    "status": "FAIL",
+    "frames_compared": 32,
+    "max_bbox_diff_on_equal_shape": 0.0,
+    "max_score_diff_on_equal_shape": 0.0,
+    "label_diff_on_equal_shape": 0,
+    "observed_first_frame_rows": {
+      "offline_from_cache": 29,
+      "fresh_tempo_disabled_post_filter": 40
+    },
+    "decision": "old native_cache_v5 is not accepted as formal MASA Test input; fresh Test post-filter export is running"
+  },
+  "masa_payload_contract": {
+    "root": "/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa",
+    "per_image_pickle_keys": ["det_labels", "det_bboxes"],
+    "det_bboxes": "float32 [N,5] xyxy+score",
+    "det_labels": "int64 [N]",
+    "excluded": ["embeds", "cls_embeds", "affinity", "track_id", "GT", "Tempo assignment"]
+  }
+}

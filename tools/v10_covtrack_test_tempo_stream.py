@@ -38,7 +38,10 @@ def _config() -> TempoTrackConfig:
         raise ValueError(f"COV V10 tempo config must be a mapping: {config_path}")
     fields = set(TempoTrackConfig.__dataclass_fields__)
     values = {key: value for key, value in tempo.items() if key in fields}
-    values["reranker_checkpoint"] = str(Path(values["reranker_checkpoint"]).resolve())
+    checkpoint = values.get("reranker_checkpoint")
+    values["reranker_checkpoint"] = (
+        str(Path(checkpoint).resolve()) if checkpoint else None
+    )
     return TempoTrackConfig(**values)
 
 
