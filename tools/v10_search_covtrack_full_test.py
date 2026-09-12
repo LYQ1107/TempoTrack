@@ -45,6 +45,7 @@ class SearchPlan:
     contract_gate_sha256: str | None
     threshold_source: str | None
     threshold_quantiles: dict[str, float]
+    expected_inputs: dict[str, Any]
     trials: tuple[dict[str, Any], ...]
 
 
@@ -172,6 +173,7 @@ def _load_search_plan(path: Path | None) -> SearchPlan:
             contract_gate_sha256=None,
             threshold_source=None,
             threshold_quantiles={},
+            expected_inputs={},
             trials=tuple(default_trial_specs()),
         )
     path = path.expanduser().resolve()
@@ -186,6 +188,7 @@ def _load_search_plan(path: Path | None) -> SearchPlan:
             contract_gate_sha256=None,
             threshold_source=None,
             threshold_quantiles={},
+            expected_inputs={},
             trials=tuple(dict(item) for item in raw),
         )
     if not isinstance(raw, Mapping):
@@ -196,6 +199,9 @@ def _load_search_plan(path: Path | None) -> SearchPlan:
     quantiles = raw.get("threshold_quantiles", {})
     if not isinstance(quantiles, Mapping):
         raise ValueError("search plan threshold_quantiles must be a mapping")
+    expected_inputs = raw.get("expected_inputs", {})
+    if not isinstance(expected_inputs, Mapping):
+        raise ValueError("search plan expected_inputs must be a mapping")
     return SearchPlan(
         path=str(path),
         sha256=_sha256(path),
@@ -209,6 +215,7 @@ def _load_search_plan(path: Path | None) -> SearchPlan:
             None if raw.get("threshold_source") is None else str(raw["threshold_source"])
         ),
         threshold_quantiles={str(key): float(value) for key, value in quantiles.items()},
+        expected_inputs={str(key): value for key, value in expected_inputs.items()},
         trials=tuple(dict(item) for item in trials),
     )
 
@@ -424,6 +431,25 @@ def _validate_runtime_contract(
 
 def _worker_search_plan_binding(args: argparse.Namespace) -> dict[str, Any] | None:
     """Validate and return the immutable search-plan binding for a worker."""
+    if args.disabled_overlay:
+        if args.search_plan is None and args.search_plan_sha256 is None:
+            return None
+        if args.search_plan is None or args.search_plan_sha256 is None:
+            raise RuntimeError("SEARCH_PLAN_BINDING_INCOMPLETE")
+        plan_path = Path(args.search_plan).expanduser().resolve()
+        plan = _load_search_plan(plan_path)
+        if plan.sha256 != args.search_plan_sha256:
+            raise RuntimeError("SEARCH_PLAN_HASH_MISMATCH")
+        return {
+            "path": str(plan_path),
+            "sha256": str(plan.sha256),
+            "contract_gate": None,
+            "contract_gate_sha256": None,
+            "threshold_source": plan.threshold_source,
+            "protocol": plan.protocol,
+            "unbiased_test": plan.unbiased_test,
+            "expected_inputs": dict(plan.expected_inputs),
+        }
     fields = (
         args.search_plan,
         args.search_plan_sha256,
@@ -454,6 +480,7 @@ def _worker_search_plan_binding(args: argparse.Namespace) -> dict[str, Any] | No
         "threshold_source": plan.threshold_source,
         "protocol": plan.protocol,
         "unbiased_test": plan.unbiased_test,
+        "expected_inputs": dict(plan.expected_inputs),
     }
 
 
@@ -586,6 +613,8 @@ def run_trial(args: argparse.Namespace) -> int:
         "resources_start": _resource_snapshot(str(args.gpu)),
         "started_at_unix": started,
     }
+    if args.requested_trial_id:
+        receipt["requested_trial_id"] = args.requested_trial_id
     if search_plan_binding is not None:
         receipt["search_plan"] = search_plan_binding
     _write_json(receipt_path, receipt)
@@ -606,17 +635,19 @@ def run_trial(args: argparse.Namespace) -> int:
         manifest = json.loads(stream_manifest.read_text(encoding="utf-8"))
         if manifest.get("status") != "PASS" or int(manifest.get("frames", -1)) != image_count:
             raise RuntimeError(f"stream manifest contract failed: {manifest}")
-        runtime_contract = _validate_runtime_contract(
-            diagnostics_path=trial_root / "diagnostics.json",
-            spec=spec,
-            expected_checkpoint_sha=(
-                _sha256(Path(str(config_data["tempo"]["reranker_checkpoint"])).resolve())
-                if not args.disabled_overlay
-                and config_data.get("tempo", {}).get("reranker_checkpoint")
-                and Path(str(config_data["tempo"]["reranker_checkpoint"])).resolve().is_file()
-                else None
-            ),
-        )
+        if args.disabled_overlay:
+            runtime_contract = {"status": "NOT_APPLICABLE", "failures": []}
+        else:
+            runtime_contract = _validate_runtime_contract(
+                diagnostics_path=trial_root / "diagnostics.json",
+                spec=spec,
+                expected_checkpoint_sha=(
+                    _sha256(Path(str(config_data["tempo"]["reranker_checkpoint"])).resolve())
+                    if config_data.get("tempo", {}).get("reranker_checkpoint")
+                    and Path(str(config_data["tempo"]["reranker_checkpoint"])).resolve().is_file()
+                    else None
+                ),
+            )
         receipt["runtime_contract"] = {
             "status": runtime_contract["status"],
             "failures": runtime_contract["failures"],
@@ -682,6 +713,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-config", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--trial-id", required=True)
+    parser.add_argument("--requested-trial-id")
     parser.add_argument("--spec-file")
     parser.add_argument("--spec-json")
     parser.add_argument("--stage", choices=("subset", "full"), default="subset")

@@ -14,10 +14,16 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import tempfile
 from typing import Any, Mapping
 
 try:
-    from v10_search_covtrack_full_test import _load_search_plan, _sha256, _validate_contract_gate
+    from v10_search_covtrack_full_test import (
+        _load_search_plan,
+        _materialize_config,
+        _sha256,
+        _validate_contract_gate,
+    )
 except ModuleNotFoundError:  # import-safe when loaded by pytest from the repo root
     import importlib.util
     import sys
@@ -31,11 +37,13 @@ except ModuleNotFoundError:  # import-safe when loaded by pytest from the repo r
     sys.modules[_sibling_spec.name] = _sibling
     _sibling_spec.loader.exec_module(_sibling)
     _load_search_plan = _sibling._load_search_plan
+    _materialize_config = _sibling._materialize_config
     _sha256 = _sibling._sha256
     _validate_contract_gate = _sibling._validate_contract_gate
 
 
 LAUNCH_CHECKPOINT_SHA256 = "ed2524af31c22d17b6fcb61dd118095274b1bb56ad9329b993f9cdc4579aa80f"
+LAUNCH_EXTERNAL_CHECKPOINT_SHA256 = "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c"
 LAUNCH_EXTERNAL_COMMIT = "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b"
 LAUNCH_HEAD_DEFAULT = "e24b2db4e2297c51ad6718e70b3e1fd520ee6ff8"
 
@@ -81,17 +89,35 @@ def _check_file_hash(
 
 
 def _find_receipt(root: Path, requested_id: str) -> Path | None:
+    candidates: list[Path] = []
     direct = root / requested_id / "receipt.json"
     if direct.is_file():
-        return direct
+        candidates.append(direct)
+    candidates.extend(sorted(root.glob(f"{requested_id}__retry*/receipt.json")))
     for path in sorted(root.glob("*/receipt.json")):
+        if path in candidates:
+            continue
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if str(value.get("requested_trial_id", value.get("trial_id", ""))) == requested_id:
-            return path
-    return None
+        if str(value.get("requested_trial_id", "")) == requested_id:
+            candidates.append(path)
+    completed: list[Path] = []
+    for path in candidates:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if value.get("status") == "COMPLETED":
+            completed.append(path)
+    if len(completed) == 1:
+        return completed[0]
+    if len(completed) > 1:
+        raise RuntimeError(
+            "MULTIPLE_COMPLETED_ATTEMPTS_FOR_REQUESTED_TRIAL: " + requested_id
+        )
+    return candidates[-1] if candidates else None
 
 
 def _audit_trial(
@@ -104,10 +130,15 @@ def _audit_trial(
     external_commit: str,
     checkpoint_sha256: str,
     external_config_sha256: str | None,
+    external_checkpoint_sha256: str | None = None,
+    expected_base_config: Path,
+    expected_base_config_sha256: str,
 ) -> dict[str, Any]:
     trial_id = str(expected_spec["trial_id"])
     reasons: list[str] = []
     receipt: dict[str, Any] = {}
+    diagnostics: dict[str, Any] = {}
+    base_config_reconstruction_status = "NOT_APPLICABLE"
     if receipt_path is None:
         reasons.append("RECEIPT_MISSING")
     else:
@@ -122,6 +153,8 @@ def _audit_trial(
             reasons.append("LAUNCH_HEAD_MISMATCH")
         actual_spec = dict(receipt.get("spec", {}))
         wanted_spec = dict(expected_spec)
+        effective_trial_id = str(actual_spec.pop("trial_id", receipt.get("trial_id", "")))
+        requested_trial_id = str(wanted_spec.pop("trial_id", ""))
         if actual_spec != wanted_spec:
             reasons.append("TRIAL_SPEC_MISMATCH")
         binding = _binding(receipt)
@@ -129,18 +162,61 @@ def _audit_trial(
             reasons.append("ANNOTATION_HASH_MISMATCH")
         if binding["external_commit"] != external_commit:
             reasons.append("EXTERNAL_COMMIT_MISMATCH")
-        if binding["external_checkpoint_sha256"] != checkpoint_sha256:
+        if (
+            external_checkpoint_sha256 is not None
+            and binding["external_checkpoint_sha256"] != external_checkpoint_sha256
+        ):
             reasons.append("EXTERNAL_CHECKPOINT_HASH_MISMATCH")
         if external_config_sha256 is not None and binding["external_config_sha256"] != external_config_sha256:
             reasons.append("EXTERNAL_CONFIG_HASH_MISMATCH")
         inputs = receipt.get("inputs", {})
-        for key in ("external_checkpoint", "external_config", "base_config"):
+        for key in ("external_checkpoint", "external_config"):
             raw = inputs.get(key)
             hash_key = f"{key}_sha256"
             if not raw or not Path(raw).is_file():
                 reasons.append(f"INPUT_{key.upper()}_MISSING")
             elif inputs.get(hash_key) != _sha256(Path(raw)):
                 reasons.append(f"INPUT_{key.upper()}_HASH_MISMATCH")
+        receipt_base_config = inputs.get("base_config")
+        receipt_base_config_sha = inputs.get("base_config_sha256")
+        legacy_base_config_reconstructed = receipt_base_config is None
+        base_config_reconstruction_status = "NOT_APPLICABLE"
+        if receipt_base_config is not None:
+            receipt_base_path = Path(str(receipt_base_config)).expanduser().resolve()
+            if not receipt_base_path.is_file():
+                reasons.append("INPUT_BASE_CONFIG_MISSING")
+                base_config_reconstruction_status = "FAIL"
+            else:
+                actual_receipt_base_sha = _sha256(receipt_base_path)
+                if actual_receipt_base_sha != receipt_base_config_sha:
+                    reasons.append("INPUT_BASE_CONFIG_HASH_MISMATCH")
+                if actual_receipt_base_sha != expected_base_config_sha256:
+                    reasons.append("BASE_CONFIG_EXPECTED_HASH_MISMATCH")
+                base_config_reconstruction_status = (
+                    "PASS"
+                    if actual_receipt_base_sha == expected_base_config_sha256
+                    and actual_receipt_base_sha == receipt_base_config_sha
+                    else "FAIL"
+                )
+        else:
+            try:
+                with tempfile.TemporaryDirectory() as temporary:
+                    reconstructed = Path(temporary) / "tempo.yaml"
+                    _materialize_config(
+                        expected_base_config,
+                        reconstructed,
+                        expected_spec,
+                        disabled=False,
+                    )
+                    reconstructed_sha = _sha256(reconstructed)
+                if reconstructed_sha != inputs.get("tempo_config_sha256"):
+                    reasons.append("LEGACY_BASE_CONFIG_RECONSTRUCTION_MISMATCH")
+                    base_config_reconstruction_status = "FAIL"
+                else:
+                    base_config_reconstruction_status = "PASS"
+            except Exception:
+                reasons.append("LEGACY_BASE_CONFIG_RECONSTRUCTION_MISMATCH")
+                base_config_reconstruction_status = "FAIL"
         _check_file_hash(receipt, "inputs", "tempo_config", "tempo_config_sha256", reasons)
         outputs = receipt.get("outputs", {})
         for key in ("prediction", "diagnostics", "summary"):
@@ -151,7 +227,6 @@ def _audit_trial(
             elif not expected_hash or _sha256(Path(raw)) != expected_hash:
                 reasons.append(f"OUTPUT_{key.upper()}_HASH_MISMATCH")
         diagnostics_path = Path(outputs.get("diagnostics", ""))
-        diagnostics: dict[str, Any] = {}
         if diagnostics_path.is_file():
             diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
             if int(diagnostics.get("reranker_expected_query_observations", -1)) != 1:
@@ -182,7 +257,7 @@ def _audit_trial(
             else:
                 if status.get("status") != "EXACT_V9_MODEL_CODE_AND_WEIGHTS":
                     reasons.append("RERANKER_PROVENANCE_STATUS_MISMATCH")
-                if status.get("checkpoint_sha256") != LAUNCH_CHECKPOINT_SHA256:
+                if status.get("checkpoint_sha256") != checkpoint_sha256:
                     reasons.append("RERANKER_CHECKPOINT_HASH_MISMATCH")
                 for key, expected in (
                     ("base_only_supervision", True),
@@ -203,6 +278,8 @@ def _audit_trial(
         "status": "PASS" if not reasons else "FAIL",
         "usage": "SEARCH_SELECTION" if not reasons else "REJECT_FROM_SELECTION",
         "trial_id": trial_id,
+        "requested_trial_id": requested_trial_id if receipt else trial_id,
+        "effective_trial_id": effective_trial_id if receipt else None,
         "receipt": str(receipt_path) if receipt_path else None,
         "search_plan_sha256": None,
         "contract_gate_sha256": None,
@@ -210,6 +287,30 @@ def _audit_trial(
         "runtime_contract": {
             "status": "PASS" if not any(reason.startswith("RUNTIME_") for reason in reasons) else "FAIL",
             "failures": [reason for reason in reasons if reason.startswith("RUNTIME_")],
+        },
+        "native_memo_bootstrap": (
+            {
+                "observed": True,
+                "value": int(diagnostics.get("reranker_native_memo_bootstrap_count")),
+                "status": "PASS"
+                if int(diagnostics.get("reranker_native_memo_bootstrap_count")) == 0
+                else "FAIL",
+            }
+            if "reranker_native_memo_bootstrap_count" in diagnostics
+            else {
+                "observed": False,
+                "value": None,
+                "status": "LEGACY_NOT_RECORDED",
+            }
+        ),
+        "base_config_binding": {
+            "expected_path": str(expected_base_config),
+            "expected_sha256": expected_base_config_sha256,
+            "receipt_had_base_config": bool(receipt.get("inputs", {}).get("base_config")) if receipt else False,
+            "legacy_reconstructed": bool(receipt and "base_config" not in receipt.get("inputs", {})),
+            "reconstruction_status": (
+                base_config_reconstruction_status if receipt else "NOT_APPLICABLE"
+            ),
         },
         "input_binding": binding,
         "hash_binding": hash_binding,
@@ -232,8 +333,17 @@ def audit(args: argparse.Namespace) -> int:
     annotation = Path(args.annotation).resolve()
     annotation_sha256 = _sha256(annotation)
     checkpoint_sha256 = args.checkpoint_sha256 or LAUNCH_CHECKPOINT_SHA256
+    external_checkpoint_sha256 = (
+        args.external_checkpoint_sha256 or LAUNCH_EXTERNAL_CHECKPOINT_SHA256
+    )
     external_commit = args.external_commit or LAUNCH_EXTERNAL_COMMIT
     external_config_sha256 = args.external_config_sha256
+    base_config = Path(args.base_config).expanduser().resolve()
+    if not base_config.is_file():
+        raise FileNotFoundError(f"base config missing: {base_config}")
+    actual_base_config_sha = _sha256(base_config)
+    if args.base_config_sha256 is not None and actual_base_config_sha != args.base_config_sha256:
+        raise RuntimeError("BASE_CONFIG_SHA256_MISMATCH")
     if external_config_sha256 is None:
         for receipt_path in sorted(search_root.glob("*/receipt.json")):
             try:
@@ -258,6 +368,9 @@ def audit(args: argparse.Namespace) -> int:
             external_commit=external_commit,
             checkpoint_sha256=checkpoint_sha256,
             external_config_sha256=external_config_sha256,
+            external_checkpoint_sha256=external_checkpoint_sha256,
+            expected_base_config=base_config,
+            expected_base_config_sha256=actual_base_config_sha,
         )
         result["search_plan_sha256"] = plan.sha256
         result["contract_gate_sha256"] = plan.contract_gate_sha256
@@ -265,26 +378,38 @@ def audit(args: argparse.Namespace) -> int:
         if receipt_path is not None:
             _write_json(receipt_path.parent / "selection_audit.json", result)
     passed = sum(value["status"] == "PASS" for value in trials.values())
+    total = len(trials)
+    failed = total - passed
+    if total == 0:
+        global_status, global_usage = "FAIL", "REJECT_FROM_SELECTION"
+    elif passed == total:
+        global_status, global_usage = "PASS", "SEARCH_SELECTION"
+    elif passed > 0:
+        global_status, global_usage = "PARTIAL_PASS", "SEARCH_SELECTION"
+    else:
+        global_status, global_usage = "FAIL", "REJECT_FROM_SELECTION"
     global_result = {
         "schema_version": 1,
         "artifact": "tempotrack_v10_postcontract_search_audit",
-        "status": "PASS" if passed == len(trials) and trials else "INCOMPLETE_OR_FAILED",
-        "usage": "SEARCH_SELECTION" if passed == len(trials) and trials else "REJECT_FROM_SELECTION",
+        "status": global_status,
+        "usage": global_usage,
         "search_root": str(search_root),
         "search_plan": {"path": str(plan_path), "sha256": plan.sha256},
         "contract_gate": {"path": plan.contract_gate, "sha256": plan.contract_gate_sha256, "status": gate.get("status")},
         "launch_head": launch_head,
         "annotation": {"path": str(annotation), "sha256": annotation_sha256},
+        "base_config": {"path": str(base_config), "sha256": actual_base_config_sha},
         "external_commit": external_commit,
         "checkpoint_sha256": checkpoint_sha256,
+        "external_checkpoint_sha256": external_checkpoint_sha256,
         "external_config_sha256": external_config_sha256,
         "trials": trials,
-        "counts": {"total": len(trials), "pass": passed, "fail": len(trials) - passed},
+        "counts": {"total": total, "pass": passed, "fail": failed},
     }
     output = Path(args.output).resolve() if args.output else search_root / "postcontract_search_audit.json"
     _write_json(output, global_result)
     print(json.dumps({"status": global_result["status"], "pass": passed, "total": len(trials), "output": str(output)}))
-    return 0 if global_result["status"] == "PASS" else 2
+    return 0 if global_result["status"] in {"PASS", "PARTIAL_PASS"} else 2
 
 
 def main() -> int:
@@ -296,7 +421,10 @@ def main() -> int:
     parser.add_argument("--launch-head", default=LAUNCH_HEAD_DEFAULT)
     parser.add_argument("--external-commit")
     parser.add_argument("--checkpoint-sha256")
+    parser.add_argument("--external-checkpoint-sha256")
     parser.add_argument("--external-config-sha256")
+    parser.add_argument("--base-config", required=True)
+    parser.add_argument("--base-config-sha256")
     parser.add_argument("--output")
     args = parser.parse_args()
     return audit(args)

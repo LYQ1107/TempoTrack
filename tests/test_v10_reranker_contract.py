@@ -301,6 +301,8 @@ def test_q1_online_prefilter_exact_parity_with_v9_rank_candidates():
     try:
         from tempotrack_research.orchestration import v9_parameter_search as search_module
     except ModuleNotFoundError as exc:
+        if exc.name not in {"mmengine", "mmdet", "mmcv"}:
+            raise
         # The exact orchestration module imports optional MMDetection runtime
         # dependencies.  In the lightweight test environment, execute the
         # production _rank_candidates function node itself so this parity test

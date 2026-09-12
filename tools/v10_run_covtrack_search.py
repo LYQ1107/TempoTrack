@@ -15,8 +15,10 @@ from typing import Any
 try:
     from v10_search_covtrack_full_test import (
         _load_search_plan,
+        _sha256,
         _validate_contract_gate,
         default_trial_specs,
+        _git_value,
         _write_json,
     )
 except ModuleNotFoundError:  # import-safe when loaded as tools.v10_run_covtrack_search
@@ -31,8 +33,10 @@ except ModuleNotFoundError:  # import-safe when loaded as tools.v10_run_covtrack
     sys.modules[_spec.name] = _module
     _spec.loader.exec_module(_module)
     _load_search_plan = _module._load_search_plan
+    _sha256 = _module._sha256
     _validate_contract_gate = _module._validate_contract_gate
     default_trial_specs = _module.default_trial_specs
+    _git_value = _module._git_value
     _write_json = _module._write_json
 
 
@@ -48,6 +52,7 @@ def _build_command(
     spec: dict[str, Any],
     gpu: str,
     plan: Any | None = None,
+    requested_trial_id: str | None = None,
 ) -> list[str]:
     script = Path(args.repo).resolve() / "tools/v10_search_covtrack_full_test.py"
     command = [
@@ -86,6 +91,8 @@ def _build_command(
     ]
     if args.disabled_overlay:
         command.append("--disabled-overlay")
+    if requested_trial_id and requested_trial_id != str(spec["trial_id"]):
+        command.extend(["--requested-trial-id", requested_trial_id])
     if plan is not None:
         command.extend(
             [
@@ -93,14 +100,19 @@ def _build_command(
                 str(plan.path),
                 "--search-plan-sha256",
                 str(plan.sha256),
-                "--contract-gate",
-                str(plan.contract_gate),
-                "--contract-gate-sha256",
-                str(plan.contract_gate_sha256),
                 "--threshold-source",
                 str(plan.threshold_source),
             ]
         )
+        if not args.disabled_overlay:
+            command.extend(
+                [
+                    "--contract-gate",
+                    str(plan.contract_gate),
+                    "--contract-gate-sha256",
+                    str(plan.contract_gate_sha256),
+                ]
+            )
     return command
 
 
@@ -131,13 +143,24 @@ def _plan_binding(plan: Any) -> dict[str, Any]:
         "contract_gate": plan.contract_gate,
         "contract_gate_sha256": plan.contract_gate_sha256,
         "threshold_source": plan.threshold_source,
+        "expected_inputs": dict(plan.expected_inputs),
+        "gate_checkpoint_sha256": None,
     }
 
 
-def _write_status(path: Path, status: dict[str, Any], *, plan: Any | None = None) -> None:
+def _write_status(
+    path: Path,
+    status: dict[str, Any],
+    *,
+    plan: Any | None = None,
+    contract_gate: dict[str, Any] | None = None,
+) -> None:
     status["mem_available_gb"] = _mem_available_gib()
     if plan is not None:
         status["search_plan"] = _plan_binding(plan)
+        status["search_plan"]["gate_checkpoint_sha256"] = (
+            None if contract_gate is None else contract_gate.get("checkpoint_sha256")
+        )
     status["updated_at_unix"] = time.time()
     _write_json(path, status)
 
@@ -176,6 +199,64 @@ def _release_gpu(free_gpus: list[str], gpu: str, order: list[str]) -> None:
         raise RuntimeError(f"GPU {gpu} released twice")
     free_gpus.append(gpu)
     free_gpus.sort(key=order.index)
+
+
+def _base_reranker_checkpoint_binding(base_config: Path) -> tuple[Path, str]:
+    try:
+        import yaml
+    except ImportError as exc:
+        raise RuntimeError("PyYAML required for search gate binding") from exc
+    raw = yaml.safe_load(base_config.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise RuntimeError("BASE_CONFIG_INVALID")
+    tempo = raw.get("tempo", raw)
+    if not isinstance(tempo, dict):
+        raise RuntimeError("BASE_CONFIG_TEMPO_INVALID")
+    value = tempo.get("reranker_checkpoint")
+    if not value:
+        raise RuntimeError("BASE_CONFIG_RERANKER_CHECKPOINT_MISSING")
+    checkpoint = Path(str(value)).expanduser().resolve()
+    if not checkpoint.is_file():
+        raise FileNotFoundError(checkpoint)
+    return checkpoint, _sha256(checkpoint)
+
+
+def _validate_gate_checkpoint_binding(
+    contract_gate: dict[str, Any],
+    base_config: Path,
+) -> tuple[Path, str]:
+    checkpoint, checkpoint_sha = _base_reranker_checkpoint_binding(base_config)
+    gate_checkpoint_sha = contract_gate.get("checkpoint_sha256")
+    if not gate_checkpoint_sha:
+        raise RuntimeError("SEARCH_GATE_CHECKPOINT_SHA_MISSING")
+    if gate_checkpoint_sha != checkpoint_sha:
+        raise RuntimeError("SEARCH_GATE_CHECKPOINT_MISMATCH")
+    return checkpoint, checkpoint_sha
+
+
+def _validate_expected_inputs(
+    plan: Any,
+    args: argparse.Namespace,
+    *,
+    reranker_checkpoint_sha256: str | None,
+) -> None:
+    expected = dict(plan.expected_inputs)
+    if not expected:
+        return
+    annotation_sha = _sha256(Path(args.annotation).resolve())
+    if expected.get("subset_annotation_sha256") != annotation_sha:
+        raise RuntimeError("SEARCH_EXPECTED_INPUT_ANNOTATION_MISMATCH")
+    external_commit = _git_value(Path(args.source).resolve(), "rev-parse", "HEAD")
+    if expected.get("external_cov_commit") != external_commit:
+        raise RuntimeError("SEARCH_EXPECTED_INPUT_EXTERNAL_COMMIT_MISMATCH")
+    external_checkpoint_sha = _sha256(Path(args.external_checkpoint).resolve())
+    if expected.get("external_checkpoint_sha256") != external_checkpoint_sha:
+        raise RuntimeError("SEARCH_EXPECTED_INPUT_EXTERNAL_CHECKPOINT_MISMATCH")
+    if (
+        not bool(getattr(args, "disabled_overlay", False))
+        and expected.get("reranker_checkpoint_sha256") != reranker_checkpoint_sha256
+    ):
+        raise RuntimeError("SEARCH_EXPECTED_INPUT_RERANKER_CHECKPOINT_MISMATCH")
 
 
 def _build_jobs(
@@ -239,7 +320,28 @@ def run(args: argparse.Namespace) -> int:
     requested = {value for value in args.trial_ids.split(",") if value} if args.trial_ids else None
     plan_path = Path(args.spec_file).resolve() if args.spec_file else None
     plan = _load_search_plan(plan_path)
-    _validate_contract_gate(plan)
+    contract_gate = None
+    reranker_checkpoint_sha256 = None
+    if not args.disabled_overlay:
+        contract_gate = _validate_contract_gate(plan)
+        _, reranker_checkpoint_sha256 = _validate_gate_checkpoint_binding(
+            contract_gate,
+            Path(args.base_config).resolve(),
+        )
+    else:
+        # A disabled native control has no reranker contract.  It still keeps
+        # the immutable search-plan/input provenance when a plan is supplied.
+        try:
+            _, reranker_checkpoint_sha256 = _base_reranker_checkpoint_binding(
+                Path(args.base_config).resolve()
+            )
+        except (FileNotFoundError, RuntimeError):
+            reranker_checkpoint_sha256 = None
+    _validate_expected_inputs(
+        plan,
+        args,
+        reranker_checkpoint_sha256=reranker_checkpoint_sha256,
+    )
     specs = [dict(item) for item in plan.trials]
     if requested is not None:
         specs = [item for item in specs if str(item.get("trial_id")) in requested]
@@ -280,7 +382,13 @@ def run(args: argparse.Namespace) -> int:
             # output artifact or trip the safety check.
             trial_log = root / "worker_logs" / f"{trial_id}.log"
             trial_log.parent.mkdir(parents=True, exist_ok=True)
-            command = _build_command(args, spec, gpu, plan)
+            command = _build_command(
+                args,
+                spec,
+                gpu,
+                plan,
+                requested_trial_id=jobs[trial_id].get("requested_trial_id"),
+            )
             log = trial_log.open("w", encoding="utf-8")
             process = subprocess.Popen(
                 command,
@@ -321,6 +429,7 @@ def run(args: argparse.Namespace) -> int:
                     ),
                 },
                 plan=plan,
+                contract_gate=contract_gate,
             )
         _write_status(
             status_path,
@@ -335,6 +444,7 @@ def run(args: argparse.Namespace) -> int:
                 ),
             },
             plan=plan,
+            contract_gate=contract_gate,
         )
         if pending or running:
             time.sleep(max(1.0, float(args.poll_seconds)))
@@ -344,6 +454,7 @@ def run(args: argparse.Namespace) -> int:
         status_path,
         {"schema_version": 1, "status": final_status, "jobs": jobs, "completed": completed, "failed": failed},
         plan=plan,
+        contract_gate=contract_gate,
     )
     print(json.dumps({"status": final_status, "completed": completed, "failed": failed, "status_path": str(status_path)}))
     return 0 if failed == 0 else 1

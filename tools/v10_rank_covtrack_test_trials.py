@@ -39,9 +39,20 @@ def _audit_for_trial(
     if global_audit is not None:
         trials = global_audit.get("trials", {})
         if isinstance(trials, dict):
-            value = trials.get(str(receipt.get("trial_id")))
-            if isinstance(value, dict):
-                return value
+            receipt_trial_id = str(receipt.get("trial_id", ""))
+            requested = str(receipt.get("requested_trial_id", ""))
+            for key in (requested, receipt_trial_id):
+                value = trials.get(key)
+                if isinstance(value, dict):
+                    return value
+            for value in trials.values():
+                if not isinstance(value, dict):
+                    continue
+                if str(value.get("effective_trial_id", "")) == receipt_trial_id:
+                    return value
+                audit_receipt = value.get("receipt")
+                if audit_receipt and Path(audit_receipt).resolve() == receipt_path.resolve():
+                    return value
         return None
     sidecar = receipt_path.parent / "selection_audit.json"
     if not sidecar.is_file():
@@ -147,10 +158,10 @@ def rank(args: argparse.Namespace) -> int:
     if search_audit_arg:
         global_audit = json.loads(Path(search_audit_arg).resolve().read_text(encoding="utf-8"))
         if (
-            global_audit.get("status") != "PASS"
+            global_audit.get("status") not in {"PASS", "PARTIAL_PASS"}
             or global_audit.get("usage") != "SEARCH_SELECTION"
         ):
-            raise ValueError("search audit is not PASS/SEARCH_SELECTION")
+            raise ValueError("search audit is not selectable")
     expected_annotation_arg = getattr(args, "expected_annotation", None)
     expected_annotation_sha256 = (
         _sha256(Path(expected_annotation_arg).resolve()) if expected_annotation_arg else None

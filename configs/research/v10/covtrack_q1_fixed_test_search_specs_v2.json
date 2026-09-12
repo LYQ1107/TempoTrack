@@ -12,6 +12,12 @@
     "margin_p25": 0.6632569432258606,
     "margin_p50": 1.566097915172577
   },
+  "expected_inputs": {
+    "subset_annotation_sha256": "6a1245c5bcc2e9838caf3c5f545256a216ff52003eafd9c47f64c95de3118938",
+    "reranker_checkpoint_sha256": "ed2524af31c22d17b6fcb61dd118095274b1bb56ad9329b993f9cdc4579aa80f",
+    "external_cov_commit": "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b",
+    "external_checkpoint_sha256": "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c"
+  },
   "trials": [
     {"trial_id": "q1_full_no_gate", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 0.0, "margin_threshold": 0.0},
     {"trial_id": "q1_score_p05_margin0", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 1.367088943719864, "margin_threshold": 0.0},
