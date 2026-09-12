@@ -29,15 +29,12 @@ def build_shards(annotation: Path, output: Path, count: int) -> dict[str, Any]:
     videos = list(source.get("videos", []))
     images = list(source.get("images", []))
     annotations = list(source.get("annotations", []))
+    tracks = list(source.get("tracks", []))
     if not videos or not images:
         raise ValueError("annotation must contain videos and images")
     image_by_video: dict[int, list[dict[str, Any]]] = {}
     for image in images:
         image_by_video.setdefault(int(image["video_id"]), []).append(image)
-    ann_by_image: dict[int, list[dict[str, Any]]] = {}
-    for item in annotations:
-        ann_by_image.setdefault(int(item["image_id"]), []).append(item)
-
     # Greedy bin packing by frame count is deterministic and keeps workers
     # close in duration while never splitting a video.
     ordered = sorted(
@@ -59,10 +56,17 @@ def build_shards(annotation: Path, output: Path, count: int) -> dict[str, Any]:
         shard_images = [image for image in images if int(image["video_id"]) in video_set]
         image_ids = {int(image["id"]) for image in shard_images}
         shard_annotations = [item for item in annotations if int(item["image_id"]) in image_ids]
+        shard_tracks = [
+            track
+            for track in tracks
+            if int(track.get("video_id", track.get("video", -1))) in video_set
+        ]
         shard = dict(source)
         shard["videos"] = shard_videos
         shard["images"] = shard_images
         shard["annotations"] = shard_annotations
+        if "tracks" in source:
+            shard["tracks"] = shard_tracks
         path = output / f"shard_{index:02d}.json"
         path.write_text(json.dumps(shard, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
         records.append(
@@ -74,8 +78,20 @@ def build_shards(annotation: Path, output: Path, count: int) -> dict[str, Any]:
                 "video_count": len(video_set),
                 "frame_count": len(shard_images),
                 "annotation_count": len(shard_annotations),
+                "track_count": len(shard_tracks),
             }
         )
+    source_video_ids = {_video_id(video) for video in videos}
+    shard_video_ids = [set(item["video_ids"]) for item in records]
+    union_video_ids = set().union(*shard_video_ids) if shard_video_ids else set()
+    if union_video_ids != source_video_ids:
+        raise RuntimeError("shard video union does not equal source videos")
+    for index, left in enumerate(shard_video_ids):
+        for right in shard_video_ids[index + 1 :]:
+            if left.intersection(right):
+                raise RuntimeError("shard video IDs are not disjoint")
+    if sum(int(item["frame_count"]) for item in records) != len(images):
+        raise RuntimeError("shard frame counts do not cover source exactly")
     manifest = {
         "schema_version": 1,
         "artifact": "tempotrack_v10_complete_video_annotation_shards",
@@ -84,6 +100,7 @@ def build_shards(annotation: Path, output: Path, count: int) -> dict[str, Any]:
         "source_video_count": len(videos),
         "source_frame_count": len(images),
         "source_annotation_count": len(annotations),
+        "source_track_count": len(tracks),
         "shard_count": count,
         "complete_video_disjoint": True,
         "shards": records,

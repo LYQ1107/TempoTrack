@@ -119,27 +119,43 @@ def _release_gpu(free_gpus: list[str], gpu: str, order: list[str]) -> None:
     free_gpus.sort(key=order.index)
 
 
-def run(args: argparse.Namespace) -> int:
-    requested = {value for value in args.trial_ids.split(",") if value} if args.trial_ids else None
-    specs = _load_requested_specs(Path(args.spec_file) if args.spec_file else None, requested)
-    if not specs:
-        raise ValueError("no trial specs selected")
-    gpus = [value.strip() for value in args.gpus.split(",") if value.strip()]
-    if not gpus:
-        raise ValueError("--gpus must contain at least one physical GPU index")
-    root = Path(args.output_root).resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    status_path = root / "coordinator_status.json"
-    if status_path.exists() and not args.resume:
-        raise FileExistsError(f"coordinator status already exists; use --resume: {status_path}")
+def _build_jobs(
+    specs: list[dict[str, Any]],
+    root: Path,
+    old: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Materialize immutable retry-aware jobs from a prior coordinator.
 
-    old: dict[str, Any] = {}
-    if args.resume and status_path.is_file():
-        old = json.loads(status_path.read_text(encoding="utf-8")).get("jobs", {})
+    A requested trial is identified independently from its effective retry
+    directory.  Once any completed retry exists, resume must reuse that
+    completed artifact; failed/partial directories are never overwritten.
+    """
+    old_by_requested: dict[str, list[dict[str, Any]]] = {}
+    for effective_id, value in old.items():
+        requested_id = str(value.get("requested_trial_id", value.get("trial_id", effective_id)))
+        old_by_requested.setdefault(requested_id, []).append(value)
     jobs: dict[str, dict[str, Any]] = {}
     for item in specs:
         requested_id = str(item["trial_id"])
-        old_job = old.get(requested_id)
+        completed_old = next(
+            (
+                value for value in old_by_requested.get(requested_id, [])
+                if value.get("state") == "COMPLETED"
+            ),
+            None,
+        )
+        if completed_old is not None:
+            effective_id = str(completed_old.get("trial_id", requested_id))
+            spec = dict(item)
+            spec["trial_id"] = effective_id
+            jobs[effective_id] = dict(completed_old)
+            jobs[effective_id]["spec"] = spec
+            jobs[effective_id].setdefault("requested_trial_id", requested_id)
+            continue
+        old_job = next(
+            (value for value in old_by_requested.get(requested_id, []) if value.get("trial_id") == requested_id),
+            None,
+        )
         effective_id = requested_id
         if _trial_needs_retry(root, requested_id, old_job):
             effective_id = _next_retry_id(root, requested_id)
@@ -157,6 +173,27 @@ def run(args: argparse.Namespace) -> int:
         }
         if old_job and old_job.get("state") == "COMPLETED":
             jobs[effective_id].update(old_job)
+    return jobs
+
+
+def run(args: argparse.Namespace) -> int:
+    requested = {value for value in args.trial_ids.split(",") if value} if args.trial_ids else None
+    specs = _load_requested_specs(Path(args.spec_file) if args.spec_file else None, requested)
+    if not specs:
+        raise ValueError("no trial specs selected")
+    gpus = [value.strip() for value in args.gpus.split(",") if value.strip()]
+    if not gpus:
+        raise ValueError("--gpus must contain at least one physical GPU index")
+    root = Path(args.output_root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    status_path = root / "coordinator_status.json"
+    if status_path.exists() and not args.resume:
+        raise FileExistsError(f"coordinator status already exists; use --resume: {status_path}")
+
+    old: dict[str, Any] = {}
+    if args.resume and status_path.is_file():
+        old = json.loads(status_path.read_text(encoding="utf-8")).get("jobs", {})
+    jobs = _build_jobs(specs, root, old)
 
     pending = [trial_id for trial_id, job in jobs.items() if job["state"] != "COMPLETED"]
     running: dict[str, tuple[subprocess.Popen[Any], str, Any]] = {}

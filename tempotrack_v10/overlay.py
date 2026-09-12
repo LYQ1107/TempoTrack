@@ -102,6 +102,9 @@ class _MemoryRecord:
     root_id: int = 0
     lineage: tuple[int, ...] = field(default_factory=tuple)
     last_box: np.ndarray | None = None
+    # The Q1 reranker prefilter is defined by the last real observation, not
+    # by the runtime-truncated heuristic history or a fast/slow prototype.
+    last_embedding: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -324,11 +327,13 @@ class TempoTrackOverlay:
                     reranker_evidence_history=reranker_evidence,
                     root_id=root_id,
                     lineage=lineage,
+                    last_embedding=_normalize(raw_history[-1]),
                 )
             else:
                 current.last_frame = int(snapshot.memory_last_frame[index])
                 if explicit_history is not None:
                     current.history = history[-self.config.memory_capacity :]
+                    current.last_embedding = _normalize(raw_history[-1])
                 if evidence_value is not None:
                     current.evidence_history = evidence[-self.config.memory_capacity :]
                 if self._reranker is not None and explicit_history is not None and evidence_value is not None:
@@ -356,6 +361,28 @@ class TempoTrackOverlay:
                 continue
             candidates.append(_Candidate(int(memory_id), None, record, int(record.root_id), False))
         return candidates
+
+    def _reranker_prefilter_score(
+        self,
+        query: np.ndarray,
+        candidate: _Candidate,
+    ) -> float:
+        """Exact Q1 prefilter matching V9 ``_rank_candidates``.
+
+        The training-side prefilter is cosine(query, candidate's last real
+        observation).  Native affinity, fast/slow prototypes, support, and
+        reliability are deliberately excluded from this FULL-path ranking.
+        """
+        if self._reranker is None or self.config.reranker_weight <= 0.0:
+            raise SnapshotContractError("reranker prefilter requested while reranker is disabled")
+        expected_q = int(self._reranker_feature_config["query_observations"])
+        if expected_q != 1:
+            raise SnapshotContractError(
+                f"BLOCKED_RERANKER_PREFILTER_Q_MISMATCH: expected Q={expected_q}"
+            )
+        if candidate.record.last_embedding is None:
+            raise SnapshotContractError("BLOCKED_RERANKER_LAST_EMBEDDING_MISSING")
+        return _cosine(query, candidate.record.last_embedding)
 
     def _support_score(self, query: np.ndarray, record: _MemoryRecord) -> float:
         values = [
@@ -506,6 +533,11 @@ class TempoTrackOverlay:
         all_candidates: list[list[tuple[float, int, int]]] = [[] for _ in range(count)]
         reranker_missing_total = 0
         for observation_index in range(count):
+            # Validate the checkpoint's query protocol before candidate
+            # filtering. A Q>1 checkpoint must fail closed even when this
+            # frame has no legal memory candidate.
+            if self.config.reranker_weight > 0.0:
+                self._query_sequence(snapshot, observation_index)
             legal: list[tuple[float, _Candidate]] = []
             for candidate in candidates:
                 gap = int(snapshot.frame_id) - int(candidate.record.last_frame)
@@ -513,22 +545,28 @@ class TempoTrackOverlay:
                     continue
                 if gap < self.config.min_gap or gap > self.config.max_gap:
                     continue
-                active = 0.70 * _cosine(
-                    snapshot.embeddings[observation_index], candidate.record.state.fast.detach().cpu().numpy()
-                ) + 0.30 * _cosine(
-                    snapshot.embeddings[observation_index], candidate.record.state.slow.detach().cpu().numpy()
-                )
-                if candidate.is_native:
-                    if candidate.memory_index is None:
-                        continue
-                    native = float(snapshot.native_affinity[observation_index, candidate.memory_index])
-                    if not np.isfinite(native):
-                        continue
-                    prefilter = native + active
+                query = snapshot.embeddings[observation_index]
+                if self.config.reranker_weight > 0.0:
+                    # FULL Q1 reranker path: preserve the exact training
+                    # candidate rank before constructing the Top-K context.
+                    prefilter = self._reranker_prefilter_score(query, candidate)
                 else:
-                    # No zero/one/mean native affinity is manufactured for a
-                    # dormant ID: it enters through causal memory evidence.
-                    prefilter = active + self._support_score(snapshot.embeddings[observation_index], candidate.record)
+                    active = 0.70 * _cosine(
+                        query, candidate.record.state.fast.detach().cpu().numpy()
+                    ) + 0.30 * _cosine(
+                        query, candidate.record.state.slow.detach().cpu().numpy()
+                    )
+                    if candidate.is_native:
+                        if candidate.memory_index is None:
+                            continue
+                        native = float(snapshot.native_affinity[observation_index, candidate.memory_index])
+                        if not np.isfinite(native):
+                            continue
+                        prefilter = native + active
+                    else:
+                        # No zero/one/mean native affinity is manufactured for
+                        # a dormant ID: it enters through causal memory evidence.
+                        prefilter = active + self._support_score(query, candidate.record)
                 legal.append((float(prefilter), candidate))
             legal.sort(key=lambda item: (-item[0], item[1].memory_id, item[1].root_id))
             selected = legal[: self.config.candidate_top_k]
@@ -621,7 +659,7 @@ class TempoTrackOverlay:
                 "reranker_status": self._reranker.provenance if self._reranker is not None else "DISABLED_NOT_FULL",
                 "reranker_missing_evidence": int(reranker_missing_total),
                 "full_capability_status": (
-                    "FULL_EXACT_V9_RERANKER"
+                    "FULL_Q1_RERANKER_RUNTIME_ACTIVE"
                     if self._reranker is not None and self.config.reranker_weight > 0
                     else "OVERLAY_WITHOUT_RERANKER"
                 ),
@@ -727,7 +765,8 @@ class TempoTrackOverlay:
                 proposal_record = self._records.get((video, int(proposal_id))) if proposal_id is not None else None
                 was_new = current is None
                 if current is None:
-                    prototype = torch.as_tensor(_normalize(snapshot.embeddings[index]), dtype=torch.float32)
+                    current_embedding = _normalize(snapshot.embeddings[index])
+                    prototype = torch.as_tensor(current_embedding, dtype=torch.float32)
                     state = self._dual.initialize(prototype, frame=int(snapshot.frame_id))
                     source_root_value = self._observation_value(snapshot, "observation_root_ids", index)
                     if proposal_record is not None and proposal_id == int(final_id):
@@ -744,6 +783,7 @@ class TempoTrackOverlay:
                         evidence_history=[],
                         root_id=root_id,
                         lineage=lineage,
+                        last_embedding=current_embedding.copy(),
                     )
                 evidence_value = self._observation_value(snapshot, "observation_evidence", index)
                 evidence_explicit = self._observation_value_present(snapshot, "observation_evidence", index)
@@ -774,6 +814,7 @@ class TempoTrackOverlay:
                     evidence,
                 )
                 current.last_box = np.asarray(snapshot.boxes_xyxy[index], dtype=np.float32).copy()
+                current.last_embedding = _normalize(snapshot.embeddings[index]).copy()
                 self._records[memory_key] = current
         self._pending.pop(key, None)
 

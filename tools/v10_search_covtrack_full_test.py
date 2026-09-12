@@ -28,8 +28,6 @@ from typing import Any, Mapping
 SEARCH_FIELDS = (
     "max_gap",
     "candidate_top_k",
-    "top_r",
-    "memory_capacity",
     "score_threshold",
     "margin_threshold",
 )
@@ -111,8 +109,6 @@ def default_trial_specs() -> list[dict[str, Any]]:
     anchor = {
         "max_gap": 60,
         "candidate_top_k": 8,
-        "top_r": 3,
-        "memory_capacity": 64,
         # Thresholds are regenerated from the post-contract Q1 smoke.  This
         # zero is only a structural placeholder and is never a replacement
         # for the smoke-derived quantiles.
@@ -129,19 +125,15 @@ def default_trial_specs() -> list[dict[str, Any]]:
 
     add("anchor")
     add("gap_30", max_gap=30)
+    add("gap_60", max_gap=60)
     add("gap_120", max_gap=120)
     add("gap_240", max_gap=240)
+    add("gap_360", max_gap=360)
     add("topk_4", candidate_top_k=4)
+    add("topk_8", candidate_top_k=8)
     add("topk_16", candidate_top_k=16)
     add("topk_32", candidate_top_k=32)
-    add("topr_1", top_r=1)
-    add("topr_5", top_r=5)
-    add("memory_32", memory_capacity=32)
-    add("memory_128", memory_capacity=128)
-    add("topk16_margin25", candidate_top_k=16, margin_threshold=0.4247480034828186)
-    add("gap120_topk16", max_gap=120, candidate_top_k=16)
-    add("memory128_topr5", memory_capacity=128, top_r=5)
-    add("gap240_topk32", max_gap=240, candidate_top_k=32)
+    add("topk_64", candidate_top_k=64)
     return rows
 
 

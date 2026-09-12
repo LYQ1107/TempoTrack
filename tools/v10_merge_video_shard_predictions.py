@@ -42,15 +42,40 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
     shard_receipts: list[dict[str, Any]] = []
     frame_total = 0
     track_offset = 0
+    common_binding: dict[str, Any] | None = None
+    invalid_markers: list[dict[str, Any]] = []
     for item in manifest.get("shards", []):
         index = int(item["index"])
         trial = trials_root / f"shard_{index:02d}"
+        shard_annotation = Path(item["path"]).resolve()
+        if not shard_annotation.is_file() or _sha256(shard_annotation) != item["sha256"]:
+            raise RuntimeError(f"shard annotation hash mismatch: {shard_annotation}")
         receipt_path = trial / "receipt.json"
         if not receipt_path.is_file():
             raise RuntimeError(f"missing shard receipt: {receipt_path}")
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if receipt.get("status") != "COMPLETED":
             raise RuntimeError(f"shard is not completed: {receipt_path}: {receipt.get('status')}")
+        inputs = receipt.get("inputs", {})
+        if inputs.get("annotation_sha256") != item["sha256"]:
+            raise RuntimeError(
+                f"receipt annotation binding mismatch for shard {index}: "
+                f"{inputs.get('annotation_sha256')} != {item['sha256']}"
+            )
+        binding = {
+            "repo_head": receipt.get("repo", {}).get("head"),
+            "external_commit": receipt.get("external_source", {}).get("commit"),
+            "external_config_sha256": inputs.get("external_config_sha256"),
+            "external_checkpoint_sha256": inputs.get("external_checkpoint_sha256"),
+            "tempo_config_sha256": inputs.get("tempo_config_sha256"),
+            "overlay_sha256": inputs.get("overlay_sha256"),
+            "runtime_sha256": inputs.get("runtime_sha256"),
+            "stream_sha256": inputs.get("stream_sha256"),
+        }
+        if common_binding is None:
+            common_binding = binding
+        elif binding != common_binding:
+            raise RuntimeError(f"logical smoke provenance mismatch at shard {index}")
         stream_manifest_path = trial / "stream" / "stream_manifest.json"
         prediction_path = trial / "stream" / "tao_track.json"
         stream_manifest = json.loads(stream_manifest_path.read_text(encoding="utf-8"))
@@ -70,6 +95,13 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
         shard_rows = json.loads(prediction_path.read_text(encoding="utf-8"))
         if not isinstance(shard_rows, list):
             raise RuntimeError(f"prediction is not a list: {prediction_path}")
+        outputs = receipt.get("outputs", {})
+        if outputs.get("prediction") and Path(outputs["prediction"]).resolve() != prediction_path.resolve():
+            raise RuntimeError(f"receipt prediction path mismatch for shard {index}")
+        if outputs.get("prediction_sha256") != _sha256(prediction_path):
+            raise RuntimeError(f"prediction hash mismatch for shard {index}")
+        if outputs.get("stream_manifest_sha256") is not None and outputs["stream_manifest_sha256"] != _sha256(stream_manifest_path):
+            raise RuntimeError(f"stream manifest hash mismatch for shard {index}")
         bad = [row for row in shard_rows if int(row.get("video_id", -1)) not in video_ids]
         if bad:
             raise RuntimeError(f"prediction row escaped shard {index}: {bad[0]}")
@@ -81,6 +113,12 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
         shard_track_offset = track_offset
         track_offset += max_track_id + 1
         frame_total += expected_frames
+        selection_status_path = trial / "selection_status.json"
+        selection_status = None
+        if selection_status_path.is_file():
+            selection_status = json.loads(selection_status_path.read_text(encoding="utf-8"))
+        if selection_status and selection_status.get("usage") == "DIAGNOSTIC_ONLY":
+            invalid_markers.append(selection_status)
         shard_receipts.append(
             {
                 "index": index,
@@ -93,6 +131,7 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
                 "video_count": len(video_ids),
                 "prediction_rows": len(shard_rows),
                 "track_id_offset": shard_track_offset,
+                "selection_status": selection_status,
             }
         )
     expected_video_count = int(manifest.get("source_video_count", -1))
@@ -118,6 +157,14 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
         "prediction": str(output),
         "prediction_sha256": _sha256(output),
         "prediction_rows": len(rows),
+        "common_binding": common_binding,
+        "scientific_validity": (
+            "INVALID_PRE_PREFILTER_CONTRACT_FIX"
+            if invalid_markers
+            else "ELIGIBLE_FOR_CONTRACT_SMOKE"
+        ),
+        "usage": "DIAGNOSTIC_ONLY" if invalid_markers else "CONTRACT_SMOKE",
+        "invalid_shard_count": len(invalid_markers),
         "shards": shard_receipts,
     }
     receipt_path = output.with_name(output.stem + ".merge_receipt.json")

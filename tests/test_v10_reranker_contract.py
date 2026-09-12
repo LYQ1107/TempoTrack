@@ -49,23 +49,45 @@ class _FakeReranker:
         return np.zeros(len(candidates), dtype=np.float32), np.zeros((len(candidates), 24), dtype=np.float32)
 
 
-def _snapshot(memory_count=1, *, frame=10, history=None, evidence=None, query_embeddings=None):
-    memory_ids = tuple(range(42, 42 + memory_count))
-    embeddings = np.asarray([[1.0, 0.0]], dtype=np.float32)
+def _snapshot(
+    memory_count=1,
+    *,
+    frame=10,
+    history=None,
+    histories=None,
+    evidence=None,
+    query_embeddings=None,
+    memory_ids=None,
+    embeddings=None,
+    native_affinity=None,
+):
+    memory_ids = tuple(range(42, 42 + memory_count)) if memory_ids is None else tuple(memory_ids)
+    memory_count = len(memory_ids)
+    embeddings = np.asarray([[1.0, 0.0]], dtype=np.float32) if embeddings is None else np.asarray(embeddings, dtype=np.float32)
     metadata = {"association_stage": "pre_association"}
-    if history is not None:
+    if histories is not None:
+        metadata["memory_embedding_history"] = {
+            int(memory_id): np.asarray(value, dtype=np.float32)
+            for memory_id, value in zip(memory_ids, histories)
+        }
+    elif history is not None and memory_count:
         metadata["memory_embedding_history"] = {memory_ids[0]: np.asarray(history, dtype=np.float32)}
     if evidence is not None:
-        metadata["memory_evidence"] = {memory_ids[0]: np.asarray(evidence, dtype=np.float32)}
+        if memory_count:
+            metadata["memory_evidence"] = {
+                memory_id: np.asarray(evidence, dtype=np.float32) for memory_id in memory_ids
+            }
     if query_embeddings is not None:
         metadata["query_embeddings"] = query_embeddings
     if memory_count > 1:
-        metadata["memory_embedding_history"] = {
+        metadata.setdefault("memory_embedding_history", {
             memory_id: np.asarray([[1.0, 0.0]], dtype=np.float32) for memory_id in memory_ids
-        }
-        metadata["memory_evidence"] = {
+        })
+        metadata.setdefault("memory_evidence", {
             memory_id: np.ones((1, 7), dtype=np.float32) for memory_id in memory_ids
-        }
+        })
+    if native_affinity is None:
+        native_affinity = np.full((1, memory_count), 0.9, dtype=np.float32)
     return PreAssociationSnapshot(
         video_id=7,
         frame_id=frame,
@@ -74,7 +96,7 @@ def _snapshot(memory_count=1, *, frame=10, history=None, evidence=None, query_em
         labels=np.asarray([3], dtype=np.int64),
         observation_uids=(f"7:{frame}:0",),
         embeddings=embeddings,
-        native_affinity=np.full((1, memory_count), 0.9, dtype=np.float32),
+        native_affinity=np.asarray(native_affinity, dtype=np.float32),
         memory_ids=memory_ids,
         memory_embeddings=np.tile(embeddings, (memory_count, 1)),
         memory_last_frame=np.full(memory_count, frame - 2, dtype=np.int64),
@@ -160,6 +182,109 @@ def test_runtime_decision_k_does_not_shrink_event_context():
     assert len(reranker.calls[0]) == 10
 
 
+def test_q1_online_prefilter_matches_training_last_observation_cosine():
+    reranker = _FakeReranker(candidate_top_k=64)
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(reranker_weight=1.0, candidate_top_k=8, score_threshold=-10.0, margin_threshold=-1.0),
+        reranker=reranker,
+    )
+    overlay.propose(
+        _snapshot(
+            memory_count=3,
+            histories=(
+                np.asarray([[0.99, 0.10]], dtype=np.float32),
+                np.asarray([[0.10, 0.99]], dtype=np.float32),
+                np.asarray([[0.70, 0.70]], dtype=np.float32),
+            ),
+            native_affinity=np.asarray([[0.01, 0.99, 0.02]], dtype=np.float32),
+        )
+    )
+    assert len(reranker.calls) == 1
+    prefilter_cosines = [float(payload[0][0, 0]) for payload in reranker.calls[0]]
+    assert prefilter_cosines[0] > prefilter_cosines[1] > prefilter_cosines[2]
+
+
+def test_full_prefilter_ignores_native_affinity_for_candidate_rank():
+    reranker = _FakeReranker(candidate_top_k=64)
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(reranker_weight=1.0, candidate_top_k=3, score_threshold=-10.0, margin_threshold=-1.0),
+        reranker=reranker,
+    )
+    overlay.propose(
+        _snapshot(
+            memory_count=3,
+            histories=(
+                np.asarray([[1.0, 0.0]], dtype=np.float32),
+                np.asarray([[0.0, 1.0]], dtype=np.float32),
+                np.asarray([[0.70, 0.70]], dtype=np.float32),
+            ),
+            native_affinity=np.asarray([[0.01, 0.99, 0.02]], dtype=np.float32),
+        )
+    )
+    ordered_prefilter_cosines = [float(payload[0][0, 0]) for payload in reranker.calls[0]]
+    np.testing.assert_allclose(ordered_prefilter_cosines, [1.0, 0.70710677, 0.0], atol=1e-6)
+
+
+def test_runtime_max_gap_does_not_change_checkpoint_feature_normalization():
+    first = _snapshot(
+        frame=10,
+        history=np.asarray([[1.0, 0.0]], dtype=np.float32),
+        evidence=np.ones((1, 7), dtype=np.float32),
+    )
+    second = _snapshot(
+        frame=40,
+        memory_ids=(42,),
+        embeddings=np.asarray([[0.8, 0.6]], dtype=np.float32),
+        native_affinity=np.asarray([[0.9]], dtype=np.float32),
+    )
+    values = []
+    for runtime_max_gap in (10, 999):
+        overlay = TempoTrackOverlay(
+            TempoTrackConfig(
+                reranker_weight=1.0,
+                max_gap=runtime_max_gap,
+                score_threshold=-10.0,
+                margin_threshold=-1.0,
+            ),
+            reranker=_FakeReranker(max_gap=360),
+        )
+        overlay.propose(first)
+        record = overlay._records[("7", 42)]
+        values.append(overlay._causal_observation_evidence(second, 0, record))
+    np.testing.assert_array_equal(values[0], values[1])
+
+
+def test_last_embedding_is_initialized_from_snapshot_history():
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(reranker_weight=1.0, score_threshold=-10.0, margin_threshold=-1.0),
+        reranker=_FakeReranker(),
+    )
+    overlay.propose(
+        _snapshot(
+            history=np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=np.float32),
+            evidence=np.ones((2, 7), dtype=np.float32),
+        )
+    )
+    np.testing.assert_allclose(overlay._records[("7", 42)].last_embedding, np.asarray([1.0, 0.0]))
+
+
+def test_last_embedding_updates_after_commit():
+    overlay = TempoTrackOverlay(TempoTrackConfig(reranker_weight=0.0))
+    first = _snapshot(memory_count=0, frame=10, embeddings=np.asarray([[1.0, 0.0]], dtype=np.float32))
+    overlay.propose(first)
+    overlay.commit(first, np.asarray([42], dtype=np.int64))
+    second = _snapshot(
+        memory_count=1,
+        frame=11,
+        memory_ids=(42,),
+        embeddings=np.asarray([[0.0, 1.0]], dtype=np.float32),
+        native_affinity=np.asarray([[0.9]], dtype=np.float32),
+    )
+    overlay.propose(second)
+    overlay.commit(second, np.asarray([42], dtype=np.int64))
+    np.testing.assert_allclose(overlay._records[("7", 42)].last_embedding, np.asarray([0.0, 1.0]))
+
+
 def test_reranker_memory_bank_matches_canonical_anchor():
     features = np.asarray([[1, 0], [0.99, 0.1], [0, 1], [0.1, 0.99]], dtype=np.float32)
     boxes = np.tile(np.asarray([[0, 0, 10, 10]], dtype=np.float32), (4, 1))
@@ -213,6 +338,25 @@ def test_resume_partial_trial_gets_retry_directory(tmp_path):
     spec.loader.exec_module(module)
     assert module._trial_needs_retry(tmp_path, "anchor", {"state": "FAILED"})
     assert module._next_retry_id(tmp_path, "anchor") == "anchor__retry01"
+
+
+def test_resume_reuses_completed_retry_without_creating_retry02(tmp_path):
+    spec = importlib.util.spec_from_file_location("cov_scheduler_completed_retry", Path(__file__).parents[1] / "tools" / "v10_run_covtrack_search.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    old = {
+        "anchor__retry01": {
+            "trial_id": "anchor__retry01",
+            "requested_trial_id": "anchor",
+            "state": "COMPLETED",
+            "returncode": 0,
+        }
+    }
+    jobs = module._build_jobs([{"trial_id": "anchor", "max_gap": 60}], tmp_path, old)
+    assert list(jobs) == ["anchor__retry01"]
+    assert jobs["anchor__retry01"]["state"] == "COMPLETED"
+    assert not (tmp_path / "anchor__retry02").exists()
 
 
 def test_missing_novel_metric_is_not_ranked(tmp_path):
