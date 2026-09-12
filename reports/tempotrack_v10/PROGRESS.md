@@ -526,3 +526,28 @@ failure.
   no existing OVTrack/COV worker was signalled. At the receipt snapshot,
   Test had 832 files and Val 258 files. MASA-R50 COV-det Native Val remains
   gated on the complete Val public-detection audit.
+
+## V10.3 FAST PATH live acceleration — 2026-09-12 11:54 CST
+
+- The source snapshot containing the MASA COV-detection path is pushed at
+  `bdbc95f`; the standalone Test config is additionally pushed at `e75584b`.
+  The required untracked `data` symlink is retained locally and is not part of
+  either commit.
+- The successful fresh Val export is being completed by the original direct
+  worker PID `33067`/child `33306` on GPU8 plus complete-video workers on
+  GPUs1/5/6/7 (parents `4040`, `8328`, `8348`, `8343`; child PIDs are recorded
+  in the live process snapshot). They all use the same pinned COV config,
+  checkpoint, `only_test_categories=True`, `.37/50/.4`,
+  `confused_features=True`, `vis=False`, and the post-filter exporter.
+- This is controlled overlap only to reduce wall time: every shard has a
+  disjoint complete-video annotation set and writes the same validated
+  `det_labels`/`det_bboxes` public-detection contract. No healthy OVTrack or
+  COV Tempo worker has been signalled. At this snapshot the shared public root
+  contains `11,893/36,375` Val files and `8,785/52,155` Test files; RAM
+  available is about `60 GB` and each added COV worker uses about `3.4 GB` VRAM.
+- Test remains on its direct full export while Val is prioritized. A separate
+  four-way Test shard annotation set is prepared at
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_exports_v10_3/test_shards/annotations/`;
+  it will only be launched after the Val workers finish and resource headroom
+  is rechecked. The next hard gate is the full annotation-aware public-file
+  audit, followed immediately by MASA-R50 COV-det Native Val.
