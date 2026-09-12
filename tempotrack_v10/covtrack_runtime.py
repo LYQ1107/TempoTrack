@@ -66,6 +66,9 @@ def _diagnostic_state(path: Path) -> dict[str, Any]:
             "reranker_missing_evidence": 0,
             "reranker_expected_query_observations": None,
             "reranker_actual_query_observations": None,
+            "reranker_context_candidate_top_k": None,
+            "reranker_decision_candidate_top_k": None,
+            "reranker_context_contract_mismatch": False,
             "reason_counts": {},
             "full_capability_status_counts": {},
             "reranker_status": None,
@@ -127,6 +130,15 @@ def _record_overlay_diagnostics(decision: Any) -> None:
         value = diagnostics.get(name)
         if value is not None and state[name] is None:
             state[name] = int(value)
+    for name in ("reranker_context_candidate_top_k", "reranker_decision_candidate_top_k"):
+        value = diagnostics.get(name)
+        if value is None:
+            continue
+        value = int(value)
+        if state[name] is None:
+            state[name] = value
+        elif int(state[name]) != value:
+            state["reranker_context_contract_mismatch"] = True
     reason_counts = Counter(state["reason_counts"])
     reason_counts.update(reasons)
     state["reason_counts"] = dict(reason_counts)
@@ -185,6 +197,9 @@ def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> Non
         "reranker_missing_evidence": int(state["reranker_missing_evidence"]),
         "reranker_expected_query_observations": state["reranker_expected_query_observations"],
         "reranker_actual_query_observations": state["reranker_actual_query_observations"],
+        "reranker_context_candidate_top_k": state["reranker_context_candidate_top_k"],
+        "reranker_decision_candidate_top_k": state["reranker_decision_candidate_top_k"],
+        "reranker_context_contract_mismatch": bool(state["reranker_context_contract_mismatch"]),
         "reason_counts": dict(sorted(state["reason_counts"].items())),
         "full_capability_status_counts": dict(sorted(state["full_capability_status_counts"].items())),
         "reranker_status": state["reranker_status"],
