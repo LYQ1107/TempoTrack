@@ -164,6 +164,7 @@ def _write_status(
     *,
     plan: Any | None = None,
     contract_gate: dict[str, Any] | None = None,
+    runtime_binding: dict[str, str] | None = None,
 ) -> None:
     status["mem_available_gb"] = _mem_available_gib()
     if plan is not None:
@@ -171,6 +172,8 @@ def _write_status(
         status["search_plan"]["gate_checkpoint_sha256"] = (
             None if contract_gate is None else contract_gate.get("checkpoint_sha256")
         )
+    if runtime_binding is not None:
+        status["runtime_gate_binding"] = dict(runtime_binding)
     status["updated_at_unix"] = time.time()
     _write_json(path, status)
 
@@ -244,6 +247,62 @@ def _validate_gate_checkpoint_binding(
     return checkpoint, checkpoint_sha
 
 
+def _base_runtime_contract_sha(base_config: Path) -> str:
+    try:
+        import yaml
+    except ImportError as exc:
+        raise RuntimeError("PyYAML required for runtime contract binding") from exc
+    raw = yaml.safe_load(base_config.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise RuntimeError("BASE_CONFIG_INVALID")
+    value = raw.get("runtime_contract_sha")
+    if value is None:
+        tempo = raw.get("tempo", {})
+        if isinstance(tempo, dict):
+            value = tempo.get("runtime_contract_sha")
+    if value is None or not str(value).strip():
+        raise RuntimeError("BASE_RUNTIME_CONTRACT_SHA_MISSING")
+    return str(value).strip()
+
+
+def _validate_gate_runtime_binding(
+    *,
+    contract_gate: dict[str, Any],
+    base_config: Path,
+    repo: Path,
+) -> dict[str, str]:
+    expected_runtime_contract_sha = _base_runtime_contract_sha(base_config)
+    gate_runtime_contract_sha = contract_gate.get("runtime_contract_sha")
+    if not gate_runtime_contract_sha:
+        raise RuntimeError("SEARCH_GATE_RUNTIME_REVISION_MISSING")
+    if str(gate_runtime_contract_sha) != expected_runtime_contract_sha:
+        raise RuntimeError("SEARCH_GATE_RUNTIME_REVISION_MISMATCH")
+
+    overlay_path = repo / "tempotrack_v10" / "overlay.py"
+    runtime_path = repo / "tempotrack_v10" / "covtrack_runtime.py"
+    if not overlay_path.is_file():
+        raise FileNotFoundError(overlay_path)
+    if not runtime_path.is_file():
+        raise FileNotFoundError(runtime_path)
+    current_overlay_sha = _sha256(overlay_path)
+    current_runtime_sha = _sha256(runtime_path)
+    gate_overlay_sha = contract_gate.get("overlay_sha256")
+    gate_runtime_sha = contract_gate.get("runtime_sha256")
+    if not gate_overlay_sha:
+        raise RuntimeError("SEARCH_GATE_OVERLAY_SHA_MISSING")
+    if not gate_runtime_sha:
+        raise RuntimeError("SEARCH_GATE_RUNTIME_SHA_MISSING")
+    if gate_overlay_sha != current_overlay_sha:
+        raise RuntimeError("SEARCH_GATE_CURRENT_OVERLAY_HASH_MISMATCH")
+    if gate_runtime_sha != current_runtime_sha:
+        raise RuntimeError("SEARCH_GATE_CURRENT_RUNTIME_HASH_MISMATCH")
+    return {
+        "runtime_contract_sha": expected_runtime_contract_sha,
+        "overlay_sha256": current_overlay_sha,
+        "runtime_sha256": current_runtime_sha,
+    }
+
+
 def _validate_expected_inputs(
     plan: Any,
     args: argparse.Namespace,
@@ -253,7 +312,12 @@ def _validate_expected_inputs(
     expected = dict(plan.expected_inputs)
     if not expected:
         return
-    teta_keys = {"teta_source_root", "teta_init_sha256", "teta_git_commit"}
+    teta_keys = {
+        "teta_source_root",
+        "teta_init_sha256",
+        "teta_git_commit",
+        "teta_require_tracked_clean",
+    }
     if teta_keys.intersection(expected):
         teta_source_root = getattr(args, "teta_source_root", None)
         if not teta_source_root:
@@ -270,6 +334,14 @@ def _validate_expected_inputs(
             and expected.get("teta_git_commit") != dependency["git_commit"]
         ):
             raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_COMMIT_MISMATCH")
+        if bool(expected.get("teta_require_tracked_clean", False)):
+            tracked_status = dependency.get("tracked_git_status")
+            if tracked_status is None:
+                raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_TRACKED_STATUS_UNAVAILABLE")
+            if tracked_status != "":
+                raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_SOURCE_TRACKED_DIRTY")
+            if dependency.get("tracked_source_clean") is not True:
+                raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_SOURCE_NOT_CLEAN")
     # A commit hash alone does not prove that the pinned external checkout is
     # the source that the worker will import.  Hardened plans must launch only
     # from a clean checkout; the already-running legacy wave has no
@@ -377,12 +449,20 @@ def run(args: argparse.Namespace) -> int:
             teta_source_root=teta_source_root,
         )
     contract_gate = None
+    runtime_binding = None
     reranker_checkpoint_sha256 = None
     if not args.disabled_overlay:
         contract_gate = _validate_contract_gate(plan)
+        base_config_path = Path(args.base_config).resolve()
+        repo_path = Path(args.repo).resolve()
         _, reranker_checkpoint_sha256 = _validate_gate_checkpoint_binding(
             contract_gate,
-            Path(args.base_config).resolve(),
+            base_config_path,
+        )
+        runtime_binding = _validate_gate_runtime_binding(
+            contract_gate=contract_gate,
+            base_config=base_config_path,
+            repo=repo_path,
         )
     else:
         # A disabled native control has no reranker contract.  It still keeps
@@ -491,6 +571,7 @@ def run(args: argparse.Namespace) -> int:
                 },
                 plan=plan,
                 contract_gate=contract_gate,
+                runtime_binding=runtime_binding,
             )
         _write_status(
             status_path,
@@ -506,6 +587,7 @@ def run(args: argparse.Namespace) -> int:
             },
             plan=plan,
             contract_gate=contract_gate,
+            runtime_binding=runtime_binding,
         )
         if pending or running:
             time.sleep(max(1.0, float(args.poll_seconds)))
@@ -516,6 +598,7 @@ def run(args: argparse.Namespace) -> int:
         {"schema_version": 1, "status": final_status, "jobs": jobs, "completed": completed, "failed": failed},
         plan=plan,
         contract_gate=contract_gate,
+        runtime_binding=runtime_binding,
     )
     print(json.dumps({"status": final_status, "completed": completed, "failed": failed, "status_path": str(status_path)}))
     return 0 if failed == 0 else 1

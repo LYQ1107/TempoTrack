@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -176,6 +177,156 @@ def test_validator_reads_top_level_runtime_contract_sha(tmp_path):
         encoding="utf-8",
     )
     assert module._runtime_contract_sha_from_config(config) == "top-level-revision"
+
+
+def test_search_gate_runtime_revision_must_match_current_base_config(tmp_path):
+    scheduler = _scheduler_module()
+    repo = tmp_path / "repo"
+    (repo / "tempotrack_v10").mkdir(parents=True)
+    overlay = repo / "tempotrack_v10" / "overlay.py"
+    runtime = repo / "tempotrack_v10" / "covtrack_runtime.py"
+    overlay.write_text("overlay\n", encoding="utf-8")
+    runtime.write_text("runtime\n", encoding="utf-8")
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        "runtime_contract_sha: new-runtime\n"
+        "tempo:\n"
+        "  reranker_checkpoint: /tmp/x.pt\n",
+        encoding="utf-8",
+    )
+    gate = {
+        "runtime_contract_sha": "old-runtime",
+        "overlay_sha256": hashlib.sha256(overlay.read_bytes()).hexdigest(),
+        "runtime_sha256": hashlib.sha256(runtime.read_bytes()).hexdigest(),
+    }
+    with pytest.raises(RuntimeError, match="SEARCH_GATE_RUNTIME_REVISION_MISMATCH"):
+        scheduler._validate_gate_runtime_binding(
+            contract_gate=gate,
+            base_config=base,
+            repo=repo,
+        )
+
+
+def test_search_gate_overlay_hash_must_match_current_repo(tmp_path):
+    scheduler = _scheduler_module()
+    repo = tmp_path / "repo"
+    (repo / "tempotrack_v10").mkdir(parents=True)
+    overlay = repo / "tempotrack_v10" / "overlay.py"
+    runtime = repo / "tempotrack_v10" / "covtrack_runtime.py"
+    overlay.write_text("overlay\n", encoding="utf-8")
+    runtime.write_text("runtime\n", encoding="utf-8")
+    base = tmp_path / "base.yaml"
+    base.write_text("runtime_contract_sha: current\n", encoding="utf-8")
+    gate = {
+        "runtime_contract_sha": "current",
+        "overlay_sha256": "wrong-overlay",
+        "runtime_sha256": hashlib.sha256(runtime.read_bytes()).hexdigest(),
+    }
+    with pytest.raises(RuntimeError, match="SEARCH_GATE_CURRENT_OVERLAY_HASH_MISMATCH"):
+        scheduler._validate_gate_runtime_binding(
+            contract_gate=gate,
+            base_config=base,
+            repo=repo,
+        )
+
+
+def test_search_gate_runtime_hash_must_match_current_repo(tmp_path):
+    scheduler = _scheduler_module()
+    repo = tmp_path / "repo"
+    (repo / "tempotrack_v10").mkdir(parents=True)
+    overlay = repo / "tempotrack_v10" / "overlay.py"
+    runtime = repo / "tempotrack_v10" / "covtrack_runtime.py"
+    overlay.write_text("overlay\n", encoding="utf-8")
+    runtime.write_text("runtime\n", encoding="utf-8")
+    base = tmp_path / "base.yaml"
+    base.write_text("runtime_contract_sha: current\n", encoding="utf-8")
+    gate = {
+        "runtime_contract_sha": "current",
+        "overlay_sha256": hashlib.sha256(overlay.read_bytes()).hexdigest(),
+        "runtime_sha256": "wrong-runtime",
+    }
+    with pytest.raises(RuntimeError, match="SEARCH_GATE_CURRENT_RUNTIME_HASH_MISMATCH"):
+        scheduler._validate_gate_runtime_binding(
+            contract_gate=gate,
+            base_config=base,
+            repo=repo,
+        )
+
+
+def test_teta_tracked_dirty_fails_expected_input_binding(tmp_path):
+    module = _scheduler_module()
+    teta_root = tmp_path / "teta_source"
+    package = teta_root / "teta"
+    package.mkdir(parents=True)
+    init_file = package / "__init__.py"
+    init_file.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(teta_root)], check=True)
+    subprocess.run(["git", "-C", str(teta_root), "add", "teta/__init__.py"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(teta_root),
+            "-c",
+            "user.name=TempoTrack test",
+            "-c",
+            "user.email=tempotrack-test@example.invalid",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+        check=True,
+    )
+    init_file.write_text("VALUE = 2\n", encoding="utf-8")
+    dependency = module._teta_dependency(teta_root)
+    assert dependency["tracked_source_clean"] is False
+    annotation = tmp_path / "annotation.json"
+    annotation.write_text("{}\n", encoding="utf-8")
+    plan = SimpleNamespace(
+        expected_inputs={
+            "teta_source_root": str(teta_root.resolve()),
+            "teta_init_sha256": hashlib.sha256(init_file.read_bytes()).hexdigest(),
+            "teta_git_commit": dependency["git_commit"],
+            "teta_require_tracked_clean": True,
+        }
+    )
+    args = SimpleNamespace(teta_source_root=str(teta_root), annotation=str(annotation))
+    with pytest.raises(RuntimeError, match="SEARCH_EXPECTED_INPUT_TETA_SOURCE_TRACKED_DIRTY"):
+        module._validate_expected_inputs(plan, args, reranker_checkpoint_sha256=None)
+
+
+def test_teta_import_preflight_records_exact_import_paths(tmp_path):
+    module = _plan_module()
+    teta_root = tmp_path / "teta_root"
+    (teta_root / "teta").mkdir(parents=True)
+    (teta_root / "teta" / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    source = tmp_path / "cov_source"
+    (source / "ovtrack" / "datasets").mkdir(parents=True)
+    (source / "ovtrack" / "__init__.py").write_text("\n", encoding="utf-8")
+    cov_init = source / "ovtrack" / "datasets" / "__init__.py"
+    cov_init.write_text("\n", encoding="utf-8")
+    result = module._run_teta_import_preflight(
+        stream_python=sys.executable,
+        source=source,
+        teta_source_root=teta_root,
+    )
+    assert result["status"] == "PASS"
+    assert result["actual_imports"]["teta_file"] == result["expected_teta_init"]
+    assert result["actual_imports"]["cov_dataset_file"] == result["expected_cov_dataset_init"]
+
+    wrong_init = tmp_path / "wrong_teta_init.py"
+    wrong_init.write_text("\n", encoding="utf-8")
+    original_resolver = module._resolve_teta_source_root
+    module._resolve_teta_source_root = lambda value: (teta_root.resolve(), wrong_init.resolve())
+    try:
+        with pytest.raises(RuntimeError, match="TETA_IMPORT_PATH_MISMATCH"):
+            module._run_teta_import_preflight(
+                stream_python=sys.executable,
+                source=source,
+                teta_source_root=teta_root,
+            )
+    finally:
+        module._resolve_teta_source_root = original_resolver
 
 
 def test_teta_source_root_requires_real_importable_package(tmp_path):

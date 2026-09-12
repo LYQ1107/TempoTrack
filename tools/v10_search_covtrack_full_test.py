@@ -104,14 +104,29 @@ def _teta_dependency(value: str | Path | None) -> dict[str, Any] | None:
     if resolved is None:
         return None
     root, init_file = resolved
-    git_root = _git_value(root, "rev-parse", "--show-toplevel")
+    git_root_raw = _git_value(root, "rev-parse", "--show-toplevel")
+    git_root = None if not git_root_raw else Path(git_root_raw).resolve()
+    git_commit = _git_value(root, "rev-parse", "HEAD")
+    git_status = _git_value(root, "status", "--porcelain")
+    tracked_git_status = (
+        None
+        if git_root is None
+        else _git_value(
+            git_root,
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+        )
+    )
     return {
         "source_root": str(root),
         "init_file": str(init_file),
         "init_sha256": _sha256(init_file),
-        "git_root": git_root,
-        "git_commit": _git_value(root, "rev-parse", "HEAD"),
-        "git_status": _git_value(root, "status", "--porcelain"),
+        "git_root": None if git_root is None else str(git_root),
+        "git_commit": git_commit,
+        "git_status": git_status,
+        "tracked_git_status": tracked_git_status,
+        "tracked_source_clean": tracked_git_status == "",
     }
 
 
@@ -126,14 +141,44 @@ def _run_teta_import_preflight(
     resolved = _resolve_teta_source_root(teta_source_root)
     if resolved is None:  # pragma: no cover - caller enforces this
         raise RuntimeError("TETA_SOURCE_ROOT_REQUIRED")
-    root, _ = resolved
+    root, teta_init_file = resolved
+    expected_teta_init = teta_init_file.resolve()
+    expected_cov_dataset_init = (source / "ovtrack" / "datasets" / "__init__.py").resolve()
+    if not expected_cov_dataset_init.is_file():
+        raise RuntimeError(f"COV_DATASET_INIT_MISSING: {expected_cov_dataset_init}")
+    preflight_code = r'''
+from pathlib import Path
+import json
+import sys
+
+import teta
+import ovtrack.datasets
+
+actual_teta = Path(teta.__file__).resolve()
+actual_cov = Path(ovtrack.datasets.__file__).resolve()
+expected_teta = Path(sys.argv[1]).resolve()
+expected_cov = Path(sys.argv[2]).resolve()
+if actual_teta != expected_teta:
+    raise RuntimeError(
+        "TETA_IMPORT_PATH_MISMATCH: "
+        f"{actual_teta} != {expected_teta}"
+    )
+if actual_cov != expected_cov:
+    raise RuntimeError(
+        "COV_IMPORT_PATH_MISMATCH: "
+        f"{actual_cov} != {expected_cov}"
+    )
+print(json.dumps({
+    "teta_file": str(actual_teta),
+    "cov_dataset_file": str(actual_cov),
+}, sort_keys=True))
+'''
     command = [
         str(stream_python),
         "-c",
-        (
-            "import teta; print('teta:', teta.__file__); "
-            "import ovtrack.datasets; print('ovtrack.datasets:', ovtrack.datasets.__file__)"
-        ),
+        preflight_code,
+        str(expected_teta_init),
+        str(expected_cov_dataset_init),
     ]
     env = os.environ.copy()
     path_entries = [str(root), str(source)]
@@ -153,6 +198,9 @@ def _run_teta_import_preflight(
         "returncode": int(result.returncode),
         "command": command,
         "cwd": str(source),
+        "expected_teta_init": str(expected_teta_init),
+        "expected_cov_dataset_init": str(expected_cov_dataset_init),
+        "actual_imports": None,
         "stdout": result.stdout[-4000:],
         "stderr": result.stderr[-4000:],
     }
@@ -161,6 +209,14 @@ def _run_teta_import_preflight(
             "TETA_IMPORT_PREFLIGHT_FAILED: "
             f"{result.stderr.strip() or result.stdout.strip()}"
         )
+    try:
+        output["actual_imports"] = json.loads(result.stdout.strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("TETA_IMPORT_PREFLIGHT_NON_JSON_OUTPUT") from exc
+    if output["actual_imports"].get("teta_file") != str(expected_teta_init):
+        raise RuntimeError("TETA_IMPORT_PATH_MISMATCH")
+    if output["actual_imports"].get("cov_dataset_file") != str(expected_cov_dataset_init):
+        raise RuntimeError("COV_IMPORT_PATH_MISMATCH")
     return output
 
 

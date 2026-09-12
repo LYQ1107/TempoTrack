@@ -76,7 +76,16 @@ def _validate_teta_dependency(receipt: dict[str, Any]) -> bool:
         return False
     if dependency.get("init_sha256") != _sha256(init_file):
         return False
-    return preflight.get("status") == "PASS" and int(preflight.get("returncode", -1)) == 0
+    if dependency.get("tracked_source_clean") is not True:
+        return False
+    if preflight.get("status") != "PASS" or int(preflight.get("returncode", -1)) != 0:
+        return False
+    actual_imports = preflight.get("actual_imports")
+    return isinstance(actual_imports, dict) and (
+        actual_imports.get("teta_file") == dependency.get("init_file")
+        and actual_imports.get("teta_file") == preflight.get("expected_teta_init")
+        and actual_imports.get("cov_dataset_file") == preflight.get("expected_cov_dataset_init")
+    )
 
 
 def _run_contract_tests(repo: Path, pytest_python: Path) -> dict[str, Any]:
