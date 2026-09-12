@@ -19,7 +19,7 @@
     "external_cov_commit": "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b",
     "external_checkpoint_sha256": "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c",
     "external_config_sha256": "282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a",
-    "base_config_sha256": "94ebd5f637a20e92e04683974ba2837b060d13f203c7119634ec1e17fe3b2e35",
+    "base_config_sha256": "9efcc61b2f6d5c47a8ed514e57b33db89271d235ba93ef7b03ec84d110c0365a",
     "teta_source_root": "/data1/LWR/vranlee/LLM/tet/teta",
     "teta_init_sha256": "68df242ab89cb19c7e392af3c8077dae93512c3966689051d13a489342c9d502",
     "teta_git_commit": "a62a9c0affec3a97f2cd0263141c53bcfb9c79f7"
