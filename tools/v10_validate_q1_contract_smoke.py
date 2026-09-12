@@ -64,6 +64,10 @@ _POST_SMOKE_NON_RUNTIME_PATHS = frozenset(
     {
         # These tools validate or resume an already materialized smoke; they
         # are not imported by the stream/runtime process that produced it.
+        "configs/research/v10/covtrack_q1_fixed_test_search_specs_v2.json",
+        "tools/v10_run_covtrack_search.py",
+        "tools/v10_search_covtrack_full_test.py",
+        "tools/v10_v104_resume_dry_wave2.py",
         "tools/v10_validate_q1_contract_smoke.py",
         "tools/v10_v104_resume_primary_stage.py",
     }
