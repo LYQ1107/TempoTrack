@@ -163,6 +163,12 @@ class TempoTrackOverlay:
         self._records: dict[tuple[str, int], _MemoryRecord] = {}
         self._pending: dict[tuple[str, int], tuple[str, OverlayProposal]] = {}
         self._last_query_observations: int | None = None
+        # A Q1 reranker may not silently bootstrap an identity from the
+        # native frontend's EMA/memo embedding.  Keep this counter explicit so
+        # runtime receipts can prove that the forbidden fallback was never
+        # used.  The counter is incremented immediately before the
+        # fail-closed exception and therefore remains zero for a valid run.
+        self._reranker_native_memo_bootstrap_count = 0
 
     @staticmethod
     def _video_key(video_id: int | str) -> str:
@@ -293,7 +299,20 @@ class TempoTrackOverlay:
             raw_history = self._raw_history_value(
                 explicit_history, snapshot.feature_dim, "memory_embedding_history"
             )
+            current = self._records.get(key)
             if not raw_history:
+                if (
+                    current is None
+                    and self._reranker is not None
+                    and self.config.reranker_weight > 0.0
+                ):
+                    self._reranker_native_memo_bootstrap_count += 1
+                    raise SnapshotContractError(
+                        "BLOCKED_RERANKER_NATIVE_MEMO_BOOTSTRAP: FULL Q1 requires "
+                        "the candidate's exact last real observation embedding; "
+                        "native frontend memo/EMA embedding cannot initialize "
+                        "last_embedding."
+                    )
                 raw_history = [np.asarray(snapshot.memory_embeddings[index], dtype=np.float32).copy()]
             history = [_normalize(row) for row in raw_history]
             evidence_value = self._indexed_metadata(
@@ -312,7 +331,6 @@ class TempoTrackOverlay:
                 snapshot, "memory_lineage", index, int(memory_id), len(snapshot.memory_ids)
             )
             lineage = tuple(int(value) for value in lineage_value) if lineage_value is not None else (root_id,)
-            current = self._records.get(key)
             if current is None:
                 prototype = torch.as_tensor(history[-1], dtype=torch.float32)
                 state = self._dual.initialize(prototype, frame=int(snapshot.memory_last_frame[index]))
@@ -525,6 +543,13 @@ class TempoTrackOverlay:
             self._pending[(self._video_key(snapshot.video_id), int(snapshot.frame_id))] = (observation_hash, proposal)
             return proposal
 
+        # Validate the checkpoint query protocol before touching any native
+        # memory bootstrap.  A Q>1 checkpoint without explicit query history
+        # must report the protocol mismatch, never be shadowed by a separate
+        # Q1 memo-bootstrap failure.
+        if self.config.reranker_weight > 0.0:
+            for observation_index in range(count):
+                self._query_sequence(snapshot, observation_index)
         self._ensure_snapshot_memory(snapshot)
         video = self._video_key(snapshot.video_id)
         candidates = self._candidate_union(snapshot)
@@ -536,8 +561,6 @@ class TempoTrackOverlay:
             # Validate the checkpoint's query protocol before candidate
             # filtering. A Q>1 checkpoint must fail closed even when this
             # frame has no legal memory candidate.
-            if self.config.reranker_weight > 0.0:
-                self._query_sequence(snapshot, observation_index)
             legal: list[tuple[float, _Candidate]] = []
             for candidate in candidates:
                 gap = int(snapshot.frame_id) - int(candidate.record.last_frame)
@@ -654,6 +677,9 @@ class TempoTrackOverlay:
                     self._reranker_feature_config.get("query_observations", 1)
                 ),
                 "reranker_actual_query_observations": self._last_query_observations,
+                "reranker_native_memo_bootstrap_count": int(
+                    self._reranker_native_memo_bootstrap_count
+                ),
                 "competition_losers": int(competition_losers),
                 "frame_collision_rejections": int(sum(value == "frame_collision" for value in reasons)),
                 "reranker_status": self._reranker.provenance if self._reranker is not None else "DISABLED_NOT_FULL",

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import ast
 import importlib.util
 import json
 from pathlib import Path
+import types
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -128,7 +131,12 @@ def test_q4_checkpoint_without_query_embeddings_fails_closed():
         reranker=_FakeReranker(query_observations=4),
     )
     with pytest.raises(SnapshotContractError, match="BLOCKED_QUERY_PROTOCOL_MISMATCH"):
-        overlay.propose(_snapshot(evidence=np.ones((1, 7), dtype=np.float32)))
+        overlay.propose(
+            _snapshot(
+                history=np.asarray([[1.0, 0.0]], dtype=np.float32),
+                evidence=np.ones((1, 7), dtype=np.float32),
+            )
+        )
 
 
 def test_q1_checkpoint_q1_runtime_passes_and_uses_new_provenance():
@@ -137,7 +145,12 @@ def test_q1_checkpoint_q1_runtime_passes_and_uses_new_provenance():
         TempoTrackConfig(reranker_weight=1.0, score_threshold=-10.0, margin_threshold=-1.0),
         reranker=reranker,
     )
-    proposal = overlay.propose(_snapshot(evidence=np.ones((1, 7), dtype=np.float32)))
+    proposal = overlay.propose(
+        _snapshot(
+            history=np.asarray([[1.0, 0.0]], dtype=np.float32),
+            evidence=np.ones((1, 7), dtype=np.float32),
+        )
+    )
     assert proposal.diagnostics["reranker_status"]["status"] == "EXACT_V9_MODEL_CODE_AND_WEIGHTS"
     assert proposal.diagnostics["reranker_feature_config"]["query_observations"] == 1
     assert len(reranker.calls) == 1
@@ -266,6 +279,71 @@ def test_last_embedding_is_initialized_from_snapshot_history():
         )
     )
     np.testing.assert_allclose(overlay._records[("7", 42)].last_embedding, np.asarray([1.0, 0.0]))
+
+
+def test_full_q1_native_memo_bootstrap_fails_closed():
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(reranker_weight=1.0, score_threshold=-10.0, margin_threshold=-1.0),
+        reranker=_FakeReranker(),
+    )
+    with pytest.raises(SnapshotContractError, match="BLOCKED_RERANKER_NATIVE_MEMO_BOOTSTRAP"):
+        overlay.propose(_snapshot(evidence=np.ones((1, 7), dtype=np.float32), history=None))
+    assert overlay._reranker_native_memo_bootstrap_count == 1
+
+
+def test_memory_only_native_memo_bootstrap_still_allowed():
+    overlay = TempoTrackOverlay(TempoTrackConfig(reranker_weight=0.0, score_threshold=-10.0))
+    proposal = overlay.propose(_snapshot(evidence=None, history=None))
+    assert proposal.diagnostics["full_capability_status"] == "OVERLAY_WITHOUT_RERANKER"
+
+
+def test_q1_online_prefilter_exact_parity_with_v9_rank_candidates():
+    try:
+        from tempotrack_research.orchestration import v9_parameter_search as search_module
+    except ModuleNotFoundError as exc:
+        # The exact orchestration module imports optional MMDetection runtime
+        # dependencies.  In the lightweight test environment, execute the
+        # production _rank_candidates function node itself so this parity test
+        # still exercises the real implementation rather than a retyped copy.
+        source_path = Path(__file__).parents[1] / "tempotrack_research" / "orchestration" / "v9_parameter_search.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_rank_candidates")
+        search_module = types.SimpleNamespace()
+        namespace = {"np": np}
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(source_path), "exec"), namespace)
+        search_module._rank_candidates = namespace["_rank_candidates"]
+    features = np.asarray(
+        [[1.0, 0.0], [0.0, 1.0], [0.7, 0.7], [0.2, 0.98]], dtype=np.float32
+    )
+    video = SimpleNamespace(features=features)
+    target = {"rows": np.asarray([0], dtype=np.int64)}
+    legal = [
+        {"serial": 42, "rows": np.asarray([1], dtype=np.int64)},
+        {"serial": 43, "rows": np.asarray([2], dtype=np.int64)},
+        {"serial": 44, "rows": np.asarray([3], dtype=np.int64)},
+    ]
+    training = search_module._rank_candidates(video, target, legal, query_count=1)
+    expected_serials = [int(item[1]["serial"]) for item in training]
+    overlay = TempoTrackOverlay(
+        TempoTrackConfig(reranker_weight=1.0, candidate_top_k=64, score_threshold=-10.0, margin_threshold=-1.0),
+        reranker=_FakeReranker(candidate_top_k=64),
+    )
+    overlay.propose(
+        _snapshot(
+            memory_ids=(42, 43, 44),
+            memory_count=3,
+            histories=(features[1:2], features[2:3], features[3:4]),
+            evidence=np.ones((1, 7), dtype=np.float32),
+        )
+    )
+    # The fake reranker receives the exact context order produced by the
+    # online last-observation cosine prefilter.
+    online_cosines = [float(payload[0][0, 0]) for payload in overlay._reranker.calls[0]]
+    expected_scores = [
+        float(features[{42: 1, 43: 2, 44: 3}[serial], 0] / np.linalg.norm(features[{42: 1, 43: 2, 44: 3}[serial]]))
+        for serial in expected_serials
+    ]
+    np.testing.assert_allclose(online_cosines, expected_scores, atol=1e-6)
 
 
 def test_last_embedding_updates_after_commit():

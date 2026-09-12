@@ -69,6 +69,7 @@ def _diagnostic_state(path: Path) -> dict[str, Any]:
             "reranker_context_candidate_top_k": None,
             "reranker_decision_candidate_top_k": None,
             "reranker_context_contract_mismatch": False,
+            "reranker_native_memo_bootstrap_count": 0,
             "reason_counts": {},
             "full_capability_status_counts": {},
             "reranker_status": None,
@@ -139,6 +140,11 @@ def _record_overlay_diagnostics(decision: Any) -> None:
             state[name] = value
         elif int(state[name]) != value:
             state["reranker_context_contract_mismatch"] = True
+    bootstrap_count = diagnostics.get("reranker_native_memo_bootstrap_count")
+    if bootstrap_count is not None:
+        state["reranker_native_memo_bootstrap_count"] = max(
+            int(state["reranker_native_memo_bootstrap_count"]), int(bootstrap_count)
+        )
     reason_counts = Counter(state["reason_counts"])
     reason_counts.update(reasons)
     state["reason_counts"] = dict(reason_counts)
@@ -200,6 +206,9 @@ def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> Non
         "reranker_context_candidate_top_k": state["reranker_context_candidate_top_k"],
         "reranker_decision_candidate_top_k": state["reranker_decision_candidate_top_k"],
         "reranker_context_contract_mismatch": bool(state["reranker_context_contract_mismatch"]),
+        "reranker_native_memo_bootstrap_count": int(
+            state["reranker_native_memo_bootstrap_count"]
+        ),
         "reason_counts": dict(sorted(state["reason_counts"].items())),
         "full_capability_status_counts": dict(sorted(state["full_capability_status_counts"].items())),
         "reranker_status": state["reranker_status"],

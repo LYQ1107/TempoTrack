@@ -1,0 +1,24 @@
+{
+  "protocol": "TEST_TUNED_MODEL_SPECIFIC",
+  "unbiased_test": false,
+  "contract_gate": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_contract_smoke_final_20260912/contract_gate.json",
+  "contract_gate_sha256": "ec88c46753d897d2f973ec2cc4e771b91e4c3ff2ee0b0f49d1cf36c6da306906",
+  "threshold_source": "post_fix_q1_2video_smoke_initialization_points",
+  "threshold_quantiles": {
+    "score_p05": 1.367088943719864,
+    "score_p25": 2.371457517147064,
+    "score_p50": 3.5821245908737183,
+    "margin_p05": 0.1311543583869934,
+    "margin_p25": 0.6632569432258606,
+    "margin_p50": 1.566097915172577
+  },
+  "trials": [
+    {"trial_id": "q1_full_no_gate", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 0.0, "margin_threshold": 0.0},
+    {"trial_id": "q1_score_p05_margin0", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 1.367088943719864, "margin_threshold": 0.0},
+    {"trial_id": "q1_score_p25_margin0", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 2.371457517147064, "margin_threshold": 0.0},
+    {"trial_id": "q1_score_p50_margin0", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 3.5821245908737183, "margin_threshold": 0.0},
+    {"trial_id": "q1_score0_margin_p05", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 0.0, "margin_threshold": 0.1311543583869934},
+    {"trial_id": "q1_score0_margin_p25", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 0.0, "margin_threshold": 0.6632569432258606},
+    {"trial_id": "q1_score0_margin_p50", "max_gap": 360, "candidate_top_k": 8, "score_threshold": 0.0, "margin_threshold": 1.566097915172577}
+  ]
+}

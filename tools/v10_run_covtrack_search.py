@@ -13,7 +13,12 @@ import time
 from typing import Any
 
 try:
-    from v10_search_covtrack_full_test import _load_specs, default_trial_specs, _write_json
+    from v10_search_covtrack_full_test import (
+        _load_search_plan,
+        _validate_contract_gate,
+        default_trial_specs,
+        _write_json,
+    )
 except ModuleNotFoundError:  # import-safe when loaded as tools.v10_run_covtrack_search
     import importlib.util
 
@@ -25,19 +30,25 @@ except ModuleNotFoundError:  # import-safe when loaded as tools.v10_run_covtrack
     _module = importlib.util.module_from_spec(_spec)
     sys.modules[_spec.name] = _module
     _spec.loader.exec_module(_module)
-    _load_specs = _module._load_specs
+    _load_search_plan = _module._load_search_plan
+    _validate_contract_gate = _module._validate_contract_gate
     default_trial_specs = _module.default_trial_specs
     _write_json = _module._write_json
 
 
 def _load_requested_specs(path: Path | None, trial_ids: set[str] | None) -> list[dict[str, Any]]:
-    specs = _load_specs(path) if path is not None else default_trial_specs()
+    specs = list(_load_search_plan(path).trials) if path is not None else default_trial_specs()
     if trial_ids is None:
         return specs
     return [item for item in specs if str(item.get("trial_id")) in trial_ids]
 
 
-def _build_command(args: argparse.Namespace, spec: dict[str, Any], gpu: str) -> list[str]:
+def _build_command(
+    args: argparse.Namespace,
+    spec: dict[str, Any],
+    gpu: str,
+    plan: Any | None = None,
+) -> list[str]:
     script = Path(args.repo).resolve() / "tools/v10_search_covtrack_full_test.py"
     command = [
         args.stream_python,
@@ -75,10 +86,58 @@ def _build_command(args: argparse.Namespace, spec: dict[str, Any], gpu: str) -> 
     ]
     if args.disabled_overlay:
         command.append("--disabled-overlay")
+    if plan is not None:
+        command.extend(
+            [
+                "--search-plan",
+                str(plan.path),
+                "--search-plan-sha256",
+                str(plan.sha256),
+                "--contract-gate",
+                str(plan.contract_gate),
+                "--contract-gate-sha256",
+                str(plan.contract_gate_sha256),
+                "--threshold-source",
+                str(plan.threshold_source),
+            ]
+        )
     return command
 
 
-def _write_status(path: Path, status: dict[str, Any]) -> None:
+def _mem_available_bytes() -> int:
+    with Path("/proc/meminfo").open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    raise RuntimeError("MemAvailable not found")
+
+
+def _mem_available_gib() -> float:
+    return _mem_available_bytes() / (1024**3)
+
+
+def _ram_launch_gate(args: argparse.Namespace) -> tuple[bool, float, float]:
+    available_gb = _mem_available_gib()
+    required_gb = float(args.min_available_ram_gb) + float(args.launch_reserve_ram_gb)
+    return available_gb >= required_gb, available_gb, required_gb
+
+
+def _plan_binding(plan: Any) -> dict[str, Any]:
+    return {
+        "path": plan.path,
+        "sha256": plan.sha256,
+        "protocol": plan.protocol,
+        "unbiased_test": plan.unbiased_test,
+        "contract_gate": plan.contract_gate,
+        "contract_gate_sha256": plan.contract_gate_sha256,
+        "threshold_source": plan.threshold_source,
+    }
+
+
+def _write_status(path: Path, status: dict[str, Any], *, plan: Any | None = None) -> None:
+    status["mem_available_gb"] = _mem_available_gib()
+    if plan is not None:
+        status["search_plan"] = _plan_binding(plan)
     status["updated_at_unix"] = time.time()
     _write_json(path, status)
 
@@ -178,7 +237,12 @@ def _build_jobs(
 
 def run(args: argparse.Namespace) -> int:
     requested = {value for value in args.trial_ids.split(",") if value} if args.trial_ids else None
-    specs = _load_requested_specs(Path(args.spec_file) if args.spec_file else None, requested)
+    plan_path = Path(args.spec_file).resolve() if args.spec_file else None
+    plan = _load_search_plan(plan_path)
+    _validate_contract_gate(plan)
+    specs = [dict(item) for item in plan.trials]
+    if requested is not None:
+        specs = [item for item in specs if str(item.get("trial_id")) in requested]
     if not specs:
         raise ValueError("no trial specs selected")
     gpus = [value.strip() for value in args.gpus.split(",") if value.strip()]
@@ -201,7 +265,12 @@ def run(args: argparse.Namespace) -> int:
     completed = sum(job["state"] == "COMPLETED" for job in jobs.values())
     failed = 0
     while pending or running:
+        waiting_for_ram = False
         while pending and free_gpus and len(running) < min(args.max_workers, len(gpus)):
+            can_launch, _, _ = _ram_launch_gate(args)
+            if not can_launch:
+                waiting_for_ram = True
+                break
             trial_id = pending.pop(0)
             gpu = _acquire_free_gpu(free_gpus)
             spec = jobs[trial_id]["spec"]
@@ -211,7 +280,7 @@ def run(args: argparse.Namespace) -> int:
             # output artifact or trip the safety check.
             trial_log = root / "worker_logs" / f"{trial_id}.log"
             trial_log.parent.mkdir(parents=True, exist_ok=True)
-            command = _build_command(args, spec, gpu)
+            command = _build_command(args, spec, gpu, plan)
             log = trial_log.open("w", encoding="utf-8")
             process = subprocess.Popen(
                 command,
@@ -239,13 +308,43 @@ def run(args: argparse.Namespace) -> int:
             else:
                 failed += 1
             _release_gpu(free_gpus, gpu, gpus)
-            _write_status(status_path, {"schema_version": 1, "status": "RUNNING", "jobs": jobs, "completed": completed, "failed": failed})
-        _write_status(status_path, {"schema_version": 1, "status": "RUNNING", "jobs": jobs, "completed": completed, "failed": failed})
+            _write_status(
+                status_path,
+                {
+                    "schema_version": 1,
+                    "status": "WAITING_FOR_HOST_RAM" if waiting_for_ram else "RUNNING",
+                    "jobs": jobs,
+                    "completed": completed,
+                    "failed": failed,
+                    "required_before_launch_gb": (
+                        float(args.min_available_ram_gb) + float(args.launch_reserve_ram_gb)
+                    ),
+                },
+                plan=plan,
+            )
+        _write_status(
+            status_path,
+            {
+                "schema_version": 1,
+                "status": "WAITING_FOR_HOST_RAM" if waiting_for_ram else "RUNNING",
+                "jobs": jobs,
+                "completed": completed,
+                "failed": failed,
+                "required_before_launch_gb": (
+                    float(args.min_available_ram_gb) + float(args.launch_reserve_ram_gb)
+                ),
+            },
+            plan=plan,
+        )
         if pending or running:
             time.sleep(max(1.0, float(args.poll_seconds)))
 
     final_status = "COMPLETED" if failed == 0 else "PARTIAL_FAILURE"
-    _write_status(status_path, {"schema_version": 1, "status": final_status, "jobs": jobs, "completed": completed, "failed": failed})
+    _write_status(
+        status_path,
+        {"schema_version": 1, "status": final_status, "jobs": jobs, "completed": completed, "failed": failed},
+        plan=plan,
+    )
     print(json.dumps({"status": final_status, "completed": completed, "failed": failed, "status_path": str(status_path)}))
     return 0 if failed == 0 else 1
 
@@ -267,6 +366,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     parser.add_argument("--evaluator-cores", type=int, default=8)
+    parser.add_argument("--min-available-ram-gb", type=float, default=24.0)
+    parser.add_argument("--launch-reserve-ram-gb", type=float, default=4.0)
     parser.add_argument(
         "--stream-python",
         default="/home/lwr/anaconda3/envs/ovtr/bin/python",

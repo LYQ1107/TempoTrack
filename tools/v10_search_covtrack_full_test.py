@@ -33,6 +33,21 @@ SEARCH_FIELDS = (
 )
 
 
+@dataclass(frozen=True)
+class SearchPlan:
+    """Search trials plus the contract that makes them selectable."""
+
+    path: str | None
+    sha256: str | None
+    protocol: str
+    unbiased_test: bool
+    contract_gate: str | None
+    contract_gate_sha256: str | None
+    threshold_source: str | None
+    threshold_quantiles: dict[str, float]
+    trials: tuple[dict[str, Any], ...]
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -137,15 +152,96 @@ def default_trial_specs() -> list[dict[str, Any]]:
     return rows
 
 
-def _load_specs(path: Path | None) -> list[dict[str, Any]]:
+def _resolve_plan_reference(value: Any, plan_path: Path) -> str | None:
+    if value is None:
+        return None
+    reference = Path(str(value)).expanduser()
+    if not reference.is_absolute():
+        reference = plan_path.parent / reference
+    return str(reference.resolve())
+
+
+def _load_search_plan(path: Path | None) -> SearchPlan:
     if path is None:
-        return default_trial_specs()
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(value, Mapping):
-        value = value.get("trials", [])
-    if not isinstance(value, list):
-        raise ValueError(f"trial spec must be a list: {path}")
-    return [dict(item) for item in value]
+        return SearchPlan(
+            path=None,
+            sha256=None,
+            protocol="UNBOUND_DEFAULTS",
+            unbiased_test=False,
+            contract_gate=None,
+            contract_gate_sha256=None,
+            threshold_source=None,
+            threshold_quantiles={},
+            trials=tuple(default_trial_specs()),
+        )
+    path = path.expanduser().resolve()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, list):
+        return SearchPlan(
+            path=str(path),
+            sha256=_sha256(path),
+            protocol="LEGACY_LIST",
+            unbiased_test=False,
+            contract_gate=None,
+            contract_gate_sha256=None,
+            threshold_source=None,
+            threshold_quantiles={},
+            trials=tuple(dict(item) for item in raw),
+        )
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"invalid search plan: {path}")
+    trials = raw.get("trials")
+    if not isinstance(trials, list):
+        raise ValueError(f"search plan must contain trials[]: {path}")
+    quantiles = raw.get("threshold_quantiles", {})
+    if not isinstance(quantiles, Mapping):
+        raise ValueError("search plan threshold_quantiles must be a mapping")
+    return SearchPlan(
+        path=str(path),
+        sha256=_sha256(path),
+        protocol=str(raw.get("protocol", "")),
+        unbiased_test=bool(raw.get("unbiased_test", False)),
+        contract_gate=_resolve_plan_reference(raw.get("contract_gate"), path),
+        contract_gate_sha256=(
+            None if raw.get("contract_gate_sha256") is None else str(raw["contract_gate_sha256"])
+        ),
+        threshold_source=(
+            None if raw.get("threshold_source") is None else str(raw["threshold_source"])
+        ),
+        threshold_quantiles={str(key): float(value) for key, value in quantiles.items()},
+        trials=tuple(dict(item) for item in trials),
+    )
+
+
+def _load_specs(path: Path | None) -> list[dict[str, Any]]:
+    """Compatibility wrapper; coordinator uses the full SearchPlan."""
+    return list(_load_search_plan(path).trials)
+
+
+def _validate_contract_gate(plan: SearchPlan) -> dict[str, Any]:
+    if not plan.contract_gate:
+        raise RuntimeError("SEARCH_CONTRACT_GATE_MISSING")
+    gate_path = Path(plan.contract_gate).resolve()
+    if not gate_path.is_file():
+        raise RuntimeError(f"SEARCH_CONTRACT_GATE_NOT_FOUND: {gate_path}")
+    actual = _sha256(gate_path)
+    if not plan.contract_gate_sha256 or actual != plan.contract_gate_sha256:
+        raise RuntimeError("SEARCH_CONTRACT_GATE_HASH_MISMATCH")
+    try:
+        gate = json.loads(gate_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"SEARCH_CONTRACT_GATE_INVALID: {gate_path}") from exc
+    if gate.get("status") != "PASS":
+        raise RuntimeError("SEARCH_CONTRACT_GATE_NOT_PASS")
+    if int(gate.get("expected_q", -1)) != 1:
+        raise RuntimeError("SEARCH_CONTRACT_Q_NOT_ONE")
+    if int(gate.get("actual_q", -1)) != 1:
+        raise RuntimeError("SEARCH_CONTRACT_RUNTIME_Q_NOT_ONE")
+    if int(gate.get("context_candidate_top_k", -1)) != 64:
+        raise RuntimeError("SEARCH_CONTRACT_CONTEXT_K_NOT_64")
+    if int(gate.get("reranker_missing_evidence", -1)) != 0:
+        raise RuntimeError("SEARCH_CONTRACT_MISSING_EVIDENCE")
+    return gate
 
 
 def _spec_from_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -278,6 +374,89 @@ def _hash_if_file(path: Path) -> str | None:
     return _sha256(path) if path.is_file() else None
 
 
+def _validate_runtime_contract(
+    *,
+    diagnostics_path: Path,
+    spec: Mapping[str, Any],
+    expected_checkpoint_sha: str | None = None,
+) -> dict[str, Any]:
+    """Validate the runtime contract before allowing official evaluation."""
+    if not diagnostics_path.is_file():
+        raise RuntimeError("RUNTIME_DIAGNOSTICS_MISSING")
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    failures: list[str] = []
+    if int(diagnostics.get("reranker_expected_query_observations", -1)) != 1:
+        failures.append("expected_q")
+    if int(diagnostics.get("reranker_actual_query_observations", -1)) != 1:
+        failures.append("actual_q")
+    if int(diagnostics.get("reranker_context_candidate_top_k", -1)) != 64:
+        failures.append("context_k")
+    if int(diagnostics.get("reranker_decision_candidate_top_k", -1)) != int(spec["candidate_top_k"]):
+        failures.append("decision_k")
+    if bool(diagnostics.get("reranker_context_contract_mismatch", True)):
+        failures.append("context_contract")
+    if int(diagnostics.get("reranker_missing_evidence", -1)) != 0:
+        failures.append("missing_evidence")
+    if (
+        "reranker_native_memo_bootstrap_count" in diagnostics
+        and int(diagnostics["reranker_native_memo_bootstrap_count"]) != 0
+    ):
+        failures.append("native_memo_bootstrap")
+    if expected_checkpoint_sha is not None:
+        status = diagnostics.get("reranker_status")
+        if not isinstance(status, Mapping):
+            failures.append("reranker_provenance")
+        elif status.get("checkpoint_sha256") != expected_checkpoint_sha:
+            failures.append("reranker_checkpoint")
+    capability = dict(diagnostics.get("full_capability_status_counts", {}))
+    if not capability or any(
+        name != "FULL_Q1_RERANKER_RUNTIME_ACTIVE" for name in capability
+    ):
+        failures.append("capability")
+    if int(sum(int(value) for value in capability.values())) != int(diagnostics.get("frames", -1)):
+        failures.append("capability_frame_coverage")
+    return {
+        "status": "PASS" if not failures else "FAIL",
+        "failures": failures,
+        "diagnostics": diagnostics,
+    }
+
+
+def _worker_search_plan_binding(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Validate and return the immutable search-plan binding for a worker."""
+    fields = (
+        args.search_plan,
+        args.search_plan_sha256,
+        args.contract_gate,
+        args.contract_gate_sha256,
+    )
+    if all(value is None for value in fields):
+        return None
+    if any(value is None for value in fields):
+        raise RuntimeError("SEARCH_PLAN_BINDING_INCOMPLETE")
+    plan_path = Path(args.search_plan).expanduser().resolve()
+    plan = _load_search_plan(plan_path)
+    if plan.sha256 != args.search_plan_sha256:
+        raise RuntimeError("SEARCH_PLAN_HASH_MISMATCH")
+    gate_path = Path(args.contract_gate).expanduser().resolve()
+    if plan.contract_gate != str(gate_path):
+        raise RuntimeError("SEARCH_PLAN_GATE_PATH_MISMATCH")
+    if plan.contract_gate_sha256 != args.contract_gate_sha256:
+        raise RuntimeError("SEARCH_PLAN_GATE_HASH_MISMATCH")
+    _validate_contract_gate(plan)
+    if args.threshold_source != plan.threshold_source:
+        raise RuntimeError("SEARCH_PLAN_THRESHOLD_SOURCE_MISMATCH")
+    return {
+        "path": str(plan_path),
+        "sha256": str(plan.sha256),
+        "contract_gate": str(gate_path),
+        "contract_gate_sha256": str(plan.contract_gate_sha256),
+        "threshold_source": plan.threshold_source,
+        "protocol": plan.protocol,
+        "unbiased_test": plan.unbiased_test,
+    }
+
+
 def _parse_summary_with_evaluator(
     args: argparse.Namespace,
     summary: Path,
@@ -332,6 +511,7 @@ def run_trial(args: argparse.Namespace) -> int:
     external_checkpoint = Path(args.external_checkpoint).resolve()
     base_config = Path(args.base_config).resolve()
     output_root = Path(args.output_root).resolve()
+    search_plan_binding = _worker_search_plan_binding(args)
     trial_root = output_root / args.trial_id
     receipt_path = trial_root / "receipt.json"
     if receipt_path.is_file():
@@ -382,6 +562,8 @@ def run_trial(args: argparse.Namespace) -> int:
             "external_config_sha256": _sha256(external_config),
             "external_checkpoint": str(external_checkpoint),
             "external_checkpoint_sha256": _sha256(external_checkpoint),
+            "base_config": str(base_config),
+            "base_config_sha256": _sha256(base_config),
             "tempo_config": str(config_path),
             "tempo_config_sha256": _sha256(config_path),
             "evaluator": str(repo / "tools/eval_ovmot_teta.py"),
@@ -404,6 +586,8 @@ def run_trial(args: argparse.Namespace) -> int:
         "resources_start": _resource_snapshot(str(args.gpu)),
         "started_at_unix": started,
     }
+    if search_plan_binding is not None:
+        receipt["search_plan"] = search_plan_binding
     _write_json(receipt_path, receipt)
     try:
         stream_pid, stream_rc, stream_seconds = _run_logged(
@@ -422,6 +606,26 @@ def run_trial(args: argparse.Namespace) -> int:
         manifest = json.loads(stream_manifest.read_text(encoding="utf-8"))
         if manifest.get("status") != "PASS" or int(manifest.get("frames", -1)) != image_count:
             raise RuntimeError(f"stream manifest contract failed: {manifest}")
+        runtime_contract = _validate_runtime_contract(
+            diagnostics_path=trial_root / "diagnostics.json",
+            spec=spec,
+            expected_checkpoint_sha=(
+                _sha256(Path(str(config_data["tempo"]["reranker_checkpoint"])).resolve())
+                if not args.disabled_overlay
+                and config_data.get("tempo", {}).get("reranker_checkpoint")
+                and Path(str(config_data["tempo"]["reranker_checkpoint"])).resolve().is_file()
+                else None
+            ),
+        )
+        receipt["runtime_contract"] = {
+            "status": runtime_contract["status"],
+            "failures": runtime_contract["failures"],
+        }
+        _write_json(receipt_path, receipt)
+        if runtime_contract["status"] != "PASS":
+            raise RuntimeError(
+                "RUNTIME_CONTRACT_FAILED: " + ",".join(runtime_contract["failures"])
+            )
         eval_pid, eval_rc, eval_seconds = _run_logged(
             evaluate_command,
             cwd=repo,
@@ -493,6 +697,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluator-name", default="COV_V10_TEMPO")
     parser.add_argument("--evaluator-cores", type=int, default=8)
     parser.add_argument("--disabled-overlay", action="store_true")
+    parser.add_argument("--search-plan")
+    parser.add_argument("--search-plan-sha256")
+    parser.add_argument("--contract-gate")
+    parser.add_argument("--contract-gate-sha256")
+    parser.add_argument("--threshold-source")
     parser.add_argument("--list-defaults", action="store_true")
     return parser
 
