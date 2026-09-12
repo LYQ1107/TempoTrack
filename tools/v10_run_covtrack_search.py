@@ -53,6 +53,79 @@ def _load_requested_specs(path: Path | None, trial_ids: set[str] | None) -> list
     return [item for item in specs if str(item.get("trial_id")) in trial_ids]
 
 
+_COV_RUNTIME_ASSET_SETUP = Path(
+    "/data2/usr_for_deadline/tempotrack_v10_unified/v104_persistent_supervisor/"
+    "native_control_setup_repair.json"
+)
+
+
+def _validate_external_source_checkout(source: Path, expected_commit: str | None) -> dict[str, Any]:
+    """Validate pinned COV code plus the audited, external runtime assets.
+
+    The pinned checkout intentionally contains code only.  Its required
+    ``data`` and ``saved_models`` trees are immutable symlinks to the already
+    audited external runtime assets, so Git reports those two links as
+    untracked.  Accept exactly that setup and reject every other working-tree
+    change; this keeps code provenance strict without treating required
+    runtime assets as source edits.
+    """
+    source = source.resolve()
+    raw = _git_value(source, "status", "--porcelain", "--untracked-files=all")
+    if raw is None:
+        raise RuntimeError("EXTERNAL_COV_SOURCE_STATUS_UNAVAILABLE")
+    lines = sorted(line for line in raw.splitlines() if line)
+    if not lines:
+        return {"status": "CLEAN", "source": str(source), "git_status": []}
+
+    expected_lines = ["?? data", "?? saved_models"]
+    if lines != expected_lines:
+        raise RuntimeError("EXTERNAL_COV_SOURCE_DIRTY")
+    if not _COV_RUNTIME_ASSET_SETUP.is_file():
+        raise RuntimeError("EXTERNAL_COV_RUNTIME_ASSET_SETUP_MISSING")
+    try:
+        setup = json.loads(_COV_RUNTIME_ASSET_SETUP.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("EXTERNAL_COV_RUNTIME_ASSET_SETUP_INVALID") from exc
+    if not isinstance(setup, dict) or setup.get("status") != "PASS":
+        raise RuntimeError("EXTERNAL_COV_RUNTIME_ASSET_SETUP_NOT_PASS")
+    if Path(str(setup.get("source_checkout", ""))).resolve() != source:
+        raise RuntimeError("EXTERNAL_COV_RUNTIME_ASSET_SOURCE_MISMATCH")
+    source_commit = _git_value(source, "rev-parse", "HEAD")
+    if expected_commit and source_commit != expected_commit:
+        raise RuntimeError("EXTERNAL_COV_SOURCE_COMMIT_MISMATCH")
+    if setup.get("source_git_commit") != source_commit:
+        raise RuntimeError("EXTERNAL_COV_RUNTIME_ASSET_COMMIT_MISMATCH")
+    assets = setup.get("runtime_assets")
+    if not isinstance(assets, dict):
+        raise RuntimeError("EXTERNAL_COV_RUNTIME_ASSET_RECORD_MISSING")
+    for name in ("data", "saved_models"):
+        link = source / name
+        if not link.is_symlink():
+            raise RuntimeError(f"EXTERNAL_COV_RUNTIME_ASSET_LINK_MISSING:{name}")
+        target = link.resolve()
+        # ``Path.resolve()`` follows the symlink, so use ``absolute()`` for
+        # the recorded link path and resolve only the target.
+        recorded_link = Path(str(assets.get(name, ""))).absolute()
+        recorded_target = Path(str(assets.get(f"{name}_target", ""))).resolve()
+        if recorded_link != link or recorded_target != target or not target.is_dir():
+            raise RuntimeError(f"EXTERNAL_COV_RUNTIME_ASSET_LINK_MISMATCH:{name}")
+    for key in ("class_file", "prompt_file"):
+        path = Path(str(assets.get(key, ""))).resolve()
+        expected_sha = str(assets.get(f"{key}_sha256", ""))
+        if not path.is_file() or not expected_sha or _sha256(path) != expected_sha:
+            raise RuntimeError(f"EXTERNAL_COV_RUNTIME_ASSET_HASH_MISMATCH:{key}")
+    return {
+        "status": "PASS",
+        "mode": "PINNED_CODE_WITH_AUDITED_RUNTIME_ASSET_LINKS",
+        "source": str(source),
+        "source_git_commit": source_commit,
+        "git_status": lines,
+        "setup_receipt": str(_COV_RUNTIME_ASSET_SETUP),
+        "setup_receipt_sha256": _sha256(_COV_RUNTIME_ASSET_SETUP),
+        "runtime_assets": assets,
+    }
+
+
 def _build_command(
     args: argparse.Namespace,
     spec: dict[str, Any],
@@ -308,7 +381,7 @@ def _validate_expected_inputs(
     args: argparse.Namespace,
     *,
     reranker_checkpoint_sha256: str | None,
-) -> None:
+) -> dict[str, Any] | None:
     expected = dict(plan.expected_inputs)
     if not expected:
         return
@@ -344,14 +417,14 @@ def _validate_expected_inputs(
                 raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_SOURCE_NOT_CLEAN")
     # A commit hash alone does not prove that the pinned external checkout is
     # the source that the worker will import.  Hardened plans must launch only
-    # from a clean checkout; the already-running legacy wave has no
-    # expected_inputs block and therefore remains unaffected.
+    # from the pinned code plus the separately audited runtime asset links;
+    # the already-running legacy wave has no expected_inputs block and remains
+    # unaffected.
+    external_asset_setup = None
     if "external_config_sha256" in expected or "base_config_sha256" in expected:
-        dirty = _git_value(Path(args.source).resolve(), "status", "--porcelain")
-        if dirty is None:
-            raise RuntimeError("EXTERNAL_COV_SOURCE_STATUS_UNAVAILABLE")
-        if dirty:
-            raise RuntimeError("EXTERNAL_COV_SOURCE_DIRTY")
+        external_asset_setup = _validate_external_source_checkout(
+            Path(args.source), expected.get("external_cov_commit")
+        )
     annotation_sha = _sha256(Path(args.annotation).resolve())
     if expected.get("subset_annotation_sha256") != annotation_sha:
         raise RuntimeError("SEARCH_EXPECTED_INPUT_ANNOTATION_MISMATCH")
@@ -372,6 +445,7 @@ def _validate_expected_inputs(
         and expected.get("reranker_checkpoint_sha256") != reranker_checkpoint_sha256
     ):
         raise RuntimeError("SEARCH_EXPECTED_INPUT_RERANKER_CHECKPOINT_MISMATCH")
+    return external_asset_setup
 
 
 def _build_jobs(
@@ -473,7 +547,7 @@ def run(args: argparse.Namespace) -> int:
             )
         except (FileNotFoundError, RuntimeError):
             reranker_checkpoint_sha256 = None
-    _validate_expected_inputs(
+    external_asset_setup = _validate_expected_inputs(
         plan,
         args,
         reranker_checkpoint_sha256=reranker_checkpoint_sha256,
@@ -493,6 +567,8 @@ def run(args: argparse.Namespace) -> int:
             root / "teta_import_preflight.json",
             {"dependency": teta_dependency, "preflight": teta_preflight},
         )
+    if external_asset_setup is not None:
+        _write_json(root / "external_runtime_asset_setup.json", external_asset_setup)
     status_path = root / "coordinator_status.json"
     if status_path.exists() and not args.resume:
         raise FileExistsError(f"coordinator status already exists; use --resume: {status_path}")
