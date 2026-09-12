@@ -619,3 +619,50 @@ failure.
   `masa_r50.pth` on physical GPU1 using
   `configs/research/v10/masa_r50_covdet_native.py`; parent PID `28641`
   (DataLoader children `28836`, `28837`) is healthy at the latest snapshot.
+
+## V10.3 FAST PATH closure: Test exact gate and MASA results — 2026-09-12 13:56 CST
+
+- The COV Test direct reference writer (`20672/21361`) exited naturally after
+  producing its independent root.  The annotation-aware audit passed for
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa/test_reference_direct`:
+  `52,155` frames, `2,353,689` detections, `missing=0`, `extra=0`, exact
+  `det_labels`/`det_bboxes` schema, finite values, and no IDs/GT/Tempo fields.
+  Audit manifest SHA is
+  `08fd8b64c5f0c5d797b3f4b5a86d807af47ef4cac9e6205d286fdbf5fc757039`.
+- The required independent-root comparison then passed between
+  `test_reference_direct` and the disjoint complete-video
+  `test_sharded_reference`: `frames_compared=52,155`, missing/extra on both
+  sides are zero, `max_bbox_diff=0`, `max_score_diff=0`, `label_diff=0`, and
+  all exact-shape/value flags are true.  Receipt:
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa/receipts/test_reference_vs_sharded_exact.json`
+  (SHA `48d55b45e515291e447f3c7119a064f58a1b947f28f0785f9b50591df4c0c8ed`).
+  The frozen MASA Test input is the audited
+  `test_sharded_reference` root; the direct root is retained as an independent
+  reference and neither producer writes the other's directory.
+- MASA-R50 COV-det Native Val completed with the official
+  `masa_r50.pth` checkpoint (SHA
+  `082670efc6e8820eff8257f78ea14dfb52d6cdbe2910ecccf0901a74f4a0fd76`).
+  Prediction SHA is
+  `430fe6e18ccf3079f3c2274497e323d3fc142691648b0410d87175c73b78849f`.
+  Official TETA summary SHA is
+  `fde6d36af0b6d18d3eaaa807408ca1e92900fbe1e77f7cf560770002a3150dfd`.
+  With the Val category frequency protocol, the parsed metrics (TETA/LocA/
+  AssocA/ClsA, percent) are Base `35.8463/56.2267/36.0832/15.2288` and
+  Novel `30.8761/55.6795/33.6551/3.2937`; class counts are Base 261 and
+  Novel 35, with no unmatched class names.  The source COV Val annotation SHA
+  is `1347fdc4e3eb6880f957e81014fa505080b55d895f27afcc3d6343cff4dc6fe7` and
+  the COV checkpoint/config SHAs are `e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c`
+  and `282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a`.
+- MASA-R50 COV-det Native Test was started only after the audit and exact gate,
+  on physical GPU2, with
+  `configs/research/v10/masa_r50_covdet_test_native.py`, the frozen
+  `test_sharded_reference` root, and the same `masa_r50.pth`; it is still
+  running under the foreground session recorded by the coordinator.  No Test
+  TETA result is claimed yet.  Source Test annotation SHA is
+  `f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2`.
+- The FAST PATH 32-frame gate remains a genuine FAIL for the old pre-filter
+  cache (shape mismatch: offline first frame 29 rows vs fresh 40; common
+  bbox/score/label values were exact), so the formal Test input above is the
+  fresh COV post-filter export.  The final root was not justified by the old
+  overlapping Val/direct-shard topology; only the post-exit audit and the
+  independent-root comparison are used here.
