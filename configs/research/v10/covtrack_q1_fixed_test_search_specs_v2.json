@@ -25,7 +25,7 @@
     "external_cov_commit": "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b",
     "external_checkpoint_sha256": "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c",
     "external_config_sha256": "282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a",
-    "base_config_sha256": "3030ac72f5f12f08a021e513e8c0a9f8c823649f80863536b100afe436166f3c",
+    "base_config_sha256": "af7a2a39c8449b7b3f14d8686081064aabe35e59d350ac8e91e49ee4ac677c9d",
     "teta_source_root": "/data2/usr_for_deadline/tet_a62a9c0_clean/teta",
     "teta_init_sha256": "68df242ab89cb19c7e392af3c8077dae93512c3966689051d13a489342c9d502",
     "teta_git_commit": "a62a9c0affec3a97f2cd0263141c53bcfb9c79f7",

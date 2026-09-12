@@ -5,7 +5,7 @@
 # Q1 CHECKPOINT IS VAL_BASE_PILOT / NOT_PAPER_VALID
 frontend: covtrack
 method_core_sha: 7beb96527e2cd3ba386bb161c4031403b7de9aab
-runtime_contract_sha: 8d69b677dc726eb45ab3ddec44e900c8dbc693ee
+runtime_contract_sha: 79f99d25d976234839ee6ae448e79eff22139656
 protocol: COV_Q1_HARDENED_TEST_SEARCH
 tempo:
   enabled: true
