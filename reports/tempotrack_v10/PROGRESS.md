@@ -666,3 +666,41 @@ failure.
   fresh COV post-filter export.  The final root was not justified by the old
   overlapping Val/direct-shard topology; only the post-exit audit and the
   independent-root comparison are used here.
+
+## V10.3 FAST PATH final closure — 2026-09-12 14:56 CST
+
+- MASA-R50 + COV-det Native Test completed after the independent-root COV
+  audit and exact comparison gates. The final input is the frozen
+  `/data2/usr_for_deadline/tempotrack_v10_unified/covtrack_public_dets_for_masa/test_sharded_reference`
+  root; no Test writer was restarted or allowed to overlap the frozen root.
+- Official Test TETA parsed from
+  `/data2/usr_for_deadline/tempotrack_v10_unified/masa_r50_covdet/test/official_format/MASA/teta_summary_results.pth`
+  using the Test annotation frequency protocol (`frequency != r` = Base,
+  `frequency == r` = Novel): Base `35.596959/54.296173/36.291408/16.203341`
+  and Novel `27.223215/49.635061/27.886224/4.148450` in
+  `TETA/LocA/AssocA/ClsA` percent order. Overall is
+  `34.823/53.865/35.514/15.089`. Base/Novel class counts are 324/33 and
+  unmatched classes are zero.
+- Test artifact hashes are: internal prediction pickle
+  `3c7439ce4f76d2b78f014767deeb58affa4f9f99f7ff819c286d89b03379bb34`,
+  official `tao_track.json`
+  `ae42188b9ef5f37b242bac0ae4777329665e2a6bdd6c275129a36d8a7dfc61cd`,
+  TETA summary
+  `d5f4495111120a8cbde6f1c16603ca5041c28ac958ecb231f4fb4b97ffefc3ea`.
+  The run metadata is
+  `/data2/usr_for_deadline/tempotrack_v10_unified/masa_r50_covdet/test/native_sharded_final/20260912_134042/20260912_134042.json`.
+- The final COV Test public-detection audit and independent direct-vs-sharded
+  exact comparison remain PASS: 52,155 frames, 2,353,689 detections,
+  missing/extra zero, max bbox/score difference zero, and label difference
+  zero. The final sharded manifest SHA is
+  `08fd8b64c5f0c5d797b3f4b5a86d807af47ef4cac9e6205d286fdbf5fc757039` and
+  the comparison receipt SHA is
+  `48d55b45e515291e447f3c7119a064f58a1b947f28f0785f9b50591df4c0c8ed`.
+- The earlier shared-root/direct-plus-shard Val arrangement is retained only
+  as diagnostic history. Because its producers had frame-level overlap, it
+  is not called an overwrite-consistency proof; the final Test protocol uses
+  separate direct and sharded roots and freezes the sharded root only after
+  all its writers exited.
+- No MASA, OVTrack, or COV external process was signalled. At closure the
+  MASA Test process had exited naturally; the pre-existing COV Tempo Test
+  process `22665/22689` remained healthy and untouched.
