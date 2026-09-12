@@ -6,6 +6,7 @@ Licensed: Apache-2.0 License
 import atexit
 import os
 from typing import Any, List, Tuple
+from collections.abc import Mapping
 
 import torch
 import torch.nn.functional as F
@@ -56,6 +57,7 @@ class MasaTaoTracker(BaseTracker):
         with_cats: bool = True,
         max_distance: float = -1,
         fps=1,
+        tempo: Mapping[str, Any] | None = None,
         observation_dump_dir: str | None = None,
         observation_dump_metadata: dict | None = None,
         debug_association_trace: bool = False,
@@ -89,6 +91,37 @@ class MasaTaoTracker(BaseTracker):
         self._embedding_dim = 0
         self._last_device = torch.device("cpu")
         self._observation_recorder = None
+        if tempo is not None and bool(tempo.get("enabled", False)):
+            from tempotrack_v10 import TempoTrackConfig, TempoTrackOverlay
+            from tempotrack_v10.adapters.masa import install_masa_overlay
+
+            overlay_fields = {
+                "enabled",
+                "alpha_fast",
+                "alpha_slow",
+                "min_gap",
+                "max_gap",
+                "candidate_top_k",
+                "top_r",
+                "native_weight",
+                "active_weight",
+                "support_weight",
+                "gap_penalty",
+                "score_threshold",
+                "margin_threshold",
+                "reliability_weight",
+                "memory_capacity",
+                "reranker_weight",
+                "reranker_checkpoint",
+                "reranker_source_root",
+                "reranker_device",
+            }
+            overlay_config = {
+                str(key): value for key, value in dict(tempo).items() if key in overlay_fields
+            }
+            overlay_config["enabled"] = True
+            self._tempo_overlay = TempoTrackOverlay(TempoTrackConfig(**overlay_config))
+            self._tempo_adapter = install_masa_overlay(self, self._tempo_overlay)
         if observation_dump_dir:
             from tempotrack_research.data.native_observation_recorder import (
                 NativeObservationRecorder,
