@@ -1,0 +1,29 @@
+# V10.4 hardened Q1 Test-tuned/model-specific diagnostics.
+# This file is intentionally distinct from the legacy wave config.
+# TEST_TUNED_MODEL_SPECIFIC
+# NOT_UNBIASED_TEST
+# Q1 CHECKPOINT IS VAL_BASE_PILOT / NOT_PAPER_VALID
+frontend: covtrack
+method_core_sha: 7beb96527e2cd3ba386bb161c4031403b7de9aab
+runtime_contract_sha: 049b28800249f39339d0f0d04728e999dd1cb8cb
+protocol: COV_Q1_HARDENED_TEST_SEARCH
+tempo:
+  enabled: true
+  alpha_fast: 0.70
+  alpha_slow: 0.15
+  min_gap: 0
+  max_gap: 360
+  candidate_top_k: 8
+  top_r: 3
+  native_weight: 0.45
+  active_weight: 0.35
+  support_weight: 0.20
+  gap_penalty: 0.02
+  score_threshold: 0.0
+  margin_threshold: 0.0
+  reliability_weight: 0.0
+  memory_capacity: 64
+  reranker_weight: 1.0
+  reranker_checkpoint: /data2/usr_for_deadline/tempotrack_v10_unified/reranker/covtrack_q1_val_base_training_v104/best.pt
+  reranker_source_root: /data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9
+  reranker_device: cpu
