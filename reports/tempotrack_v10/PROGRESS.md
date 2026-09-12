@@ -773,3 +773,19 @@ failure.
   checkpoint/training/event-cache/source provenance. The next execution gate
   is a new 2–5 complete-video Q1 contract smoke; the old 10-shard run is not
   reused for threshold generation.
+- The final 2-video fixed smoke used complete Test videos 2 and 5 (72 frames)
+  on shared physical GPU9 after the runtime diagnostic patch. Gate receipt:
+  `/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_contract_smoke_final_20260912/contract_gate.json`
+  (SHA `ec88c46753d897d2f973ec2cc4e771b91e4c3ff2ee0b0f49d1cf36c6da306906`).
+  It is `PASS`: checkpoint expected/actual Q=`1/1`, context K=`64`, runtime
+  decision K=`8`, missing evidence=`0`, causal prefilter/memory tests PASS,
+  stream coverage PASS, and official TETA parsing PASS. Its diagnostic-only
+  Base metrics on this two-video smoke are TETA/LocA/AssocA/ClsA
+  `29.3295/53.8710/34.1175/0.0000`; Novel has no classes in this smoke and
+  is not a result claim.
+- The fixed smoke quantiles are score p05/p25/p50
+  `1.36709/2.37146/3.58212` and margin p05/p25/p50
+  `0.13115/0.66326/1.56610`; old `2.047/2.830/3.793` thresholds are not
+  reused. The 11,500-frame Test subset annotation remains unchanged at SHA
+  `6a1245c5bcc2e9838caf3c5f545256a216ff52003eafd9c47f64c95de3118938`; its
+  manifest now explicitly records the Test-tuned GT provenance flags.

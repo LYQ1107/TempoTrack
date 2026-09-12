@@ -15,6 +15,11 @@
   "base_only_supervision": true,
   "novel_gt_used": false,
   "test_weights_used": false,
+  "event_cache": "/data2/usr_for_deadline/tempotrack_v9_relocated_20260910/v9_1/covtrack/val/event_cache",
+  "event_cache_metadata_sha256": "4d5b3f90828b1564aff98504c451756d93cf950958755b2d70847522d28fa512",
+  "feature_schema_hash": "61ac4a85e6c12cd6a8a99b413e0f63d77e86aee9c60b47563763eb3737e8c547",
+  "val_annotation_sha256": "1347fdc4e3eb6880f957e81014fa505080b55d895f27afcc3d6343cff4dc6fe7",
+  "val_frontend_prediction_sha256": "adfb123a566f62279d7ff0f55e94ce1eaa5068d3de127f570f0c4166cd33db78",
   "feature_config": {
     "query_observations": 1,
     "top_r": 3,
@@ -30,5 +35,18 @@
     "query_conditioned_reranker.py": "2390d4049090c26c3af5be54035671be9d91512b4cf74e3ea6230035712a60da",
     "reranker_trainer.py": "192bb4cda6ad4899d9f7c8789ce385d7067bf1dcc6e6b4186e01909d1b40cbd6",
     "v9_reranker.py": "b3b320c2622c2830c4f40cf9ab6301fefec9b6b2ab0e770071a1d469669c6599"
+  },
+  "fixed_contract_smoke": {
+    "status": "PASS",
+    "gate": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_contract_smoke_final_20260912/contract_gate.json",
+    "gate_sha256": "ec88c46753d897d2f973ec2cc4e771b91e4c3ff2ee0b0f49d1cf36c6da306906",
+    "annotation_sha256": "4c7a1626398649c120d639616e8e33905aa1f4f45212ba1a143f179cd6624a94",
+    "prediction_sha256": "94becb31de053a9766edb7f519569a0261b5d42db25aa6a4883ecf35339bc212",
+    "diagnostics_sha256": "36bd8a08e08386717120937bed45bd7e4204901fcc8c49d6f7c1a73abfa382b6",
+    "expected_q": 1,
+    "actual_q": 1,
+    "context_candidate_top_k": 64,
+    "decision_candidate_top_k": 8,
+    "reranker_missing_evidence": 0
   }
 }
