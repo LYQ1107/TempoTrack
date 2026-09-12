@@ -98,7 +98,8 @@ def test_v2_search_plan_preserves_expected_input_binding():
         "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b"
     )
     assert plan.contract_mode == "hardened"
-    assert plan.expected_inputs["teta_source_root"].endswith("/LLM/tet/teta")
+    assert plan.expected_inputs["teta_source_root"].endswith("/tet_a62a9c0_clean/teta")
+    assert plan.expected_inputs["teta_require_tracked_clean"] is True
 
 
 def test_search_plan_bad_gate_hash_fails(tmp_path):
