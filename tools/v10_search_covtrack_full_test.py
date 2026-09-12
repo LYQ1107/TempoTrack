@@ -374,6 +374,16 @@ def _load_specs(path: Path | None) -> list[dict[str, Any]]:
     return list(_load_search_plan(path).trials)
 
 
+def _contract_gate_value(gate: Mapping[str, Any], key: str) -> Any:
+    """Read a gate from the canonical nested schema, with old-schema support."""
+    if key in gate:
+        return gate[key]
+    nested = gate.get("gates")
+    if isinstance(nested, Mapping):
+        return nested.get(key)
+    return None
+
+
 def _validate_contract_gate(plan: SearchPlan) -> dict[str, Any]:
     if plan.contract_mode not in {"legacy", "hardened"}:
         raise RuntimeError(f"SEARCH_CONTRACT_MODE_INVALID: {plan.contract_mode}")
@@ -413,7 +423,7 @@ def _validate_contract_gate(plan: SearchPlan) -> dict[str, Any]:
             ("runtime_sha_matches_repo", "SEARCH_CONTRACT_RUNTIME_HASH_MISMATCH"),
             ("stream_covers_all_annotation_frames", "SEARCH_CONTRACT_STREAM_FRAME_COVERAGE"),
         ):
-            if gate.get(key) is not True:
+            if _contract_gate_value(gate, key) is not True:
                 raise RuntimeError(error)
     return gate
 
