@@ -348,6 +348,16 @@ def _validate_contract_gate(plan: SearchPlan) -> dict[str, Any]:
             raise RuntimeError("SEARCH_CONTRACT_BOOTSTRAP_COUNTER_MISSING")
     elif int(gate[bootstrap_key]) != 0:
         raise RuntimeError("SEARCH_CONTRACT_NATIVE_MEMO_BOOTSTRAP")
+    if plan.contract_mode == "hardened":
+        for key, error in (
+            ("teta_dependency_provenance", "SEARCH_CONTRACT_TETA_PROVENANCE_MISSING"),
+            ("runtime_contract_sha_matches_expected", "SEARCH_CONTRACT_RUNTIME_REVISION_MISMATCH"),
+            ("overlay_sha_matches_repo", "SEARCH_CONTRACT_OVERLAY_HASH_MISMATCH"),
+            ("runtime_sha_matches_repo", "SEARCH_CONTRACT_RUNTIME_HASH_MISMATCH"),
+            ("stream_covers_all_annotation_frames", "SEARCH_CONTRACT_STREAM_FRAME_COVERAGE"),
+        ):
+            if gate.get(key) is not True:
+                raise RuntimeError(error)
     return gate
 
 
