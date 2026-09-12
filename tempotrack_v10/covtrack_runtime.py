@@ -125,6 +125,39 @@ def _maybe_export_cov_detections(
     export_masa_public_detection(root, str(filename), bboxes, labels)
 
 
+def _capture_no_embed(
+    tracker: Any,
+    bboxes: Any,
+    labels: Any,
+    frame_id: Any,
+    kwargs: Mapping[str, Any],
+) -> None:
+    """Capture the exact early-return observation when COV has no embeddings.
+
+    The pinned ``match`` returns before ``remove_distractor`` when
+    ``embeds is None``.  That branch is still a real native observation path;
+    without this hook an empty-detection frame has no MASA pickle at all.
+    This helper is capture-only and never changes the native return value.
+    """
+
+    if not os.environ.get("V10_COV_DET_EXPORT_ROOT"):
+        return
+    current_video = getattr(tracker, "_v10_current_video_id", None)
+    if current_video is None:
+        current_video = getattr(tracker, "_v10_dataset_video_id", None)
+    if current_video is None:
+        raise SnapshotContractError(
+            "COV V10 no-embed capture has no causal video_id"
+        )
+    _maybe_export_cov_detections(
+        bboxes=bboxes,
+        labels=labels,
+        frame_id=frame_id,
+        kwargs=kwargs,
+        video_id=int(current_video),
+    )
+
+
 def _prepare(
     tracker: Any,
     bboxes: Any,
@@ -252,10 +285,38 @@ ids = __v10_cov_prepare(
     return ast.parse(textwrap.dedent(source)).body[0]
 
 
+def _capture_no_embed_statement() -> ast.stmt:
+    source = """
+__v10_cov_capture_no_embed(self, bboxes, labels, frame_id, kwargs)
+"""
+    return ast.parse(textwrap.dedent(source)).body[0]
+
+
+def _is_embeds_none(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Name)
+        and node.left.id == "embeds"
+        and len(node.ops) == 1
+        and isinstance(node.ops[0], ast.Is)
+        and len(node.comparators) == 1
+        and isinstance(node.comparators[0], ast.Constant)
+        and node.comparators[0].value is None
+    )
+
+
 class _BoundaryInjector(ast.NodeTransformer):
     def __init__(self) -> None:
         self.pre_inserted = False
         self.post_inserted = False
+        self.no_embed_inserted = False
+
+    def visit_If(self, node: ast.If) -> Any:
+        node = self.generic_visit(node)
+        if not self.no_embed_inserted and _is_embeds_none(node.test):
+            node.body.insert(0, _capture_no_embed_statement())
+            self.no_embed_inserted = True
+        return node
 
     def visit_Assign(self, node: ast.Assign) -> Any:
         node = self.generic_visit(node)
@@ -281,13 +342,24 @@ def _patch_match(cls: Any) -> None:
     injector = _BoundaryInjector()
     tree = injector.visit(tree)
     ast.fix_missing_locations(tree)
-    if not injector.pre_inserted or not injector.post_inserted:
+    if (
+        not injector.pre_inserted
+        or not injector.post_inserted
+        or not injector.no_embed_inserted
+    ):
         raise RuntimeError(
             "COV V10 boundary injection failed: "
-            f"pre={injector.pre_inserted}, post={injector.post_inserted}"
+            f"pre={injector.pre_inserted}, post={injector.post_inserted}, "
+            f"no_embed={injector.no_embed_inserted}"
         )
     namespace = dict(original.__globals__)
-    namespace.update({"__v10_cov_prepare": _prepare, "__v10_cov_commit": _commit})
+    namespace.update(
+        {
+            "__v10_cov_prepare": _prepare,
+            "__v10_cov_commit": _commit,
+            "__v10_cov_capture_no_embed": _capture_no_embed,
+        }
+    )
     local_namespace: dict[str, Any] = {}
     exec(compile(tree, inspect.getsourcefile(original) or "covtrack.py", "exec"), namespace, local_namespace)
     patched = local_namespace.get("match")
