@@ -607,6 +607,49 @@ def _is_track_features_not_none(node: ast.AST) -> bool:
     )
 
 
+def _is_legacy_test_filename(node: ast.AST) -> bool:
+    """Match pinned COV's Test-incompatible ``filename[index('val'):]``.
+
+    The pinned release passes this sliced value to ``OVTracker.match`` even
+    for TAO Test frames, where no ``val`` component exists.  The maintained
+    COV checkout contains the one-line equivalent fix: pass the already
+    resolved ``img_name``.  Keep that compatibility fix narrow and explicit
+    so an unrelated filename expression can never be rewritten silently.
+    """
+
+    if not isinstance(node, ast.Subscript):
+        return False
+    slice_node = node.slice
+    if not isinstance(slice_node, ast.Slice):
+        return False
+    if slice_node.upper is not None or slice_node.step is not None:
+        return False
+    lower = slice_node.lower
+    if not isinstance(lower, ast.Call) or len(lower.args) != 1:
+        return False
+    if lower.keywords or not isinstance(lower.args[0], ast.Constant):
+        return False
+    if lower.args[0].value != "val":
+        return False
+    if not isinstance(lower.func, ast.Attribute) or lower.func.attr != "index":
+        return False
+    return ast.dump(lower.func.value, include_attributes=False) == ast.dump(
+        node.value, include_attributes=False
+    )
+
+
+def _is_tracker_match_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "match"
+        and isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "tracker"
+        and isinstance(node.func.value.value, ast.Name)
+        and node.func.value.value.id == "self"
+    )
+
+
 class _BoundaryInjector(ast.NodeTransformer):
     def __init__(self) -> None:
         self.pre_inserted = False
@@ -638,6 +681,18 @@ class _BoundaryInjector(ast.NodeTransformer):
 class _ModelBoundaryInjector(ast.NodeTransformer):
     def __init__(self) -> None:
         self.capture_inserted = False
+        self.legacy_filename_rewrites = 0
+
+    def visit_Call(self, node: ast.Call) -> Any:
+        node = self.generic_visit(node)
+        if _is_tracker_match_call(node):
+            for keyword in node.keywords:
+                if keyword.arg == "filename" and _is_legacy_test_filename(keyword.value):
+                    # This is the exact maintained-COV compatibility change:
+                    # no detector/feature/association value is changed.
+                    keyword.value = ast.Name(id="img_name", ctx=ast.Load())
+                    self.legacy_filename_rewrites += 1
+        return node
 
     def visit_If(self, node: ast.If) -> Any:
         node = self.generic_visit(node)
@@ -697,6 +752,11 @@ def _patch_model_simple_test(cls: Any) -> None:
     ast.fix_missing_locations(tree)
     if not injector.capture_inserted:
         raise RuntimeError("COV V10 model boundary injection failed")
+    if injector.legacy_filename_rewrites != 1:
+        raise RuntimeError(
+            "COV V10 pinned Test filename compatibility injection failed: "
+            f"rewrites={injector.legacy_filename_rewrites}"
+        )
     namespace = dict(original.__globals__)
     namespace["__v10_cov_capture_no_track_features"] = _capture_no_track_features
     local_namespace: dict[str, Any] = {}

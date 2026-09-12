@@ -1,13 +1,42 @@
+import ast
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from tempotrack_v10.covtrack_runtime import (
+    _ModelBoundaryInjector,
     _capture_no_embed,
     _capture_no_track_features,
     _maybe_export_cov_detections,
 )
+
+
+def test_pinned_cov_test_filename_adapter_is_exact_and_narrow():
+    tree = ast.parse(
+        """
+def simple_test(self, img, img_metas, rescale=False):
+    img_name = img_metas[0]['filename']
+    if track_feats is not None:
+        return self.tracker.match(
+            bboxes=det_bboxes,
+            filename=img_metas[0]['filename'][img_metas[0]['filename'].index('val'):]
+        )
+"""
+    )
+    injector = _ModelBoundaryInjector()
+    injector.visit(tree)
+    assert injector.legacy_filename_rewrites == 1
+    call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "match"
+    )
+    filename = next(keyword for keyword in call.keywords if keyword.arg == "filename")
+    assert isinstance(filename.value, ast.Name)
+    assert filename.value.id == "img_name"
 
 
 def test_missing_export_environment_is_a_true_noop(tmp_path, monkeypatch):
