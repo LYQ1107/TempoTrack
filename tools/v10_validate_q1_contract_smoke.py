@@ -60,6 +60,84 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+_POST_SMOKE_NON_RUNTIME_PATHS = frozenset(
+    {
+        # These tools validate or resume an already materialized smoke; they
+        # are not imported by the stream/runtime process that produced it.
+        "tools/v10_validate_q1_contract_smoke.py",
+        "tools/v10_v104_resume_primary_stage.py",
+    }
+)
+
+
+def _source_head_binding(repo: Path, receipt_head: Any) -> dict[str, Any]:
+    """Bind the smoke to runtime source, while allowing audit-only commits.
+
+    A validator-path repair is necessarily committed after a smoke has been
+    produced: re-running the full stream solely to change the validator's
+    own import path would not add runtime evidence.  The receipt still binds
+    the actual overlay/runtime files by SHA below.  We therefore accept a
+    later descendant only when its complete diff is limited to the two
+    explicitly non-runtime tools above.  Any runtime/config/data change
+    remains fail-closed.
+    """
+    expected = str(receipt_head or "")
+    actual = subprocess.check_output(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if expected == actual:
+        return {
+            "bound": True,
+            "exact": True,
+            "receipt_head": expected,
+            "current_head": actual,
+            "delta_paths": [],
+            "allowed_delta_paths": [],
+        }
+    if not expected:
+        return {
+            "bound": False,
+            "exact": False,
+            "receipt_head": expected,
+            "current_head": actual,
+            "delta_paths": [],
+            "allowed_delta_paths": [],
+            "reason": "receipt has no source head",
+        }
+    ancestor = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", expected, actual],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        return {
+            "bound": False,
+            "exact": False,
+            "receipt_head": expected,
+            "current_head": actual,
+            "delta_paths": [],
+            "allowed_delta_paths": [],
+            "reason": "receipt head is not an ancestor of current source",
+        }
+    changed = subprocess.check_output(
+        ["git", "-C", str(repo), "diff", "--name-only", expected, actual],
+        text=True,
+    )
+    delta_paths = sorted(path for path in changed.splitlines() if path)
+    allowed = sorted(set(delta_paths).intersection(_POST_SMOKE_NON_RUNTIME_PATHS))
+    disallowed = sorted(set(delta_paths) - _POST_SMOKE_NON_RUNTIME_PATHS)
+    return {
+        "bound": not disallowed and bool(delta_paths),
+        "exact": False,
+        "receipt_head": expected,
+        "current_head": actual,
+        "delta_paths": delta_paths,
+        "allowed_delta_paths": allowed,
+        "disallowed_delta_paths": disallowed,
+    }
+
+
 def _runtime_contract_sha_from_config(path: Path) -> str | None:
     if not path.is_file():
         return None
@@ -143,9 +221,8 @@ def validate(
     diagnostics_path = trial / "diagnostics.json"
     stream_manifest_path = trial / "stream" / "stream_manifest.json"
     test_gates = _run_contract_tests(repo, pytest_python)
-    source_head = subprocess.check_output(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
-    ).strip()
+    source_binding = _source_head_binding(repo, receipt.get("repo", {}).get("head"))
+    source_head = source_binding["current_head"]
 
     # The exact Q1 prefilter is the same scalar operation used by training:
     # cosine(query, candidate's last real observation).  The production
@@ -183,7 +260,7 @@ def validate(
     teta_dependency_pass = _validate_teta_dependency(receipt)
     gates = {
         "receipt_completed": receipt.get("status") == "COMPLETED",
-        "source_head_bound": receipt.get("repo", {}).get("head") == source_head,
+        "source_head_bound": source_binding["bound"],
         "checkpoint_feature_config_present": bool(feature_config),
         "expected_q_is_one": int(feature_config["query_observations"]) == 1,
         "actual_q_is_one": diagnostics.get("reranker_actual_query_observations") == 1,
@@ -241,6 +318,7 @@ def validate(
         "protocol": "COV_Q1_FEATURE_CONTRACT_SMOKE",
         "repo": str(repo),
         "repo_head": source_head,
+        "source_head_binding": source_binding,
         "trial": str(trial),
         "annotation": str(annotation),
         "annotation_sha256": _sha256(annotation),
