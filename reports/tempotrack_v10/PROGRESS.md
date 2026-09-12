@@ -789,3 +789,16 @@ failure.
   reused. The 11,500-frame Test subset annotation remains unchanged at SHA
   `6a1245c5bcc2e9838caf3c5f545256a216ff52003eafd9c47f64c95de3118938`; its
   manifest now explicitly records the Test-tuned GT provenance flags.
+
+- After the PASS gate, the new independent Test subset search started at
+  `2026-09-12 21:36:33 CST` under coordinator PID `8209`:
+  `/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_test_q1_fixed_20260912`.
+  It has 12 post-contract trial specs (spec SHA
+  `be5c4209aaf27c61a8edba5fdebacf2d7d77db9abb72f4406140d771c4bd64fd`) and
+  uses the current-core config SHA
+  `966dab191f541fb80b452f2981eacedb812825a3374c8c737f6c1458eb43fb6a`.
+  Ten independent workers are RUNNING on GPUs 0–9 and two are PENDING for
+  work-steal; all have separate trial roots and receipts. Current RAM
+  available is about 21 GB after launch, with each new worker adding about
+  3.1 GB VRAM on top of the diagnostic workers; no external process was
+  signalled.
