@@ -17,6 +17,9 @@ try:
         _load_search_plan,
         _sha256,
         _validate_contract_gate,
+        _resolve_teta_source_root,
+        _teta_dependency,
+        _run_teta_import_preflight,
         default_trial_specs,
         _git_value,
         _write_json,
@@ -35,6 +38,9 @@ except ModuleNotFoundError:  # import-safe when loaded as tools.v10_run_covtrack
     _load_search_plan = _module._load_search_plan
     _sha256 = _module._sha256
     _validate_contract_gate = _module._validate_contract_gate
+    _resolve_teta_source_root = _module._resolve_teta_source_root
+    _teta_dependency = _module._teta_dependency
+    _run_teta_import_preflight = _module._run_teta_import_preflight
     default_trial_specs = _module.default_trial_specs
     _git_value = _module._git_value
     _write_json = _module._write_json
@@ -89,6 +95,9 @@ def _build_command(
         "--evaluator-cores",
         str(args.evaluator_cores),
     ]
+    teta_source_root = getattr(args, "teta_source_root", None)
+    if teta_source_root:
+        command.extend(["--teta-source-root", str(Path(teta_source_root).resolve())])
     if args.disabled_overlay:
         command.append("--disabled-overlay")
     if requested_trial_id and requested_trial_id != str(spec["trial_id"]):
@@ -140,6 +149,7 @@ def _plan_binding(plan: Any) -> dict[str, Any]:
         "sha256": plan.sha256,
         "protocol": plan.protocol,
         "unbiased_test": plan.unbiased_test,
+        "contract_mode": plan.contract_mode,
         "contract_gate": plan.contract_gate,
         "contract_gate_sha256": plan.contract_gate_sha256,
         "threshold_source": plan.threshold_source,
@@ -243,6 +253,23 @@ def _validate_expected_inputs(
     expected = dict(plan.expected_inputs)
     if not expected:
         return
+    teta_keys = {"teta_source_root", "teta_init_sha256", "teta_git_commit"}
+    if teta_keys.intersection(expected):
+        teta_source_root = getattr(args, "teta_source_root", None)
+        if not teta_source_root:
+            raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_SOURCE_ROOT_MISSING")
+        dependency = _teta_dependency(teta_source_root)
+        if dependency is None:
+            raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_SOURCE_ROOT_INVALID")
+        if expected.get("teta_source_root") != dependency["source_root"]:
+            raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_ROOT_MISMATCH")
+        if expected.get("teta_init_sha256") != dependency["init_sha256"]:
+            raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_INIT_MISMATCH")
+        if (
+            expected.get("teta_git_commit") is not None
+            and expected.get("teta_git_commit") != dependency["git_commit"]
+        ):
+            raise RuntimeError("SEARCH_EXPECTED_INPUT_TETA_COMMIT_MISMATCH")
     # A commit hash alone does not prove that the pinned external checkout is
     # the source that the worker will import.  Hardened plans must launch only
     # from a clean checkout; the already-running legacy wave has no
@@ -336,6 +363,19 @@ def run(args: argparse.Namespace) -> int:
     requested = {value for value in args.trial_ids.split(",") if value} if args.trial_ids else None
     plan_path = Path(args.spec_file).resolve() if args.spec_file else None
     plan = _load_search_plan(plan_path)
+    teta_dependency = None
+    teta_preflight = None
+    teta_source_root = getattr(args, "teta_source_root", None)
+    if plan.contract_mode == "hardened" and not teta_source_root:
+        raise RuntimeError("TETA_SOURCE_ROOT_REQUIRED")
+    if teta_source_root:
+        _resolve_teta_source_root(teta_source_root)
+        teta_dependency = _teta_dependency(teta_source_root)
+        teta_preflight = _run_teta_import_preflight(
+            stream_python=args.stream_python,
+            source=Path(args.source).resolve(),
+            teta_source_root=teta_source_root,
+        )
     contract_gate = None
     reranker_checkpoint_sha256 = None
     if not args.disabled_overlay:
@@ -368,6 +408,11 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("--gpus must contain at least one physical GPU index")
     root = Path(args.output_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    if teta_dependency is not None:
+        _write_json(
+            root / "teta_import_preflight.json",
+            {"dependency": teta_dependency, "preflight": teta_preflight},
+        )
     status_path = root / "coordinator_status.json"
     if status_path.exists() and not args.resume:
         raise FileExistsError(f"coordinator status already exists; use --resume: {status_path}")
@@ -502,6 +547,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--evaluator-python",
         default="/home/lwr/anaconda3/envs/masaenv/bin/python",
+    )
+    parser.add_argument(
+        "--teta-source-root",
+        help="Import parent containing the pinned teta package (for example .../tet/teta)",
     )
     parser.add_argument("--disabled-overlay", action="store_true")
     parser.add_argument("--resume", action="store_true")

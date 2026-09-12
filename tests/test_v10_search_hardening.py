@@ -96,6 +96,8 @@ def test_v2_search_plan_preserves_expected_input_binding():
     assert plan.expected_inputs["external_cov_commit"] == (
         "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b"
     )
+    assert plan.contract_mode == "hardened"
+    assert plan.expected_inputs["teta_source_root"].endswith("/LLM/tet/teta")
 
 
 def test_search_plan_bad_gate_hash_fails(tmp_path):
@@ -112,6 +114,62 @@ def test_search_plan_nonpass_gate_fails(tmp_path):
     plan = module._load_search_plan(plan_path)
     with pytest.raises(RuntimeError, match="SEARCH_CONTRACT_GATE_NOT_PASS"):
         module._validate_contract_gate(plan)
+
+
+def test_hardened_gate_requires_bootstrap_counter(tmp_path):
+    module = _plan_module()
+    gate_path = tmp_path / "gate.json"
+    gate_path.write_text(json.dumps(_valid_gate()), encoding="utf-8")
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "protocol": "TEST_TUNED_MODEL_SPECIFIC",
+                "unbiased_test": False,
+                "contract_mode": "hardened",
+                "contract_gate": str(gate_path),
+                "contract_gate_sha256": hashlib.sha256(gate_path.read_bytes()).hexdigest(),
+                "trials": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    plan = module._load_search_plan(plan_path)
+    with pytest.raises(RuntimeError, match="SEARCH_CONTRACT_BOOTSTRAP_COUNTER_MISSING"):
+        module._validate_contract_gate(plan)
+
+
+def test_teta_source_root_requires_real_importable_package(tmp_path):
+    module = _plan_module()
+    with pytest.raises(RuntimeError, match="TETA_SOURCE_ROOT_INVALID"):
+        module._resolve_teta_source_root(tmp_path)
+    root = tmp_path / "teta"
+    package = root / "teta"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("__version__ = 'test'\n", encoding="utf-8")
+    resolved = module._resolve_teta_source_root(root)
+    assert resolved == (root.resolve(), (package / "__init__.py").resolve())
+
+
+def test_runtime_env_places_teta_import_parent_before_ambient_path(tmp_path):
+    module = _plan_module()
+    root = tmp_path / "teta"
+    package = root / "teta"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("__version__ = 'test'\n", encoding="utf-8")
+    args = SimpleNamespace(
+        gpu="0",
+        img_prefix=str(tmp_path / "frames"),
+        teta_source_root=str(root),
+    )
+    env = module._runtime_env(
+        args,
+        tmp_path / "repo",
+        tmp_path / "source",
+        tmp_path / "trial",
+        tmp_path / "tempo.yaml",
+    )
+    assert env["PYTHONPATH"].split(":")[0] == str(root.resolve())
 
 
 def _diagnostics(**updates):

@@ -50,6 +50,32 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _runtime_contract_sha_from_config(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(value, dict):
+        return None
+    tempo = value.get("tempo", value)
+    if not isinstance(tempo, dict):
+        return None
+    raw = tempo.get("runtime_contract_sha")
+    return None if raw is None else str(raw)
+
+
+def _validate_teta_dependency(receipt: dict[str, Any]) -> bool:
+    dependency = receipt.get("teta_dependency")
+    preflight = receipt.get("teta_import_preflight")
+    if not isinstance(dependency, dict) or not isinstance(preflight, dict):
+        return False
+    init_file = Path(str(dependency.get("init_file", "")))
+    if not init_file.is_file():
+        return False
+    if dependency.get("init_sha256") != _sha256(init_file):
+        return False
+    return preflight.get("status") == "PASS" and int(preflight.get("returncode", -1)) == 0
+
+
 def _run_contract_tests(repo: Path, pytest_python: Path) -> dict[str, Any]:
     nodes = [
         "tests/test_v10_reranker_contract.py::test_q1_online_prefilter_matches_training_last_observation_cosine",
@@ -77,6 +103,7 @@ def validate(
     checkpoint: Path,
     output: Path,
     pytest_python: Path,
+    expected_runtime_contract_sha: str | None = None,
 ) -> dict[str, Any]:
     receipt = _load_json(trial / "receipt.json")
     diagnostics = _load_json(trial / "diagnostics.json")
@@ -114,8 +141,24 @@ def validate(
     if tempo_config and Path(tempo_config).is_file():
         tempo_doc = yaml.safe_load(Path(tempo_config).read_text(encoding="utf-8")) or {}
         runtime_contract_sha = tempo_doc.get("runtime_contract_sha")
+    expected_runtime_contract_sha = (
+        expected_runtime_contract_sha
+        or _runtime_contract_sha_from_config(
+            Path(str(receipt.get("inputs", {}).get("base_config", "")))
+        )
+        or _runtime_contract_sha_from_config(
+            Path(str(receipt.get("inputs", {}).get("tempo_config", "")))
+        )
+    )
     overlay_sha = receipt.get("inputs", {}).get("overlay_sha256")
     runtime_sha = receipt.get("inputs", {}).get("runtime_sha256")
+    decision_frames = int(diagnostics.get("frames", -1))
+    capability_total = (
+        sum(int(value) for value in capability_counts.values())
+        if isinstance(capability_counts, dict)
+        else -1
+    )
+    teta_dependency_pass = _validate_teta_dependency(receipt)
     gates = {
         "receipt_completed": receipt.get("status") == "COMPLETED",
         "source_head_bound": receipt.get("repo", {}).get("head") == source_head,
@@ -137,9 +180,15 @@ def validate(
         "context_k_64": diagnostics.get("reranker_context_candidate_top_k") == int(feature_config["candidate_top_k"]) == 64,
         "decision_k_runtime_bound": diagnostics.get("reranker_decision_candidate_top_k") == expected_decision_k,
         "context_contract_stable": diagnostics.get("reranker_context_contract_mismatch") is False,
-        "capability_all_frames": capability_counts == {"FULL_Q1_RERANKER_RUNTIME_ACTIVE": frame_count},
-        "stream_manifest_pass": stream_manifest.get("status") == "PASS" and int(stream_manifest.get("frames", -1)) == frame_count,
-        "diagnostic_frame_count": int(diagnostics.get("frames", -1)) == frame_count,
+        "diagnostic_decision_frames_positive": decision_frames > 0,
+        "capability_covers_all_decision_frames": capability_total == decision_frames,
+        "all_decision_frames_are_full_q1": capability_counts == {
+            "FULL_Q1_RERANKER_RUNTIME_ACTIVE": decision_frames
+        },
+        "stream_covers_all_annotation_frames": (
+            stream_manifest.get("status") == "PASS"
+            and int(stream_manifest.get("frames", -1)) == frame_count
+        ),
         "prediction_is_nonempty": len(rows) > 0,
         "annotation_binding": receipt.get("inputs", {}).get("annotation_sha256") == _sha256(annotation),
         "prediction_binding": receipt.get("outputs", {}).get("prediction_sha256") == _sha256(prediction),
@@ -147,8 +196,21 @@ def validate(
         "stream_manifest_binding": receipt.get("outputs", {}).get("stream_manifest_sha256") == _sha256(stream_manifest_path),
         "official_evaluator_parsed": receipt.get("metrics", {}).get("status") == "PARSED",
         "runtime_contract_sha_present": bool(runtime_contract_sha),
+        "runtime_contract_sha_matches_expected": (
+            bool(expected_runtime_contract_sha)
+            and runtime_contract_sha == expected_runtime_contract_sha
+        ),
         "overlay_sha_present": bool(overlay_sha),
+        "overlay_sha_matches_repo": (
+            bool(overlay_sha)
+            and overlay_sha == _sha256(repo / "tempotrack_v10/overlay.py")
+        ),
         "runtime_sha_present": bool(runtime_sha),
+        "runtime_sha_matches_repo": (
+            bool(runtime_sha)
+            and runtime_sha == _sha256(repo / "tempotrack_v10/covtrack_runtime.py")
+        ),
+        "teta_dependency_provenance": teta_dependency_pass,
     }
     result = {
         "schema_version": 1,
@@ -170,8 +232,11 @@ def validate(
         "reranker_missing_evidence": int(diagnostics.get("reranker_missing_evidence", -1)),
         "reranker_native_memo_bootstrap_count": bootstrap_count,
         "runtime_contract_sha": runtime_contract_sha,
+        "expected_runtime_contract_sha": expected_runtime_contract_sha,
         "overlay_sha256": overlay_sha,
         "runtime_sha256": runtime_sha,
+        "teta_dependency": receipt.get("teta_dependency"),
+        "teta_import_preflight": receipt.get("teta_import_preflight"),
         "score_quantiles": diagnostics.get("score_quantiles"),
         "margin_quantiles": diagnostics.get("margin_quantiles"),
         "prediction_sha256": _sha256(prediction),
@@ -193,6 +258,7 @@ def main() -> int:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pytest-python", type=Path, required=True)
+    parser.add_argument("--expected-runtime-contract-sha")
     args = parser.parse_args()
     result = validate(
         repo=args.repo.resolve(),
@@ -201,6 +267,7 @@ def main() -> int:
         checkpoint=args.checkpoint.resolve(),
         output=args.output.resolve(),
         pytest_python=args.pytest_python.resolve(),
+        expected_runtime_contract_sha=args.expected_runtime_contract_sha,
     )
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["status"] == "PASS" else 1

@@ -41,6 +41,7 @@ class SearchPlan:
     sha256: str | None
     protocol: str
     unbiased_test: bool
+    contract_mode: str
     contract_gate: str | None
     contract_gate_sha256: str | None
     threshold_source: str | None
@@ -73,6 +74,94 @@ def _git_value(path: Path, *arguments: str) -> str | None:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def _resolve_teta_source_root(value: str | Path | None) -> tuple[Path, Path] | None:
+    """Resolve the import parent and real ``teta/__init__.py``.
+
+    The audited checkout is a repository at ``.../tet`` whose importable
+    package is nested at ``.../tet/teta/teta``.  The CLI therefore receives
+    the directory that contains the importable ``teta`` package, not the git
+    repository root.  Keeping this check in the runner prevents a namespace
+    package or an unrelated installed ``teta`` from silently satisfying the
+    dependency.
+    """
+
+    if value is None or str(value).strip() == "":
+        return None
+    root = Path(value).expanduser().resolve()
+    init_file = root / "teta" / "__init__.py"
+    if not init_file.is_file():
+        raise RuntimeError(
+            "TETA_SOURCE_ROOT_INVALID: expected importable package at "
+            f"{init_file}"
+        )
+    return root, init_file
+
+
+def _teta_dependency(value: str | Path | None) -> dict[str, Any] | None:
+    resolved = _resolve_teta_source_root(value)
+    if resolved is None:
+        return None
+    root, init_file = resolved
+    git_root = _git_value(root, "rev-parse", "--show-toplevel")
+    return {
+        "source_root": str(root),
+        "init_file": str(init_file),
+        "init_sha256": _sha256(init_file),
+        "git_root": git_root,
+        "git_commit": _git_value(root, "rev-parse", "HEAD"),
+        "git_status": _git_value(root, "status", "--porcelain"),
+    }
+
+
+def _run_teta_import_preflight(
+    *,
+    stream_python: str | Path,
+    source: Path,
+    teta_source_root: str | Path,
+) -> dict[str, Any]:
+    """Use the exact stream interpreter to import TETA and COV datasets."""
+
+    resolved = _resolve_teta_source_root(teta_source_root)
+    if resolved is None:  # pragma: no cover - caller enforces this
+        raise RuntimeError("TETA_SOURCE_ROOT_REQUIRED")
+    root, _ = resolved
+    command = [
+        str(stream_python),
+        "-c",
+        (
+            "import teta; print('teta:', teta.__file__); "
+            "import ovtrack.datasets; print('ovtrack.datasets:', ovtrack.datasets.__file__)"
+        ),
+    ]
+    env = os.environ.copy()
+    path_entries = [str(root), str(source)]
+    old = env.get("PYTHONPATH")
+    if old:
+        path_entries.append(old)
+    env["PYTHONPATH"] = os.pathsep.join(path_entries)
+    result = subprocess.run(
+        command,
+        cwd=str(source),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    output = {
+        "status": "PASS" if result.returncode == 0 else "FAIL",
+        "returncode": int(result.returncode),
+        "command": command,
+        "cwd": str(source),
+        "stdout": result.stdout[-4000:],
+        "stderr": result.stderr[-4000:],
+    }
+    if result.returncode != 0:
+        raise RuntimeError(
+            "TETA_IMPORT_PREFLIGHT_FAILED: "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+    return output
 
 
 def _resource_snapshot(gpu: str) -> dict[str, Any]:
@@ -169,6 +258,7 @@ def _load_search_plan(path: Path | None) -> SearchPlan:
             sha256=None,
             protocol="UNBOUND_DEFAULTS",
             unbiased_test=False,
+            contract_mode="legacy",
             contract_gate=None,
             contract_gate_sha256=None,
             threshold_source=None,
@@ -184,6 +274,7 @@ def _load_search_plan(path: Path | None) -> SearchPlan:
             sha256=_sha256(path),
             protocol="LEGACY_LIST",
             unbiased_test=False,
+            contract_mode="legacy",
             contract_gate=None,
             contract_gate_sha256=None,
             threshold_source=None,
@@ -207,6 +298,7 @@ def _load_search_plan(path: Path | None) -> SearchPlan:
         sha256=_sha256(path),
         protocol=str(raw.get("protocol", "")),
         unbiased_test=bool(raw.get("unbiased_test", False)),
+        contract_mode=str(raw.get("contract_mode", "legacy")),
         contract_gate=_resolve_plan_reference(raw.get("contract_gate"), path),
         contract_gate_sha256=(
             None if raw.get("contract_gate_sha256") is None else str(raw["contract_gate_sha256"])
@@ -226,6 +318,8 @@ def _load_specs(path: Path | None) -> list[dict[str, Any]]:
 
 
 def _validate_contract_gate(plan: SearchPlan) -> dict[str, Any]:
+    if plan.contract_mode not in {"legacy", "hardened"}:
+        raise RuntimeError(f"SEARCH_CONTRACT_MODE_INVALID: {plan.contract_mode}")
     if not plan.contract_gate:
         raise RuntimeError("SEARCH_CONTRACT_GATE_MISSING")
     gate_path = Path(plan.contract_gate).resolve()
@@ -248,10 +342,11 @@ def _validate_contract_gate(plan: SearchPlan) -> dict[str, Any]:
         raise RuntimeError("SEARCH_CONTRACT_CONTEXT_K_NOT_64")
     if int(gate.get("reranker_missing_evidence", -1)) != 0:
         raise RuntimeError("SEARCH_CONTRACT_MISSING_EVIDENCE")
-    if (
-        "reranker_native_memo_bootstrap_count" in gate
-        and int(gate["reranker_native_memo_bootstrap_count"]) != 0
-    ):
+    bootstrap_key = "reranker_native_memo_bootstrap_count"
+    if bootstrap_key not in gate:
+        if plan.contract_mode == "hardened":
+            raise RuntimeError("SEARCH_CONTRACT_BOOTSTRAP_COUNTER_MISSING")
+    elif int(gate[bootstrap_key]) != 0:
         raise RuntimeError("SEARCH_CONTRACT_NATIVE_MEMO_BOOTSTRAP")
     return gate
 
@@ -332,6 +427,12 @@ def _runtime_env(args: argparse.Namespace, repo: Path, source: Path, trial_root:
         }
     )
     pythonpath = [str(repo), str(source), "/data1/LWR/vranlee/LLM/scalabel-scalabel-evalAPI"]
+    teta_source_root = getattr(args, "teta_source_root", None)
+    if teta_source_root:
+        resolved_teta = _resolve_teta_source_root(teta_source_root)
+        if resolved_teta is None:  # pragma: no cover - guarded above
+            raise RuntimeError("TETA_SOURCE_ROOT_REQUIRED")
+        pythonpath.insert(0, str(resolved_teta[0]))
     old = env.get("PYTHONPATH")
     if old:
         pythonpath.append(old)
@@ -456,11 +557,14 @@ def _worker_search_plan_binding(args: argparse.Namespace) -> dict[str, Any] | No
         plan = _load_search_plan(plan_path)
         if plan.sha256 != args.search_plan_sha256:
             raise RuntimeError("SEARCH_PLAN_HASH_MISMATCH")
+        if plan.contract_mode == "hardened" and not getattr(args, "teta_source_root", None):
+            raise RuntimeError("TETA_SOURCE_ROOT_REQUIRED")
         return {
             "path": str(plan_path),
             "sha256": str(plan.sha256),
             "contract_gate": None,
             "contract_gate_sha256": None,
+            "contract_mode": plan.contract_mode,
             "threshold_source": plan.threshold_source,
             "protocol": plan.protocol,
             "unbiased_test": plan.unbiased_test,
@@ -478,6 +582,8 @@ def _worker_search_plan_binding(args: argparse.Namespace) -> dict[str, Any] | No
         raise RuntimeError("SEARCH_PLAN_BINDING_INCOMPLETE")
     plan_path = Path(args.search_plan).expanduser().resolve()
     plan = _load_search_plan(plan_path)
+    if plan.contract_mode == "hardened" and not getattr(args, "teta_source_root", None):
+        raise RuntimeError("TETA_SOURCE_ROOT_REQUIRED")
     if plan.sha256 != args.search_plan_sha256:
         raise RuntimeError("SEARCH_PLAN_HASH_MISMATCH")
     gate_path = Path(args.contract_gate).expanduser().resolve()
@@ -493,6 +599,7 @@ def _worker_search_plan_binding(args: argparse.Namespace) -> dict[str, Any] | No
         "sha256": str(plan.sha256),
         "contract_gate": str(gate_path),
         "contract_gate_sha256": str(plan.contract_gate_sha256),
+        "contract_mode": plan.contract_mode,
         "threshold_source": plan.threshold_source,
         "protocol": plan.protocol,
         "unbiased_test": plan.unbiased_test,
@@ -571,6 +678,15 @@ def run_trial(args: argparse.Namespace) -> int:
     spec = _spec_from_args(args)
     config_path = trial_root / "tempo.yaml"
     config_data = _materialize_config(base_config, config_path, spec, args.disabled_overlay)
+    teta_source_root = getattr(args, "teta_source_root", None)
+    teta_dependency = _teta_dependency(teta_source_root)
+    teta_preflight = None
+    if teta_source_root:
+        teta_preflight = _run_teta_import_preflight(
+            stream_python=args.stream_python,
+            source=source,
+            teta_source_root=teta_source_root,
+        )
     env = _runtime_env(args, repo, source, trial_root, config_path)
     stream_command = _stream_command(args, repo, source, trial_root)
     evaluate_command = _evaluate_command(args, repo, trial_root)
@@ -598,6 +714,8 @@ def run_trial(args: argparse.Namespace) -> int:
             "path": str(source),
             "commit": _git_value(source, "rev-parse", "HEAD"),
         },
+        "teta_dependency": teta_dependency,
+        "teta_import_preflight": teta_preflight,
         "inputs": {
             "annotation": str(annotation),
             "annotation_sha256": _sha256(annotation),
@@ -620,6 +738,9 @@ def run_trial(args: argparse.Namespace) -> int:
             "evaluate": evaluate_command,
             "stream_cwd": str(source),
             "evaluate_cwd": str(repo),
+            "teta_import_preflight": (
+                None if teta_preflight is None else teta_preflight["command"]
+            ),
         },
         "gpu": str(args.gpu),
         "python": {
@@ -629,6 +750,15 @@ def run_trial(args: argparse.Namespace) -> int:
         "resources_start": _resource_snapshot(str(args.gpu)),
         "started_at_unix": started,
     }
+    if teta_dependency is not None:
+        receipt["inputs"].update(
+            {
+                "teta_source_root": teta_dependency["source_root"],
+                "teta_init_file": teta_dependency["init_file"],
+                "teta_init_sha256": teta_dependency["init_sha256"],
+                "teta_git_commit": teta_dependency["git_commit"],
+            }
+        )
     if args.requested_trial_id:
         receipt["requested_trial_id"] = args.requested_trial_id
     if search_plan_binding is not None:
@@ -742,6 +872,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--evaluator-python",
         default="/home/lwr/anaconda3/envs/masaenv/bin/python",
+    )
+    parser.add_argument(
+        "--teta-source-root",
+        help="Import parent containing the pinned teta package (for example .../tet/teta)",
     )
     parser.add_argument("--evaluator-name", default="COV_V10_TEMPO")
     parser.add_argument("--evaluator-cores", type=int, default=8)

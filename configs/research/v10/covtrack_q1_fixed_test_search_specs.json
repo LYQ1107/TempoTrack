@@ -1,6 +1,7 @@
 {
   "protocol": "TEST_TUNED_MODEL_SPECIFIC",
   "unbiased_test": false,
+  "contract_mode": "legacy",
   "contract_gate": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_contract_smoke_final_20260912/contract_gate.json",
   "contract_gate_sha256": "ec88c46753d897d2f973ec2cc4e771b91e4c3ff2ee0b0f49d1cf36c6da306906",
   "threshold_source": "post_fix_q1_2video_smoke",
