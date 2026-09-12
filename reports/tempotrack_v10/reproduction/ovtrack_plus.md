@@ -79,3 +79,17 @@ real attempt.
 Pending native output completion. No TETA, LocA, AssocA, ClsA, Base, or Novel
 number is filled from another source or from the task-book target.
 
+## Completed Test native receipt — 2026-09-12
+
+The six complete-video Test shards were merged and passed the official TETA
+evaluator. At TETA50, the measured rows are `Base=28.063/53.714/16.029/14.446`
+and `Novel=20.289/45.359/13.596/1.914`, in
+`TETA/LocA/AssocA/ClsA` order. The merged prediction has 52,155 images and
+3,048,773 rows; its manifest SHA256 is
+`ec88b29fc62dffe198d0b62f70640d898f83fd0b5dd4a139caa1123f2daa8da9`.
+Summary:
+`/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus/test_merged/`
+`evaluation_native/OVTrackPlus_Test_native/teta_summary_results.pth`.
+This is the OVTrack+ native baseline, not a TempoTrack result. The Val native
+pickle conversion remains blocked by the preserved OOM attempt; the original
+pickle was not deleted.

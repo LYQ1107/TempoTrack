@@ -328,3 +328,109 @@ failure.
   prediction artifact and without a traceback in its log. It is recorded as
   `FAILED_NO_ARTIFACT_NO_TRACEBACK`, not as a result; no restart has been
   issued while the current recovery/COV jobs occupy the available resources.
+
+## Live execution snapshot — 2026-09-12 06:22 CST
+
+- The V10.3 source/config correction is pushed and clean at integration commit
+  `5d3163e29a79cdd0f694a0990a44d4a9e1000b96`; the remote branch resolves to
+  the same SHA. The affected production suite remains `40 passed in 2.52s`.
+- Official OVTrack recovery is still healthy: Test workers `11075--11078`
+  remain on GPUs `6--9`, with observed progress approximately
+  `10.73k/13.05k`, `10.94k/13.05k`, `10.51k/13.03k`, and `10.81k/13.02k`.
+  The complete Val shard predictions already exist. A separate Val-only
+  finalizer (PID `32877`) is merging those artifacts and running the pinned
+  evaluator; no metric is recorded until its official summary is present.
+- COVTrack exact paper-override Val replay remains healthy on GPU1 (PID
+  `25090`, child `25177`), observed at `32,634/36,375` images. Its effective
+  values remain `0.37/50/0.4/confused_features=True/vis=False/max_per_img=80/`
+  `max_fusion_ratio=2.0`, with validation-only categories. No metric is
+  recorded before the final JSON and official summary are complete.
+- OVTrack+ Test has been restarted only as a single complete-video shard
+  (`237` videos, `8,764` images) on GPU0, in an attached monitored session;
+  the previous full-set OOM is preserved as `FAILED_NO_ARTIFACT_NO_TRACEBACK`.
+  The new shard is producing predictions with bounded memory; it is not a
+  full Test result yet. No external process has been signalled.
+
+## COVTrack Val result and low-memory recovery — 2026-09-12 06:37 CST
+
+## Official baseline receipts and resumed Test lanes — 2026-09-12 06:48–06:52 CST
+
+- The standalone official OVTrack Val evaluator completed successfully from
+  the four complete-video JSON shards. Its TETA50 rows are
+  `Base=[35.452,49.228,36.886,20.241]` and
+  `Novel=[27.825,48.367,33.620,1.490]` in
+  `[TETA,LocA,AssocA,ClsA]` order. Receipt:
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/recovery_native_20260912_0325/final_manual/val_json/evaluation/OVTrack_Val_native/teta_summary_results.pth`.
+  This is the official OVTrack native baseline, not a TempoTrack result.
+- OVTrack+ Test retry shards 0 and 1 each completed native prediction
+  generation without another OOM; their pickle outputs are retained at
+  `/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus/`
+  `test_shards_retry_20260912/run_{0,1}/native_results.pkl`. Shards 2–5
+  have not been started, and no OVTrack+ Test metric is claimed.
+- A fresh COVTrack exact Test replay was started as project worker PID
+  `39337` on physical GPU1, using the pinned public `ctao_public.pth`, the
+  BURST Test annotation, explicit `only_test_categories=True`, and the exact
+  paper override vector `0.37/50/0.4/True/vis=False/max_per_img=80/`
+  `max_fusion_ratio=2.0`. Its output root is
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/covtrack/`
+  `test_paper_override_20260912/covtrack/test/`; no metric is claimed until
+  the complete stream and official summary are present.
+- The completed fresh COVTrack exact Val replay remains the current COV
+  native baseline receipt: `Base=[39.554,57.155,41.960,19.547]`,
+  `Novel=[34.205,58.173,40.936,3.507]` in the same metric order, with the
+  independent TETA summary under
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/covtrack/`
+  `val_paper_override_20260912_attempt2/evaluation_paper_override/`.
+
+- COVTrack's exact paper-override Val stream completed all `36,375` images
+  and produced `stream/tao_track.json`. The upstream formatter then exited
+  with its existing `assert "track_results" in results` path after the stream
+  artifact was written; this is retained as a post-format exit, not a missing
+  prediction.
+- The independent official TETA evaluator completed successfully in
+  `331.1857771873474` seconds. Receipt root:
+  `/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/covtrack/`
+  `val_paper_override_20260912_attempt2/evaluation_paper_override/`.
+  At TETA50, the measured rows are:
+  `Base=[39.554,57.155,41.960,19.547]` and
+  `Novel=[34.205,58.173,40.936,3.507]` in
+  `[TETA,LocA,AssocA,ClsA]` order. These are the current V10 COV baseline
+  reproduction values, not a TempoTrack gain claim.
+- The first Val pickle finalizer was killed by a kernel global OOM at
+  `2026-09-12 06:30:24` while its RSS was about `54.1 GB`. The complete
+  per-shard JSON predictions were independently validated and merged with
+  `tools/merge_tao_tracks.py` (743,768 rows); a standalone official evaluator
+  is now running on that low-memory JSON path. The original pickle and OOM
+  evidence are preserved.
+
+## V10.3 live correction — 2026-09-12 08:20 CST
+
+- The pinned OVTrack+ Test native stream was merged and evaluated by the
+  official TETA evaluator. TETA50 is `Base=[28.063,53.714,16.029,14.446]`
+  and `Novel=[20.289,45.359,13.596,1.914]` in `[TETA,LocA,AssocA,ClsA]`
+  order. The summary is under
+  `/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_plus/test_merged/`
+  `evaluation_native/OVTrackPlus_Test_native/teta_summary_results.pth`; the
+  merged prediction manifest has status PASS and prediction SHA
+  `ec88b29fc62dffe198d0b62f70640d898f83fd0b5dd4a139caa1123f2daa8da9`.
+  This is a native baseline receipt, not a TempoTrack gain claim.
+- OVTrack native official baseline receipts are complete for Val and Test.
+  Val is `Base=[35.452,49.228,36.886,20.241]`,
+  `Novel=[27.825,48.367,33.620,1.490]`; Test is
+  `Base=[32.681,45.630,35.501,16.912]`,
+  `Novel=[24.431,42.407,29.118,1.767]`, in the same order. The exact
+  summary paths and merge hashes are recorded in the OVTrack reproduction
+  receipt.
+- OVTrack Tempo Val/Test workers remain healthy (four Val and four Test
+  shards). OVTrack+ Tempo shard0 is healthy at about `92/8764` frames;
+  shards1–5 were then launched as independent complete-video workers on
+  shared GPUs0–4 after confirming about 69G host memory available and about
+  36G free VRAM per GPU. A first attempted launch used the wrong OVTrack
+  wrapper and failed before inference with `V10_OVTRACK_SOURCE` missing;
+  those logs are retained, and the corrected plus-wrapper launches are the
+  active jobs.
+- COV Test paper-override inference remains active as PID `39337`/child
+  `39478`. Its command omitted an explicit `model.tracker.vis=False`; it is
+  therefore retained as diagnostic evidence and will not be labeled
+  paper-qualified unless the effective runtime is independently proven or a
+  corrected replay is completed.

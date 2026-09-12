@@ -154,3 +154,19 @@ prediction files.  The exact receipt is committed at
 This is prediction equality only; it is not a canonical or enabled result.
 The exact runtime line-216 pre-association invocation is being checked
 separately before claiming hook-execution evidence.
+
+## Completed official native receipts — 2026-09-12
+
+The recovered complete-video native shards were merged without changing
+observations or track IDs within a video and evaluated with the pinned
+official evaluator. At TETA50, Val is `Base=35.452/49.228/36.886/20.241`
+and `Novel=27.825/48.367/33.620/1.490`; Test is
+`Base=32.681/45.630/35.501/16.912` and
+`Novel=24.431/42.407/29.118/1.767`, in
+`TETA/LocA/AssocA/ClsA` order. These are native OVTrack receipts only;
+TempoTrack full-stream evaluation is still pending.
+
+Test merge manifest:
+`/data2/usr_for_deadline/tempotrack_v10_unified/reproduction/ovtrack/`
+`recovery_native_20260912_0325/final_manual/test_json_from_json/merge_manifest.json`
+(SHA256 `4934953fe7bfe37140924fc8cfb1a4c3471876ef79a960a85fafb068ab77e8f7`).

@@ -232,3 +232,14 @@ No detector, MCF/confidence fusion, embedding, native affinity, final-ID, or
 memo implementation was modified. Because the canonical detector stream is
 still being generated, and because the retained native run lacks the explicit
 `vis=False` runtime proof, no unified or new full COV TETA number is reported.
+
+## V10.3 correction note — 2026-09-12
+
+A fresh COV Test paper-override replay is currently running as project PID
+`39337` (child `39478`) on GPU1 against the BURST Test annotation. The
+captured command includes `only_test_categories=True`, `0.37/50/0.4`,
+`confused_features=True`, `max_per_img=80`, and `max_fusion_ratio=2.0`, but
+does not include an explicit `model.tracker.vis=False` override. Its stream
+is retained as diagnostic evidence and is not promoted to a paper-qualified
+result unless the effective visualization setting is proven or a corrected
+replay is completed.
