@@ -13,6 +13,16 @@ import sys
 import tempfile
 from typing import Any
 
+# This file is invoked by absolute path with the masaenv interpreter.  In
+# that mode Python puts ``tools/`` on sys.path, not the repository root, so the
+# production package would otherwise be unavailable even though the command's
+# cwd is the repository.  Keep the validator bound to the checkout passed by
+# the supervisor rather than relying on an editable install or inherited
+# PYTHONPATH.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import numpy as np
 import torch
 import yaml
