@@ -41,6 +41,7 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
     rows: list[dict[str, Any]] = []
     shard_receipts: list[dict[str, Any]] = []
     frame_total = 0
+    track_offset = 0
     for item in manifest.get("shards", []):
         index = int(item["index"])
         trial = trials_root / f"shard_{index:02d}"
@@ -72,7 +73,13 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
         bad = [row for row in shard_rows if int(row.get("video_id", -1)) not in video_ids]
         if bad:
             raise RuntimeError(f"prediction row escaped shard {index}: {bad[0]}")
-        rows.extend(shard_rows)
+        max_track_id = max((int(row["track_id"]) for row in shard_rows), default=-1)
+        for row in shard_rows:
+            row = dict(row)
+            row["track_id"] = int(row["track_id"]) + track_offset
+            rows.append(row)
+        shard_track_offset = track_offset
+        track_offset += max_track_id + 1
         frame_total += expected_frames
         shard_receipts.append(
             {
@@ -85,6 +92,7 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
                 "frame_count": expected_frames,
                 "video_count": len(video_ids),
                 "prediction_rows": len(shard_rows),
+                "track_id_offset": shard_track_offset,
             }
         )
     expected_video_count = int(manifest.get("source_video_count", -1))
