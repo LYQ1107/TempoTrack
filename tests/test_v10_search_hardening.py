@@ -139,6 +139,32 @@ def test_hardened_gate_requires_bootstrap_counter(tmp_path):
         module._validate_contract_gate(plan)
 
 
+def test_hardened_gate_requires_teta_provenance_after_bootstrap(tmp_path):
+    module = _plan_module()
+    gate_path = tmp_path / "gate.json"
+    gate_path.write_text(
+        json.dumps({**_valid_gate(), "reranker_native_memo_bootstrap_count": 0}),
+        encoding="utf-8",
+    )
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps(
+            {
+                "protocol": "TEST_TUNED_MODEL_SPECIFIC",
+                "unbiased_test": False,
+                "contract_mode": "hardened",
+                "contract_gate": str(gate_path),
+                "contract_gate_sha256": hashlib.sha256(gate_path.read_bytes()).hexdigest(),
+                "trials": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    plan = module._load_search_plan(plan_path)
+    with pytest.raises(RuntimeError, match="SEARCH_CONTRACT_TETA_PROVENANCE_MISSING"):
+        module._validate_contract_gate(plan)
+
+
 def test_teta_source_root_requires_real_importable_package(tmp_path):
     module = _plan_module()
     with pytest.raises(RuntimeError, match="TETA_SOURCE_ROOT_INVALID"):
