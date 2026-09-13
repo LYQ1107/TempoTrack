@@ -29,6 +29,7 @@ SHARDED_TEMPO_ROOT = DOWNSTREAM_ROOT / "masa_tempo_sharded_20260913"
 SHARDED_TEMPO_ROOTS = (
     SHARDED_TEMPO_ROOT,
     DOWNSTREAM_ROOT / "masa_tempo_sharded_20260913__retry01",
+    DOWNSTREAM_ROOT / "masa_tempo_sharded_20260913__retry02",
 )
 EARLY_NATIVE_STATE_ROOTS = (
     V10_ROOT / "v104_masa_early_parallel_supervisor_retry01",
@@ -56,7 +57,11 @@ IMAGE_PREFIX = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/TAO/TAO-download/TAO-Am
 # stripping the relative ``data/tao/frames/`` prefix from ``img_path``.
 # Keep the production command's cwd explicit so this relative path resolves
 # through the existing data/tao/frames symlink in the runtime checkout.
-RUN_CWD = HARD_REPO
+# The hardened checkout contains the production code, but intentionally does
+# not contain a second copy of the multi-terabyte TAO frame mount.  MASA's
+# official loader resolves ``data/tao/frames/`` relative to cwd, so use the
+# already-verified project data root that owns that symlink.
+RUN_CWD = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa")
 
 
 def now() -> float:
