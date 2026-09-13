@@ -104,7 +104,11 @@ def gpu_candidates(leased: set[str]) -> list[str]:
     )
     if result.returncode != 0:
         return []
+    # Keep physical GPU indices separate from UUIDs.  UUIDs are used to
+    # identify compute-app owners, but must never be sorted as integer
+    # indices when constructing the candidate list.
     uuid_to_index: dict[str, str] = {}
+    indices: set[str] = set()
     blocked = set(leased)
     for line in result.stdout.splitlines():
         fields = [item.strip() for item in line.split(",")]
@@ -112,6 +116,7 @@ def gpu_candidates(leased: set[str]) -> list[str]:
             continue
         index, uuid, free = fields
         uuid_to_index[uuid] = index
+        indices.add(index)
         try:
             if int(float(free)) < 10000:
                 blocked.add(index)
@@ -133,7 +138,7 @@ def gpu_candidates(leased: set[str]) -> list[str]:
                 continue
             if "masa" in command or "tempotrack" in command or "v10_" in command:
                 blocked.add(uuid_to_index[fields[0]])
-    return [item for item in sorted(uuid_to_index, key=lambda value: int(value)) if item not in blocked]
+    return [item for item in sorted(indices, key=lambda value: int(value)) if item not in blocked]
 
 
 def annotation_inventory(path: Path) -> dict[str, Any]:
