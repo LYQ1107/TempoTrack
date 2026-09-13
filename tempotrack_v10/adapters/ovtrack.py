@@ -93,6 +93,11 @@ def load_ovtrack_tempo_config(path: str | Path) -> OVTrackTempoConfig:
         "reranker_checkpoint",
         "reranker_source_root",
         "reranker_device",
+        "qdic_weight",
+        "qdic_checkpoint",
+        "qdic_device",
+        "qdic_recent_k",
+        "qdic_context_top_k",
     }
     overlay_kwargs = {key: value for key, value in merged.items() if key in allowed}
     overlay_kwargs["enabled"] = bool(merged.get("enabled", False))

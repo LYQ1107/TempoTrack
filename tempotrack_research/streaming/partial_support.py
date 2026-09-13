@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from ..analysis.partial_support import PartialSupportConfig, PartialSupportScorer
+from ..memory.fixed_dual import FixedDualMemory
 from ..models.memory_reliability import MemoryReliabilityCalibrator
 
 
@@ -181,6 +182,53 @@ def build_anchor_evidence(
     """Backward-compatible single-row helper; new code uses the sequence."""
     sequence = build_anchor_evidence_sequence(features, boxes_xyxy, scores, frames, max_gap=max_gap)
     return sequence[-1] if len(sequence) else np.zeros(7, dtype=np.float32)
+
+
+def replay_fixed_dual_prototypes(
+    features: np.ndarray,
+    *,
+    alpha_fast: float = 0.70,
+    alpha_slow: float = 0.15,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Replay the fixed dual memory over a complete causal observation stream.
+
+    The QDIC offline sidecar needs the same fast/slow states that the online
+    overlay owns at decision time.  In particular, this is intentionally
+    *not* a replay over the deduplicated canonical bank: every raw observation
+    contributes one ``FixedDualMemory.update``.  Keeping this helper next to
+    the streaming primitives gives offline and online code one explicit
+    implementation of the V10.4 rates (the class default for ``alpha_slow``
+    is otherwise 0.02).
+
+    ``features`` are accepted in chronological order and may be unnormalized;
+    ``FixedDualMemory`` applies the same safe normalization and fallback as
+    the runtime path.  Detection confidence is deliberately not an argument:
+    fixed-dual mode uses fixed rates and therefore ignores it.
+    """
+    values = np.asarray(features, dtype=np.float32)
+    if values.ndim != 2 or values.shape[0] < 1 or values.shape[1] < 1:
+        raise ValueError("features must be a nonempty [L,D] array")
+    if not (0.0 <= float(alpha_slow) <= float(alpha_fast) < 1.0):
+        raise ValueError("alpha_fast/alpha_slow must satisfy 0 <= slow <= fast < 1")
+    if not np.isfinite(values).all():
+        raise ValueError("features must be finite")
+
+    memory = FixedDualMemory(
+        mode="fixed_dual",
+        alpha_fast=float(alpha_fast),
+        alpha_slow=float(alpha_slow),
+    )
+    state = memory.initialize(torch.as_tensor(values[0], dtype=torch.float32))
+    for value in values[1:]:
+        state, _ = memory.update(
+            state,
+            torch.as_tensor(value, dtype=torch.float32),
+            confidence=1.0,
+        )
+    return (
+        state.fast.detach().cpu().numpy().astype(np.float32, copy=True),
+        state.slow.detach().cpu().numpy().astype(np.float32, copy=True),
+    )
 
 
 def build_memory_anchor(
@@ -585,4 +633,13 @@ class StreamingReactivationEngine:
         return result, diagnostics
 
 
-__all__ = ["MemoryAnchor", "ReactivationDecision", "ReactivationDiagnostics", "StreamingReactivationEngine", "build_anchor_evidence", "build_anchor_evidence_sequence", "build_memory_anchor"]
+__all__ = [
+    "MemoryAnchor",
+    "ReactivationDecision",
+    "ReactivationDiagnostics",
+    "StreamingReactivationEngine",
+    "build_anchor_evidence",
+    "build_anchor_evidence_sequence",
+    "build_memory_anchor",
+    "replay_fixed_dual_prototypes",
+]

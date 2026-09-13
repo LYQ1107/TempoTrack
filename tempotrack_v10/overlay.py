@@ -18,8 +18,16 @@ import torch
 
 from tempotrack_research.memory.fixed_dual import FixedDualMemory
 from tempotrack_research.memory.state import MemoryState
+from tempotrack_research.streaming.partial_support import replay_fixed_dual_prototypes
 
 from .contract import FrameCollisionError, PreAssociationSnapshot, SnapshotContractError
+from .qdic_features import (
+    QDIC_FEATURE_NAMES,
+    QDIC_QUERY_OBSERVATIONS,
+    QDIC_RAW_DIM,
+    QDIC_RECENT_K,
+)
+from .qdic_loader import load_qdic_checkpoint
 from .reranker import load_exact_v9_reranker
 
 
@@ -31,6 +39,20 @@ def _normalize(value: np.ndarray) -> np.ndarray:
 
 def _cosine(left: np.ndarray, right: np.ndarray) -> float:
     return float(np.dot(_normalize(left), _normalize(right)))
+
+
+def _bounded_quantiles(value: Any) -> dict[str, float] | None:
+    """Summarize a model diagnostic without retaining per-frame arrays."""
+    if value is None:
+        return None
+    array = np.asarray(value, dtype=np.float32).reshape(-1)
+    array = array[np.isfinite(array)]
+    if not len(array):
+        return None
+    return {
+        name: float(np.percentile(array, percentile))
+        for name, percentile in (("p05", 5), ("p50", 50), ("p95", 95))
+    }
 
 
 @dataclass(frozen=True)
@@ -58,6 +80,14 @@ class TempoTrackConfig:
     reranker_checkpoint: str | None = None
     reranker_source_root: str | None = None
     reranker_device: str = "cpu"
+    # QDIC-MO is an alternative learned association path, not a blend with
+    # the older Q1 reranker.  A positive weight requires a verified V11
+    # checkpoint; tests may inject a provenance-checked scorer explicitly.
+    qdic_weight: float = 0.0
+    qdic_checkpoint: str | None = None
+    qdic_device: str = "cpu"
+    qdic_recent_k: int = 8
+    qdic_context_top_k: int = 64
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.alpha_slow <= self.alpha_fast < 1.0):
@@ -70,6 +100,16 @@ class TempoTrackConfig:
             raise ValueError("score weights must be non-negative")
         if self.reranker_weight < 0:
             raise ValueError("reranker_weight must be non-negative")
+        if self.qdic_weight < 0:
+            raise ValueError("qdic_weight must be non-negative")
+        if self.reranker_weight > 0.0 and self.qdic_weight > 0.0:
+            raise ValueError("reranker_weight and qdic_weight are mutually exclusive")
+        if self.qdic_recent_k < 1:
+            raise ValueError("qdic_recent_k must be positive")
+        if self.qdic_weight > 0.0 and (
+            self.qdic_context_top_k < self.candidate_top_k or self.qdic_context_top_k > 64
+        ):
+            raise ValueError("qdic_context_top_k must satisfy candidate_top_k <= K <= 64")
 
 
 @dataclass(frozen=True)
@@ -125,7 +165,13 @@ class TempoTrackOverlay:
     relabeled as a FULL reranker implementation.
     """
 
-    def __init__(self, config: TempoTrackConfig | None = None, *, reranker: Any | None = None) -> None:
+    def __init__(
+        self,
+        config: TempoTrackConfig | None = None,
+        *,
+        reranker: Any | None = None,
+        qdic: Any | None = None,
+    ) -> None:
         self.config = config or TempoTrackConfig()
         if self.config.reranker_weight > 0.0 and reranker is None:
             if not self.config.reranker_checkpoint:
@@ -155,6 +201,69 @@ class TempoTrackOverlay:
         else:
             self._reranker_feature_config = {}
         self._reranker = reranker
+        if self.config.qdic_weight > 0.0 and qdic is None:
+            if not self.config.qdic_checkpoint:
+                raise SnapshotContractError("BLOCKED_QDIC_CHECKPOINT_MISSING")
+            qdic = load_qdic_checkpoint(
+                self.config.qdic_checkpoint,
+                device=self.config.qdic_device,
+            )
+        if self.config.qdic_weight > 0.0 and qdic is not None:
+            if not (
+                np.isclose(self.config.alpha_fast, 0.70, rtol=0.0, atol=1e-8)
+                and np.isclose(self.config.alpha_slow, 0.15, rtol=0.0, atol=1e-8)
+            ):
+                raise SnapshotContractError("BLOCKED_QDIC_ALPHA_MISMATCH")
+            if self.config.memory_capacity != 64 or self.config.candidate_top_k != 8:
+                raise SnapshotContractError("BLOCKED_QDIC_RUNTIME_SHAPE_MISMATCH")
+            if self.config.qdic_recent_k != QDIC_RECENT_K or self.config.qdic_context_top_k != 64:
+                raise SnapshotContractError("BLOCKED_QDIC_RUNTIME_FEATURE_MISMATCH")
+            if not callable(getattr(qdic, "score_event", None)):
+                raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: score_event")
+            provenance = getattr(qdic, "provenance", None)
+            if not isinstance(provenance, Mapping) or provenance.get("status") != "QDIC_V11_MODEL_CODE_AND_WEIGHTS":
+                raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: exact provenance")
+            if int(provenance.get("feature_dim", -1)) != QDIC_RAW_DIM or tuple(
+                provenance.get("feature_names", ())
+            ) != tuple(QDIC_FEATURE_NAMES):
+                raise SnapshotContractError("BLOCKED_QDIC_FEATURE_SCHEMA_MISMATCH")
+            if (
+                provenance.get("training_protocol") != "QDIC_V11_BASE_ONLY_TRAINING"
+                or not bool(provenance.get("base_only_supervision"))
+                or bool(provenance.get("novel_gt_used"))
+                or bool(provenance.get("test_weights_used"))
+            ):
+                raise SnapshotContractError("BLOCKED_QDIC_INVALID_SUPERVISION_PROVENANCE")
+            feature_config = provenance.get("feature_config")
+            if not isinstance(feature_config, Mapping):
+                raise SnapshotContractError("BLOCKED_QDIC_FEATURE_CONFIG_MISSING")
+            for key, expected in (
+                ("query_observations", QDIC_QUERY_OBSERVATIONS),
+                ("alpha_fast", self.config.alpha_fast),
+                ("alpha_slow", self.config.alpha_slow),
+                ("recent_k", self.config.qdic_recent_k),
+                ("memory_capacity", self.config.memory_capacity),
+                ("context_candidate_top_k", self.config.qdic_context_top_k),
+                ("decision_candidate_top_k", self.config.candidate_top_k),
+            ):
+                if key not in feature_config:
+                    raise SnapshotContractError(f"BLOCKED_QDIC_FEATURE_CONFIG_MISSING: {key}")
+                actual = float(feature_config[key]) if key.startswith("alpha") else int(feature_config[key])
+                if actual != expected and not (
+                    key.startswith("alpha") and np.isclose(actual, float(expected), rtol=0.0, atol=1e-8)
+                ):
+                    raise SnapshotContractError(f"BLOCKED_QDIC_{key.upper()}_MISMATCH")
+            if not np.isclose(
+                float(feature_config.get("memory_dedup_cos", float("nan"))),
+                0.95,
+                rtol=0.0,
+                atol=1e-8,
+            ):
+                raise SnapshotContractError("BLOCKED_QDIC_MEMORY_DEDUP_MISMATCH")
+            self._qdic_feature_config = dict(feature_config)
+        else:
+            self._qdic_feature_config = {}
+        self._qdic = qdic
         self._dual = FixedDualMemory(
             mode="fixed_dual",
             alpha_fast=self.config.alpha_fast,
@@ -169,6 +278,8 @@ class TempoTrackOverlay:
         # used.  The counter is incremented immediately before the
         # fail-closed exception and therefore remains zero for a valid run.
         self._reranker_native_memo_bootstrap_count = 0
+        self._qdic_native_memo_bootstrap_count = 0
+        self._last_qdic_diagnostics: dict[str, Any] = {}
 
     @staticmethod
     def _video_key(video_id: int | str) -> str:
@@ -185,6 +296,22 @@ class TempoTrackOverlay:
             self._records.pop(record_key, None)
         for pending_key in [item for item in self._pending if item[0] == key]:
             self._pending.pop(pending_key, None)
+
+    @property
+    def _learned_association_active(self) -> bool:
+        return self.config.reranker_weight > 0.0 or self.config.qdic_weight > 0.0
+
+    @property
+    def _learned_feature_config(self) -> Mapping[str, Any]:
+        if self.config.qdic_weight > 0.0:
+            return self._qdic_feature_config
+        return self._reranker_feature_config
+
+    @property
+    def _learned_model(self) -> Any | None:
+        if self.config.qdic_weight > 0.0:
+            return self._qdic
+        return self._reranker
 
     @staticmethod
     def _indexed_metadata(
@@ -244,15 +371,16 @@ class TempoTrackOverlay:
         evidence: Sequence[np.ndarray],
     ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Rebuild the causal V9 bank with synchronized feature/evidence rows."""
-        if self._reranker is None or not history or not evidence:
+        if not self._learned_association_active or not history or not evidence:
             return [], []
         length = min(len(history), len(evidence))
         if length < 1:
             return [], []
         bank_features: list[np.ndarray] = []
         bank_evidence: list[np.ndarray] = []
-        threshold = float(self._reranker_feature_config["memory_dedup_cos"])
-        capacity = int(self._reranker_feature_config["memory_capacity"])
+        feature_config = self._learned_feature_config
+        threshold = float(feature_config["memory_dedup_cos"])
+        capacity = int(feature_config["memory_capacity"])
         for feature, row in zip(history[-length:], evidence[-length:]):
             feature_value = np.asarray(feature, dtype=np.float32).copy()
             evidence_value = np.asarray(row, dtype=np.float32).reshape(-1)
@@ -270,10 +398,11 @@ class TempoTrackOverlay:
         evidence: Sequence[np.ndarray],
     ) -> None:
         """Append one causal observation and keep feature/evidence aligned."""
-        if self._reranker is None or not evidence:
+        if not self._learned_association_active or not evidence:
             return
-        threshold = float(self._reranker_feature_config["memory_dedup_cos"])
-        capacity = int(self._reranker_feature_config["memory_capacity"])
+        feature_config = self._learned_feature_config
+        threshold = float(feature_config["memory_dedup_cos"])
+        capacity = int(feature_config["memory_capacity"])
         feature_value = np.asarray(feature, dtype=np.float32).copy()
         for row in evidence:
             evidence_value = np.asarray(row, dtype=np.float32).reshape(-1)
@@ -301,12 +430,16 @@ class TempoTrackOverlay:
             )
             current = self._records.get(key)
             if not raw_history:
-                if (
-                    current is None
-                    and self._reranker is not None
-                    and self.config.reranker_weight > 0.0
-                ):
-                    self._reranker_native_memo_bootstrap_count += 1
+                if current is None and self._learned_association_active:
+                    self._reranker_native_memo_bootstrap_count += int(self.config.reranker_weight > 0.0)
+                    self._qdic_native_memo_bootstrap_count += int(self.config.qdic_weight > 0.0)
+                    if self.config.qdic_weight > 0.0:
+                        raise SnapshotContractError(
+                            "BLOCKED_LEARNED_ASSOC_NATIVE_MEMO_BOOTSTRAP: QDIC requires "
+                            "the candidate's exact last real observation embedding; "
+                            "native frontend memo/EMA embedding cannot initialize "
+                            "last_embedding."
+                        )
                     raise SnapshotContractError(
                         "BLOCKED_RERANKER_NATIVE_MEMO_BOOTSTRAP: FULL Q1 requires "
                         "the candidate's exact last real observation embedding; "
@@ -334,6 +467,14 @@ class TempoTrackOverlay:
             if current is None:
                 prototype = torch.as_tensor(history[-1], dtype=torch.float32)
                 state = self._dual.initialize(prototype, frame=int(snapshot.memory_last_frame[index]))
+                if self.config.qdic_weight > 0.0:
+                    fast, slow = replay_fixed_dual_prototypes(
+                        np.asarray(raw_history, dtype=np.float32),
+                        alpha_fast=self.config.alpha_fast,
+                        alpha_slow=self.config.alpha_slow,
+                    )
+                    state.fast = torch.as_tensor(fast, dtype=torch.float32)
+                    state.slow = torch.as_tensor(slow, dtype=torch.float32)
                 reranker_history, reranker_evidence = self._canonical_reranker_bank(raw_history, evidence)
                 self._records[key] = _MemoryRecord(
                     state=state,
@@ -352,13 +493,27 @@ class TempoTrackOverlay:
                 if explicit_history is not None:
                     current.history = history[-self.config.memory_capacity :]
                     current.last_embedding = _normalize(raw_history[-1])
+                    if self.config.qdic_weight > 0.0:
+                        fast, slow = replay_fixed_dual_prototypes(
+                            np.asarray(raw_history, dtype=np.float32),
+                            alpha_fast=self.config.alpha_fast,
+                            alpha_slow=self.config.alpha_slow,
+                        )
+                        current.state.fast = torch.as_tensor(fast, dtype=torch.float32)
+                        current.state.slow = torch.as_tensor(slow, dtype=torch.float32)
                 if evidence_value is not None:
                     current.evidence_history = evidence[-self.config.memory_capacity :]
-                if self._reranker is not None and explicit_history is not None and evidence_value is not None:
-                    (
-                        current.reranker_history,
-                        current.reranker_evidence_history,
-                    ) = self._canonical_reranker_bank(raw_history, evidence)
+                if self._learned_association_active and explicit_history is not None:
+                    if evidence_value is None:
+                        # Never pair a refreshed exact history with stale
+                        # evidence from an earlier snapshot.
+                        current.reranker_history = []
+                        current.reranker_evidence_history = []
+                    else:
+                        (
+                            current.reranker_history,
+                            current.reranker_evidence_history,
+                        ) = self._canonical_reranker_bank(raw_history, evidence)
 
     def _candidate_union(self, snapshot: PreAssociationSnapshot) -> list[_Candidate]:
         video = self._video_key(snapshot.video_id)
@@ -380,27 +535,37 @@ class TempoTrackOverlay:
             candidates.append(_Candidate(int(memory_id), None, record, int(record.root_id), False))
         return candidates
 
-    def _reranker_prefilter_score(
+    def _q1_prefilter_score(
         self,
         query: np.ndarray,
         candidate: _Candidate,
     ) -> float:
-        """Exact Q1 prefilter matching V9 ``_rank_candidates``.
+        """Exact Q1 prefilter shared by V9 and QDIC.
 
         The training-side prefilter is cosine(query, candidate's last real
         observation).  Native affinity, fast/slow prototypes, support, and
         reliability are deliberately excluded from this FULL-path ranking.
         """
-        if self._reranker is None or self.config.reranker_weight <= 0.0:
-            raise SnapshotContractError("reranker prefilter requested while reranker is disabled")
-        expected_q = int(self._reranker_feature_config["query_observations"])
+        if not self._learned_association_active:
+            raise SnapshotContractError("learned prefilter requested while learned association is disabled")
+        expected_q = int(self._learned_feature_config["query_observations"])
         if expected_q != 1:
             raise SnapshotContractError(
-                f"BLOCKED_RERANKER_PREFILTER_Q_MISMATCH: expected Q={expected_q}"
+                f"BLOCKED_LEARNED_PREFILTER_Q_MISMATCH: expected Q={expected_q}"
             )
         if candidate.record.last_embedding is None:
-            raise SnapshotContractError("BLOCKED_RERANKER_LAST_EMBEDDING_MISSING")
+            raise SnapshotContractError("BLOCKED_LEARNED_LAST_EMBEDDING_MISSING")
         return _cosine(query, candidate.record.last_embedding)
+
+    def _reranker_prefilter_score(
+        self,
+        query: np.ndarray,
+        candidate: _Candidate,
+    ) -> float:
+        """Backward-compatible V9 name for the shared Q1 prefilter."""
+        if self.config.reranker_weight <= 0.0:
+            raise SnapshotContractError("reranker prefilter requested while reranker is disabled")
+        return self._q1_prefilter_score(query, candidate)
 
     def _support_score(self, query: np.ndarray, record: _MemoryRecord) -> float:
         values = [
@@ -418,7 +583,22 @@ class TempoTrackOverlay:
         observation_index: int,
         candidate: _Candidate,
         reranker_score: float | None,
+        qdic_score: float | None = None,
     ) -> float:
+        if self.config.qdic_weight > 0.0:
+            if qdic_score is None or not np.isfinite(qdic_score):
+                raise SnapshotContractError("BLOCKED_QDIC_EVIDENCE_MISSING")
+            # QDIC's structured score and residual are already combined by the
+            # model.  Do not blend it with the heuristic or legacy Q1 logit.
+            return float(qdic_score)
+        if self.config.reranker_weight > 0.0:
+            if reranker_score is None:
+                raise SnapshotContractError("BLOCKED_QUERY_RERANKER_EVIDENCE_MISSING")
+            # V9's production replay uses the query-conditioned model logit as
+            # the decision score.  A positive weight is an explicit opt-in to
+            # that exact path; it must not silently blend the V9 model with
+            # V10's heuristic score.
+            return float(self.config.reranker_weight * float(reranker_score))
         query = snapshot.embeddings[observation_index]
         active = 0.70 * _cosine(query, candidate.record.state.fast.detach().cpu().numpy()) + 0.30 * _cosine(
             query, candidate.record.state.slow.detach().cpu().numpy()
@@ -443,18 +623,10 @@ class TempoTrackOverlay:
                 score += self.config.reliability_weight * float(
                     np.log(max(float(values[candidate.memory_index]), 1e-6))
                 )
-        if self.config.reranker_weight > 0.0:
-            if reranker_score is None:
-                raise SnapshotContractError("BLOCKED_QUERY_RERANKER_EVIDENCE_MISSING")
-            # V9's production replay uses the query-conditioned model logit as
-            # the decision score.  A positive weight is an explicit opt-in to
-            # that exact path; it must not silently blend the V9 model with
-            # V10's heuristic score.
-            return float(self.config.reranker_weight * float(reranker_score))
         return float(score)
 
     def _query_sequence(self, snapshot: PreAssociationSnapshot, observation_index: int) -> np.ndarray:
-        expected = int(self._reranker_feature_config.get("query_observations", 1))
+        expected = int(self._learned_feature_config.get("query_observations", 1))
         value = snapshot.metadata.get("query_embeddings")
         if value is None:
             if expected > 1:
@@ -523,6 +695,76 @@ class TempoTrackOverlay:
                 aligned[index] = by_memory_id[int(candidate.memory_id)]
         return aligned, missing
 
+    def _qdic_scores(
+        self,
+        snapshot: PreAssociationSnapshot,
+        observation_index: int,
+        context_candidates: Sequence[tuple[float, _Candidate]],
+        decision_candidates: Sequence[tuple[float, _Candidate]],
+    ) -> tuple[np.ndarray | None, int, Mapping[str, Any]]:
+        """Score the complete QDIC context and align it to decision Top-K."""
+        if self.config.qdic_weight <= 0.0:
+            return None, 0, {}
+        if self._qdic is None:
+            raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING")
+        if not context_candidates:
+            return None, 0, {}
+        query = self._query_sequence(snapshot, observation_index)
+        query = query / np.maximum(np.linalg.norm(query, axis=1, keepdims=True), 1e-8)
+        feature_config = self._qdic_feature_config
+        payload: list[dict[str, Any]] = []
+        candidate_ids: list[int] = []
+        missing = 0
+        for rank, (_, candidate) in enumerate(context_candidates, start=1):
+            history = candidate.record.reranker_history
+            evidence = candidate.record.reranker_evidence_history
+            length = min(len(history), len(evidence))
+            if length < 1:
+                missing += 1
+                continue
+            memory = np.stack(history[-length:], axis=0).astype(np.float32)
+            memory = memory / np.maximum(np.linalg.norm(memory, axis=1, keepdims=True), 1e-8)
+            evidence_array = np.stack(evidence[-length:], axis=0).astype(np.float32)
+            fast = candidate.record.state.fast.detach().cpu().numpy()
+            slow = candidate.record.state.slow.detach().cpu().numpy()
+            payload.append(
+                {
+                    "cosine": query @ memory.T,
+                    "evidence": evidence_array,
+                    "gap": int(snapshot.frame_id - candidate.record.last_frame),
+                    "rank": int(rank),
+                    "query_fast_cosine": _cosine(query[0], fast),
+                    "query_slow_cosine": _cosine(query[0], slow),
+                    "fast_slow_cosine": _cosine(fast, slow),
+                    "recent_k": int(feature_config["recent_k"]),
+                    "top_r": int(feature_config.get("top_r", self.config.top_r)),
+                    "max_gap": int(feature_config.get("max_gap", self.config.max_gap)),
+                }
+            )
+            candidate_ids.append(int(candidate.memory_id))
+        if not payload:
+            self._last_qdic_diagnostics = {}
+            return None, missing, {}
+        try:
+            scored = self._qdic.score_event(payload, return_diagnostics=True)
+        except TypeError:
+            # A small test double may implement the same numerical interface
+            # without the optional diagnostics keyword.
+            scored = self._qdic.score_event(payload)
+        if not isinstance(scored, (tuple, list)) or not scored:
+            raise SnapshotContractError("BLOCKED_QDIC_SCORE_INTERFACE")
+        logits = np.asarray(scored[0], dtype=np.float32).reshape(-1)
+        if len(logits) != len(payload) or not np.isfinite(logits).all():
+            raise FloatingPointError("QDIC returned non-finite or misaligned logits")
+        details = scored[1] if len(scored) > 1 and isinstance(scored[1], Mapping) else {}
+        self._last_qdic_diagnostics = dict(details)
+        by_memory_id = {memory_id: float(logit) for memory_id, logit in zip(candidate_ids, logits)}
+        aligned = np.full(len(decision_candidates), np.nan, dtype=np.float32)
+        for index, (_, candidate) in enumerate(decision_candidates):
+            if int(candidate.memory_id) in by_memory_id:
+                aligned[index] = by_memory_id[int(candidate.memory_id)]
+        return aligned, missing, details
+
     def propose(self, snapshot: PreAssociationSnapshot) -> OverlayProposal:
         """Produce a deterministic candidate assignment before native IDs commit."""
         count = snapshot.observation_count
@@ -547,7 +789,7 @@ class TempoTrackOverlay:
         # memory bootstrap.  A Q>1 checkpoint without explicit query history
         # must report the protocol mismatch, never be shadowed by a separate
         # Q1 memo-bootstrap failure.
-        if self.config.reranker_weight > 0.0:
+        if self._learned_association_active:
             for observation_index in range(count):
                 self._query_sequence(snapshot, observation_index)
         self._ensure_snapshot_memory(snapshot)
@@ -557,6 +799,8 @@ class TempoTrackOverlay:
         occupied_roots = {int(value) for value in snapshot.metadata.get("occupied_root_ids", ())}
         all_candidates: list[list[tuple[float, int, int]]] = [[] for _ in range(count)]
         reranker_missing_total = 0
+        qdic_missing_total = 0
+        qdic_diagnostics: list[Mapping[str, Any]] = []
         for observation_index in range(count):
             # Validate the checkpoint's query protocol before candidate
             # filtering. A Q>1 checkpoint must fail closed even when this
@@ -569,10 +813,11 @@ class TempoTrackOverlay:
                 if gap < self.config.min_gap or gap > self.config.max_gap:
                     continue
                 query = snapshot.embeddings[observation_index]
-                if self.config.reranker_weight > 0.0:
-                    # FULL Q1 reranker path: preserve the exact training
-                    # candidate rank before constructing the Top-K context.
-                    prefilter = self._reranker_prefilter_score(query, candidate)
+                if self._learned_association_active:
+                    # Both learned paths use the exact training Q1
+                    # last-observation prefilter.  Fast/slow and native
+                    # affinity enter only after the context is selected.
+                    prefilter = self._q1_prefilter_score(query, candidate)
                 else:
                     active = 0.70 * _cosine(
                         query, candidate.record.state.fast.detach().cpu().numpy()
@@ -593,9 +838,20 @@ class TempoTrackOverlay:
                 legal.append((float(prefilter), candidate))
             legal.sort(key=lambda item: (-item[0], item[1].memory_id, item[1].root_id))
             selected = legal[: self.config.candidate_top_k]
-            context = legal[: int(self._reranker_feature_config.get(
-                "candidate_top_k", self.config.candidate_top_k
-            ))] if self.config.reranker_weight > 0.0 else selected
+            if self.config.qdic_weight > 0.0:
+                context = legal[: int(self.config.qdic_context_top_k)]
+            elif self.config.reranker_weight > 0.0:
+                context = legal[: int(self._reranker_feature_config.get(
+                    "candidate_top_k", self.config.candidate_top_k
+                ))]
+            else:
+                context = selected
+            qdic_logits, qdic_missing, qdic_detail = self._qdic_scores(
+                snapshot, observation_index, context, selected
+            )
+            qdic_missing_total += qdic_missing
+            if qdic_detail:
+                qdic_diagnostics.append(qdic_detail)
             logits, missing = self._reranker_scores(
                 snapshot, observation_index, context, selected
             )
@@ -607,7 +863,19 @@ class TempoTrackOverlay:
                     reranker_score = float(logits[rank - 1])
                 else:
                     reranker_score = None
-                score = self._candidate_score(snapshot, observation_index, candidate, reranker_score)
+                if self.config.qdic_weight > 0.0:
+                    if qdic_logits is None or rank - 1 >= len(qdic_logits) or not np.isfinite(qdic_logits[rank - 1]):
+                        continue
+                    qdic_score = float(qdic_logits[rank - 1])
+                else:
+                    qdic_score = None
+                score = self._candidate_score(
+                    snapshot,
+                    observation_index,
+                    candidate,
+                    reranker_score,
+                    qdic_score=qdic_score,
+                )
                 all_candidates[observation_index].append((score, candidate.memory_id, candidate.root_id))
             all_candidates[observation_index].sort(key=lambda item: (-item[0], item[1], item[2]))
 
@@ -619,7 +887,9 @@ class TempoTrackOverlay:
         proposals_by_root: dict[int, list[int]] = {}
         for index, candidates_for_observation in enumerate(all_candidates):
             if not candidates_for_observation:
-                if self.config.reranker_weight > 0.0 and reranker_missing_total:
+                if self.config.qdic_weight > 0.0 and qdic_missing_total:
+                    reasons[index] = "qdic_evidence_missing"
+                elif self.config.reranker_weight > 0.0 and reranker_missing_total:
                     reasons[index] = "reranker_evidence_missing"
                 continue
             best_score, best_memory, best_root = candidates_for_observation[0]
@@ -680,14 +950,41 @@ class TempoTrackOverlay:
                 "reranker_native_memo_bootstrap_count": int(
                     self._reranker_native_memo_bootstrap_count
                 ),
+                "qdic_status": (
+                    self._qdic.provenance
+                    if self._qdic is not None and self.config.qdic_weight > 0.0
+                    else "DISABLED_NOT_FULL"
+                ),
+                "qdic_expected_query_observations": int(
+                    self._qdic_feature_config.get("query_observations", 1)
+                ),
+                "qdic_actual_query_observations": self._last_query_observations,
+                "qdic_context_candidate_top_k": int(
+                    self.config.qdic_context_top_k if self.config.qdic_weight > 0.0 else self.config.candidate_top_k
+                ),
+                "qdic_decision_candidate_top_k": int(self.config.candidate_top_k),
+                "qdic_missing_evidence": int(qdic_missing_total),
+                "qdic_native_memo_bootstrap_count": int(
+                    self._qdic_native_memo_bootstrap_count
+                ),
+                "qdic_alpha_quantiles": _bounded_quantiles(
+                    [detail.get("alpha") for detail in qdic_diagnostics if "alpha" in detail]
+                ),
+                "qdic_structured_score_quantiles": _bounded_quantiles(
+                    [detail.get("structured_score") for detail in qdic_diagnostics if "structured_score" in detail]
+                ),
                 "competition_losers": int(competition_losers),
                 "frame_collision_rejections": int(sum(value == "frame_collision" for value in reasons)),
                 "reranker_status": self._reranker.provenance if self._reranker is not None else "DISABLED_NOT_FULL",
                 "reranker_missing_evidence": int(reranker_missing_total),
                 "full_capability_status": (
+                    "FULL_QDIC_MO_RUNTIME_ACTIVE"
+                    if self._qdic is not None and self.config.qdic_weight > 0
+                    else (
                     "FULL_Q1_RERANKER_RUNTIME_ACTIVE"
                     if self._reranker is not None and self.config.reranker_weight > 0
                     else "OVERLAY_WITHOUT_RERANKER"
+                    )
                 ),
             },
         )
@@ -750,7 +1047,7 @@ class TempoTrackOverlay:
             area = max(float(max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])), 1e-6)
             old_area = max(float(max(0.0, old_box[2] - old_box[0]) * max(0.0, old_box[3] - old_box[1])), 1e-6)
             area_ratio = float(np.clip(np.log(area / old_area), -2.0, 2.0) / 2.0)
-        feature_max_gap = int(self._reranker_feature_config.get("max_gap", self.config.max_gap))
+        feature_max_gap = int(self._learned_feature_config.get("max_gap", self.config.max_gap))
         return np.asarray(
             [
                 score,

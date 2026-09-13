@@ -94,6 +94,11 @@ class OVTrackPlusTempoAdapter:
             "reranker_checkpoint",
             "reranker_source_root",
             "reranker_device",
+            "qdic_weight",
+            "qdic_checkpoint",
+            "qdic_device",
+            "qdic_recent_k",
+            "qdic_context_top_k",
         }
         values = {key: tempo[key] for key in allowed if key in tempo}
         values["enabled"] = not disabled

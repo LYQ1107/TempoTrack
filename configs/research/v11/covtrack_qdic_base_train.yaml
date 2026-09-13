@@ -1,0 +1,22 @@
+# QDIC V11 Base-only feature/training contract.
+# This file does not enable a runtime checkpoint; the trainer consumes the
+# feature cache produced from the paired V9 event cache and sidecar.
+frontend: covtrack
+protocol: QDIC_V11_BASE_ONLY_TRAINING
+split: train
+tempo:
+  enabled: true
+  alpha_fast: 0.70
+  alpha_slow: 0.15
+  min_gap: 0
+  max_gap: 360
+  candidate_top_k: 8
+  qdic_context_top_k: 64
+  top_r: 3
+  memory_capacity: 64
+  qdic_recent_k: 8
+  qdic_weight: 0.0
+  qdic_checkpoint: null
+  qdic_device: cpu
+  score_threshold: 0.0
+  margin_threshold: 0.0

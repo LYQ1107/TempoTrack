@@ -813,6 +813,211 @@ def _load_event_cache(path: str | Path) -> tuple[dict[str, Any], dict[str, np.nd
     return metadata, arrays, None
 
 
+def _load_qdic_feature_source(
+    metadata: Mapping[str, Any],
+    source: Any | None,
+) -> tuple[dict[int, np.ndarray] | None, np.ndarray | None, dict[str, Any]]:
+    """Resolve raw native embeddings for the lightweight QDIC sidecar.
+
+    ``candidate_rows`` and ``query_rows`` in ``events.jsonl`` are local to a
+    video.  Tests may pass a mapping/array directly; production callers can
+    omit it and the sidecar reads the immutable ``embeddings_raw`` arrays from
+    the event cache's native manifest.  No detector or association output is
+    rebuilt here.
+    """
+    provenance: dict[str, Any] = {}
+    if source is None:
+        manifest_value = metadata.get("manifest")
+        if not manifest_value:
+            raise ValueError("QDIC sidecar needs features or an event-cache native manifest")
+        manifest_path = Path(str(manifest_value))
+        if not manifest_path.is_file():
+            raise FileNotFoundError(f"QDIC native manifest missing: {manifest_path}")
+        manifest = _json(manifest_path)
+        by_video: dict[int, np.ndarray] = {}
+        for shard in sorted(manifest.get("shards", []), key=lambda item: (int(item["video_id"]), str(item["path"]))):
+            video = int(shard["video_id"])
+            shard_path = Path(str(shard["path"]))
+            if not shard_path.is_file():
+                raise FileNotFoundError(f"QDIC native shard missing: {shard_path}")
+            if shard.get("sha256") and _sha256(shard_path) != shard["sha256"]:
+                raise ValueError(f"QDIC native shard hash mismatch: {shard_path}")
+            with np.load(shard_path, allow_pickle=False) as arrays:
+                if "embeddings_raw" not in arrays:
+                    raise ValueError(f"QDIC native shard lacks embeddings_raw: {shard_path}")
+                by_video[video] = np.asarray(arrays["embeddings_raw"], dtype=np.float32)
+            provenance.setdefault("manifest", str(manifest_path.resolve()))
+            provenance.setdefault("manifest_hash", _sha256(manifest_path))
+        if not by_video:
+            raise ValueError("QDIC native manifest contains no feature shards")
+        return by_video, None, provenance
+
+    if isinstance(source, Mapping):
+        by_video = {
+            int(video): np.asarray(value, dtype=np.float32)
+            for video, value in source.items()
+        }
+        provenance["kind"] = "mapping"
+        return by_video, None, provenance
+    if isinstance(source, np.ndarray):
+        provenance["kind"] = "array"
+        return None, np.asarray(source, dtype=np.float32), provenance
+    source_path = Path(source)
+    if source_path.is_file() and source_path.suffix == ".npy":
+        provenance.update({"path": str(source_path.resolve()), "sha256": _sha256(source_path)})
+        return None, np.load(source_path, mmap_mode="r", allow_pickle=False), provenance
+    if source_path.is_file() and source_path.suffix == ".json":
+        return _load_qdic_feature_source(json.loads(source_path.read_text(encoding="utf-8")), None)
+    if source_path.is_dir():
+        by_video: dict[int, np.ndarray] = {}
+        for path in sorted(source_path.glob("video_*.npy")):
+            try:
+                video = int(path.stem.split("_", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            by_video[video] = np.load(path, mmap_mode="r", allow_pickle=False)
+        if by_video:
+            provenance["directory"] = str(source_path.resolve())
+            return by_video, None, provenance
+    raise FileNotFoundError(f"unsupported QDIC feature source: {source_path}")
+
+
+def precompute_qdic_sidecar(
+    event_cache: str | Path,
+    output: str | Path,
+    *,
+    features: Any | None = None,
+    feature_source: Any | None = None,
+    recent_k: int = 8,
+    alpha_fast: float = 0.70,
+    alpha_slow: float = 0.15,
+    memory_capacity: int = 64,
+    memory_dedup_cos: float = 0.95,
+) -> dict[str, Any]:
+    """Precompute causal fast/slow prototype evidence for every cache row.
+
+    The sidecar is intentionally narrow: it stores only the three direct
+    Innovation-1 prototype similarities required by QDIC.  Projected MO
+    moments are calculated later from the event cache's canonical cosine
+    matrix, so the existing large event cache is never rebuilt or modified.
+    """
+    if int(recent_k) != 8:
+        raise ValueError("QDIC V11 requires recent_k=8")
+    if not (0.0 <= float(alpha_slow) <= float(alpha_fast) < 1.0):
+        raise ValueError("alpha_fast/alpha_slow must satisfy 0 <= slow <= fast < 1")
+    if int(memory_capacity) != 64 or not np.isclose(
+        float(memory_dedup_cos), 0.95, rtol=0.0, atol=1e-8
+    ):
+        raise ValueError("QDIC V11 sidecar requires memory_capacity=64 and dedup_cos=0.95")
+    if features is not None and feature_source is not None:
+        raise ValueError("provide features or feature_source, not both")
+    metadata, arrays, _ = _load_event_cache(event_cache)
+    event_root = Path(event_cache)
+    metadata_path = event_root if event_root.is_file() else event_root / "metadata.json"
+    rows_path = Path(str(metadata.get("rows_path", metadata_path.parent / "events.jsonl")))
+    if not rows_path.is_absolute():
+        rows_path = metadata_path.parent / rows_path
+    rows = [
+        json.loads(line)
+        for line in rows_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    count = int(np.asarray(arrays["mem_len"]).shape[0])
+    if len(rows) != count:
+        raise ValueError("QDIC sidecar rows and event cache arrays have different lengths")
+
+    by_video, shared_features, feature_provenance = _load_qdic_feature_source(
+        metadata, features if features is not None else feature_source
+    )
+    from ..streaming.partial_support import replay_fixed_dual_prototypes
+
+    query_fast = np.empty(count, dtype=np.float32)
+    query_slow = np.empty(count, dtype=np.float32)
+    fast_slow = np.empty(count, dtype=np.float32)
+    prototype_cache: dict[tuple[int, tuple[int, ...]], tuple[np.ndarray, np.ndarray]] = {}
+
+    def source_for(video: int, index: int) -> np.ndarray:
+        if by_video is not None:
+            if video not in by_video:
+                raise KeyError(f"QDIC features missing video {video} at event row {index}")
+            value = np.asarray(by_video[video], dtype=np.float32)
+        else:
+            assert shared_features is not None
+            value = np.asarray(shared_features, dtype=np.float32)
+        if value.ndim != 2 or value.shape[1] < 1 or not np.isfinite(value).all():
+            raise ValueError(f"QDIC feature source for video {video} must be finite [N,D]")
+        return value
+
+    for index, row in enumerate(rows):
+        video = int(row["video_id"])
+        candidate_rows = tuple(int(value) for value in row.get("candidate_rows", ()))
+        query_rows = tuple(int(value) for value in row.get("query_rows", ()))
+        if not candidate_rows or not query_rows:
+            raise ValueError(f"QDIC event row {index} lacks candidate_rows/query_rows")
+        value = source_for(video, index)
+        all_rows = candidate_rows + query_rows
+        if min(all_rows) < 0 or max(all_rows) >= len(value):
+            raise IndexError(f"QDIC event row {index} references features outside video {video}")
+        key = (video, candidate_rows)
+        prototypes = prototype_cache.get(key)
+        if prototypes is None:
+            prototypes = replay_fixed_dual_prototypes(
+                value[np.asarray(candidate_rows, dtype=np.int64)],
+                alpha_fast=float(alpha_fast),
+                alpha_slow=float(alpha_slow),
+            )
+            prototype_cache[key] = prototypes
+        fast, slow = prototypes
+        query = value[query_rows[0]]
+        query = query / max(float(np.linalg.norm(query)), 1e-8)
+        fast = fast / max(float(np.linalg.norm(fast)), 1e-8)
+        slow = slow / max(float(np.linalg.norm(slow)), 1e-8)
+        query_fast[index] = float(np.dot(query, fast))
+        query_slow[index] = float(np.dot(query, slow))
+        fast_slow[index] = float(np.dot(fast, slow))
+    if not np.isfinite(np.stack((query_fast, query_slow, fast_slow))).all():
+        raise FloatingPointError("QDIC sidecar contains non-finite prototype evidence")
+
+    output_path = Path(output).resolve()
+    output_path.mkdir(parents=True, exist_ok=False)
+    values = {
+        "query_fast_cosine": query_fast,
+        "query_slow_cosine": query_slow,
+        "fast_slow_cosine": fast_slow,
+    }
+    array_paths: dict[str, str] = {}
+    for name, value in values.items():
+        path = output_path / f"{name}.npy"
+        np.save(path, value, allow_pickle=False)
+        array_paths[name] = str(path)
+    sidecar_metadata: dict[str, Any] = {
+        "schema_version": 11,
+        "artifact": "qdic_v11_projected_prototype_sidecar",
+        "event_cache": str(Path(event_cache).resolve()),
+        "event_cache_metadata_hash": _sha256(metadata_path),
+        "event_rows": str(rows_path.resolve()),
+        "event_rows_hash": _sha256(rows_path),
+        "rows": count,
+        "recent_k": int(recent_k),
+        "alpha_fast": float(alpha_fast),
+        "alpha_slow": float(alpha_slow),
+        "memory_capacity": int(memory_capacity),
+        "memory_dedup_cos": float(memory_dedup_cos),
+        "prototype_history": "full causal raw candidate_rows; no canonical dedup",
+        "query_observations": 1,
+        "arrays": array_paths,
+        "array_hashes": {name: _sha256(path) for name, path in array_paths.items()},
+        "source_hashes": feature_provenance,
+    }
+    (output_path / "metadata.json").write_text(
+        json.dumps(sidecar_metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    # The event-cache metadata remains untouched; this pointer is convenient
+    # for callers that pass the cache directory to build_qdic_features later.
+    sidecar_metadata["metadata_hash"] = _sha256(output_path / "metadata.json")
+    return {"status": "COMPLETED", "output": str(output_path), **sidecar_metadata}
+
+
 def _load_calibrator(checkpoint: str | Path | None):
     if checkpoint is None or str(checkpoint).lower() in {"", "none", "null"}:
         return None, 0.0
@@ -2316,6 +2521,18 @@ def dispatch_psmr_v9(args) -> int:
         result = audit_candidates(frontend=args.frontend, split=args.split, manifest=args.manifest, frontend_prediction=args.frontend_prediction, annotation=args.annotation, max_gap=args.max_gap, candidate_k=args.candidate_k, query_observations=args.query_observations, output=args.output, max_videos=args.video_limit)
     elif action == "build-event-cache":
         result = build_event_cache(frontend=args.frontend, split=args.split, manifest=args.manifest, frontend_prediction=args.frontend_prediction, annotation=args.annotation, checkpoint=args.checkpoint, min_gap=args.min_gap, max_gap=args.max_gap, candidate_k=args.candidate_k, query_observations=args.query_observations, top_r=args.top_r, output=args.output, device=args.device, max_videos=args.video_limit)
+    elif action == "precompute-qdic-sidecar":
+        result = precompute_qdic_sidecar(
+            args.event_cache,
+            args.output,
+            features=getattr(args, "features", None),
+            feature_source=getattr(args, "feature_source", None),
+            recent_k=args.recent_k,
+            alpha_fast=args.alpha_fast,
+            alpha_slow=args.alpha_slow,
+            memory_capacity=args.memory_capacity,
+            memory_dedup_cos=args.memory_dedup_cos,
+        )
     elif action == "precompute-reliability":
         result = precompute_reliability_cache(event_cache=args.event_cache, checkpoint=args.checkpoint, output=args.output, device=args.device, chunk_events=args.chunk_events)
     elif action == "sweep-psmr":
@@ -2350,4 +2567,4 @@ def dispatch_psmr_v9(args) -> int:
     return 0 if str(result.get("status", "COMPLETED")).startswith("COMPLETED") or result.get("status") in {"READY", "REUSED"} else 2
 
 
-__all__ = ["resolve_v9_inputs", "audit_candidates", "build_event_cache", "precompute_reliability_cache", "sweep_psmr", "merge_sweep_shards", "sweep_dual", "materialize", "evaluate_v9", "train_external_v9", "prepare_masa_r50", "convert_public_dets", "format_native_assigned", "convert_vov_detector_dets", "complete_annotation_partition", "r50_native_cache", "report_v9", "dispatch_psmr_v9"]
+__all__ = ["resolve_v9_inputs", "audit_candidates", "build_event_cache", "precompute_qdic_sidecar", "precompute_reliability_cache", "sweep_psmr", "merge_sweep_shards", "sweep_dual", "materialize", "evaluate_v9", "train_external_v9", "prepare_masa_r50", "convert_public_dets", "format_native_assigned", "convert_vov_detector_dets", "complete_annotation_partition", "r50_native_cache", "report_v9", "dispatch_psmr_v9"]

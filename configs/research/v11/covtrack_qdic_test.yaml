@@ -1,0 +1,22 @@
+# TEST_TUNED_MODEL_SPECIFIC
+# NOT_UNBIASED_TEST
+# Runtime configuration becomes usable only after a Base-trained QDIC
+# checkpoint is supplied.  This task intentionally does not train or run it.
+frontend: covtrack
+protocol: TEST_TUNED_MODEL_SPECIFIC
+tempo:
+  enabled: true
+  alpha_fast: 0.70
+  alpha_slow: 0.15
+  min_gap: 0
+  max_gap: 360
+  candidate_top_k: 8
+  qdic_context_top_k: 64
+  top_r: 3
+  memory_capacity: 64
+  qdic_weight: 1.0
+  qdic_recent_k: 8
+  qdic_checkpoint: null
+  qdic_device: cpu
+  score_threshold: 0.0
+  margin_threshold: 0.0

@@ -14,6 +14,9 @@ from .overlay import (
     TempoTrackConfig,
     TempoTrackOverlay,
 )
+from .qdic_features import QDIC_FEATURE_NAMES, QDIC_RAW_DIM, QDIC_RECENT_K
+from .qdic_loader import QDIC_STATUS, QDICV11Artifact, load_qdic_checkpoint
+from .query_distributional_calibrator import QueryDistributionalCalibrator
 from .adapters import (
     COVTrackAssociationDecision,
     COVTrackTempoAdapter,
@@ -36,6 +39,13 @@ __all__ = [
     "SnapshotContractError",
     "TempoTrackConfig",
     "TempoTrackOverlay",
+    "QDIC_FEATURE_NAMES",
+    "QDIC_RAW_DIM",
+    "QDIC_RECENT_K",
+    "QDIC_STATUS",
+    "QDICV11Artifact",
+    "QueryDistributionalCalibrator",
+    "load_qdic_checkpoint",
     "COVTrackAssociationDecision",
     "COVTrackTempoAdapter",
     "MasaPreAssociationDecision",

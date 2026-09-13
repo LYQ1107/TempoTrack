@@ -70,6 +70,20 @@ def _diagnostic_state(path: Path) -> dict[str, Any]:
             "reranker_decision_candidate_top_k": None,
             "reranker_context_contract_mismatch": False,
             "reranker_native_memo_bootstrap_count": 0,
+            "qdic_missing_evidence": 0,
+            "qdic_expected_query_observations": None,
+            "qdic_actual_query_observations": None,
+            "qdic_context_candidate_top_k": None,
+            "qdic_decision_candidate_top_k": None,
+            "qdic_context_contract_mismatch": False,
+            "qdic_native_memo_bootstrap_count": 0,
+            "qdic_status": None,
+            "qdic_alpha_samples": [],
+            "qdic_alpha_seen": 0,
+            "qdic_alpha_rng": 0x456789AB,
+            "qdic_structured_samples": [],
+            "qdic_structured_seen": 0,
+            "qdic_structured_rng": 0x56789ABC,
             "reason_counts": {},
             "full_capability_status_counts": {},
             "reranker_status": None,
@@ -145,6 +159,35 @@ def _record_overlay_diagnostics(decision: Any) -> None:
         state["reranker_native_memo_bootstrap_count"] = max(
             int(state["reranker_native_memo_bootstrap_count"]), int(bootstrap_count)
         )
+    state["qdic_missing_evidence"] += int(diagnostics.get("qdic_missing_evidence", 0))
+    for name in ("qdic_expected_query_observations", "qdic_actual_query_observations"):
+        value = diagnostics.get(name)
+        if value is not None and state[name] is None:
+            state[name] = int(value)
+    for name in ("qdic_context_candidate_top_k", "qdic_decision_candidate_top_k"):
+        value = diagnostics.get(name)
+        if value is None:
+            continue
+        value = int(value)
+        if state[name] is None:
+            state[name] = value
+        elif int(state[name]) != value:
+            state["qdic_context_contract_mismatch"] = True
+    qdic_bootstrap_count = diagnostics.get("qdic_native_memo_bootstrap_count")
+    if qdic_bootstrap_count is not None:
+        state["qdic_native_memo_bootstrap_count"] = max(
+            int(state["qdic_native_memo_bootstrap_count"]), int(qdic_bootstrap_count)
+        )
+    if state["qdic_status"] is None and diagnostics.get("qdic_status") is not None:
+        state["qdic_status"] = diagnostics.get("qdic_status")
+    for diagnostic_name, reservoir_name in (
+        ("qdic_alpha_quantiles", "qdic_alpha"),
+        ("qdic_structured_score_quantiles", "qdic_structured"),
+    ):
+        quantiles = diagnostics.get(diagnostic_name)
+        if isinstance(quantiles, Mapping):
+            for value in quantiles.values():
+                _reservoir_add(state, reservoir_name, float(value))
     reason_counts = Counter(state["reason_counts"])
     reason_counts.update(reasons)
     state["reason_counts"] = dict(reason_counts)
@@ -209,6 +252,16 @@ def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> Non
         "reranker_native_memo_bootstrap_count": int(
             state["reranker_native_memo_bootstrap_count"]
         ),
+        "qdic_missing_evidence": int(state["qdic_missing_evidence"]),
+        "qdic_expected_query_observations": state["qdic_expected_query_observations"],
+        "qdic_actual_query_observations": state["qdic_actual_query_observations"],
+        "qdic_context_candidate_top_k": state["qdic_context_candidate_top_k"],
+        "qdic_decision_candidate_top_k": state["qdic_decision_candidate_top_k"],
+        "qdic_context_contract_mismatch": bool(state["qdic_context_contract_mismatch"]),
+        "qdic_native_memo_bootstrap_count": int(state["qdic_native_memo_bootstrap_count"]),
+        "qdic_status": state["qdic_status"],
+        "qdic_alpha_quantiles": _quantiles(state["qdic_alpha_samples"]),
+        "qdic_structured_score_quantiles": _quantiles(state["qdic_structured_samples"]),
         "reason_counts": dict(sorted(state["reason_counts"].items())),
         "full_capability_status_counts": dict(sorted(state["full_capability_status_counts"].items())),
         "reranker_status": state["reranker_status"],
