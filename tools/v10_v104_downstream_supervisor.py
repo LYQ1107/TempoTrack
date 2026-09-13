@@ -532,10 +532,13 @@ class DownstreamSupervisor:
         base = DOWNSTREAM_ROOT / "annotation_shards" / name
         existing = read_json(base / "manifest.json")
         if isinstance(existing, dict) and existing.get("source_sha256") == sha256(annotation):
-            self.stage(name.upper() + "_SHARDS").update(
+            # A manifest is only an input artifact.  It must not share the
+            # execution-stage key used by run_parallel: doing so makes a
+            # reused manifest look like completed prediction workers.
+            self.stage(name.upper() + "_MANIFEST").update(
                 {"status": "COMPLETED", "output": str(base / "manifest.json"), "reused": True}
             )
-            self.save(current_stage=name.upper() + "_SHARDS", next_action="reuse exact annotation shards")
+            self.save(current_stage=name.upper() + "_MANIFEST", next_action="reuse exact annotation shards")
             return base
         root = safe_root(base)
         manifest = root / "manifest.json"
@@ -546,7 +549,7 @@ class DownstreamSupervisor:
             "--output", str(root),
             "--count", str(count),
         ]
-        if not self.run_one(name.upper() + "_SHARDS", command, HARD_REPO, common_env(), marker=manifest):
+        if not self.run_one(name.upper() + "_MANIFEST", command, HARD_REPO, common_env(), marker=manifest):
             return None
         return root
 
@@ -736,8 +739,11 @@ class DownstreamSupervisor:
                     ),
                 }
             )
-        stage = "COV_" + split.upper() + "_SHARDS"
-        if not self.run_parallel(stage, jobs):
+        # Keep manifest creation and prediction workers as separate DAG
+        # nodes.  The old shared name allowed a reused manifest to bypass
+        # all workers and fail only at merge time.
+        worker_stage = "COV_" + split.upper() + "_WORKERS"
+        if not self.run_parallel(worker_stage, jobs):
             return False
         merged = DOWNSTREAM_ROOT / ("cov_" + split.lower()) / "tao_track.json"
         merge_cmd = [
@@ -747,7 +753,7 @@ class DownstreamSupervisor:
             "--trials-root", str(trials_root),
             "--output", str(merged),
         ]
-        if not self.run_one(stage + "_MERGE", merge_cmd, HARD_REPO, common_env(), marker=merged):
+        if not self.run_one(worker_stage + "_MERGE", merge_cmd, HARD_REPO, common_env(), marker=merged):
             return False
         eval_dir = merged.parent / "evaluation"
         eval_cmd = [
@@ -760,7 +766,7 @@ class DownstreamSupervisor:
             "--cores", "2",
         ]
         summary = eval_dir / "COV_V10_DOWNSTREAM" / "teta_summary_results.pth"
-        if not self.run_one(stage + "_EVAL", eval_cmd, HARD_REPO, self.eval_env(), marker=summary):
+        if not self.run_one(worker_stage + "_EVAL", eval_cmd, HARD_REPO, self.eval_env(), marker=summary):
             return False
         result = {
             "status": "PASS",
@@ -779,8 +785,8 @@ class DownstreamSupervisor:
         }
         output = DOWNSTREAM_ROOT / ("cov_" + split.lower() + "_result.json")
         atomic_json(output, result)
-        self.stage(stage + "_RESULT").update({"status": "COMPLETED", "output": str(output)})
-        self.save(current_stage=stage + "_RESULT", next_action="advance")
+        self.stage(worker_stage + "_RESULT").update({"status": "COMPLETED", "output": str(output)})
+        self.save(current_stage=worker_stage + "_RESULT", next_action="advance")
         return True
 
     def ov_jobs(self, shard_root: Path, output_root: Path) -> list[dict[str, Any]]:
@@ -828,8 +834,10 @@ class DownstreamSupervisor:
             return False
         trials_root = DOWNSTREAM_ROOT / ("ov_" + split.lower() + "_trials")
         jobs = self.ov_jobs(shard_root, trials_root)
-        stage = "OV_" + split.upper() + "_SHARDS"
-        if not self.run_parallel(stage, jobs):
+        # As above, the annotation manifest must not satisfy the worker
+        # execution node merely because it was reused.
+        worker_stage = "OV_" + split.upper() + "_WORKERS"
+        if not self.run_parallel(worker_stage, jobs):
             return False
         manifest = read_json(shard_root / "manifest.json")
         if not isinstance(manifest, dict):
@@ -845,7 +853,7 @@ class DownstreamSupervisor:
         for shard in manifest.get("shards", []):
             index = int(shard["index"])
             merge_cmd.extend(["--shard", str(shard["path"]), str(trials_root / f"shard_{index:02d}" / "stream/tao_track.json")])
-        if not self.run_one("OV_" + split.upper() + "_MERGE", merge_cmd, HARD_REPO, common_env(), marker=merged):
+        if not self.run_one(worker_stage + "_MERGE", merge_cmd, HARD_REPO, common_env(), marker=merged):
             return False
         eval_dir = merged.parent / "evaluation"
         eval_cmd = [
@@ -858,7 +866,7 @@ class DownstreamSupervisor:
             "--cores", "2",
         ]
         summary = eval_dir / "OV_V10_MEMORY_ONLY" / "teta_summary_results.pth"
-        if not self.run_one("OV_" + split.upper() + "_EVAL", eval_cmd, HARD_REPO, self.eval_env(), marker=summary):
+        if not self.run_one(worker_stage + "_EVAL", eval_cmd, HARD_REPO, self.eval_env(), marker=summary):
             return False
         checkpoint = next(item for item in OV_CHECKPOINT_ALTERNATES if item.is_file())
         result = {
@@ -886,8 +894,8 @@ class DownstreamSupervisor:
         }
         output = DOWNSTREAM_ROOT / ("ov_" + split.lower() + "_result.json")
         atomic_json(output, result)
-        self.stage("OV_" + split.upper() + "_RESULT").update({"status": "COMPLETED", "output": str(output)})
-        self.save(current_stage="OV_" + split.upper() + "_RESULT", next_action="advance")
+        self.stage(worker_stage + "_RESULT").update({"status": "COMPLETED", "output": str(output)})
+        self.save(current_stage=worker_stage + "_RESULT", next_action="advance")
         return True
 
     def write_inventory(self) -> None:
