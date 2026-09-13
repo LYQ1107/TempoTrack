@@ -23,6 +23,11 @@ HARD_REPO = Path("/data2/usr_for_deadline/tempotrack_v104_search_hardening")
 V10_ROOT = Path("/data2/usr_for_deadline/tempotrack_v10_unified")
 DOWNSTREAM_ROOT = V10_ROOT / "v104_downstream"
 OV_STATE = V10_ROOT / "v104_downstream_supervisor" / "state.json"
+SHARDED_TEMPO_ROOT = DOWNSTREAM_ROOT / "masa_tempo_sharded_20260913"
+EARLY_NATIVE_STATE_ROOTS = (
+    V10_ROOT / "v104_masa_early_parallel_supervisor_retry01",
+    V10_ROOT / "v104_masa_early_parallel_supervisor_retry02",
+)
 ANNOTATIONS = {
     "val": Path("/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/validation_ours_v1.json"),
     "test": Path("/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json"),
@@ -332,12 +337,149 @@ class MasaRunner:
             rows.append(row)
         atomic_json(DOWNSTREAM_ROOT / "masa_results.json", {"status": "PASS", "rows": rows, "created_at": iso()})
 
+    def _completed_native_rows(self) -> list[dict[str, Any]] | None:
+        """Recover only completed native rows from durable sidecar state.
+
+        The early sidecars use isolated roots and the same production native
+        command.  Adoption is deliberately fail-closed: the state, command,
+        output files, checkpoint/config hashes, and annotation binding must
+        all be present before a row is eligible.
+        """
+        rows: dict[str, dict[str, Any]] = {}
+        for state_root in EARLY_NATIVE_STATE_ROOTS:
+            state = read_json(state_root / "state.json")
+            if not isinstance(state, dict):
+                continue
+            jobs = state.get("stages", {}).get("MASA_RUN", {}).get("jobs", [])
+            if not isinstance(jobs, list):
+                continue
+            for job in jobs:
+                if not isinstance(job, dict) or job.get("method") != "native":
+                    continue
+                split = str(job.get("split", ""))
+                if split not in ANNOTATIONS or job.get("status") != "COMPLETED" or int(job.get("returncode", 1)) != 0:
+                    continue
+                command = job.get("command", [])
+                if not isinstance(command, list) or str(NATIVE_CONFIG) not in [str(x) for x in command]:
+                    continue
+                if str(MASA_CHECKPOINT) not in [str(x) for x in command]:
+                    continue
+                output = Path(str(job.get("output", ""))).resolve()
+                prediction = output / "predictions.pkl"
+                if not prediction.is_file():
+                    continue
+                try:
+                    summary = find_summary(output)
+                except RuntimeError:
+                    continue
+                annotation = ANNOTATIONS[split]
+                det_root = PUBLIC_DETECTIONS[split]
+                row = {
+                    "status": "PASS",
+                    "split": split,
+                    "method": "native",
+                    "protocol": "official_native_sidecar_adopted",
+                    "annotation": annotation_inventory(annotation),
+                    "public_detection_root": str(det_root),
+                    "public_detection_root_status": "frozen_existing_audited_input",
+                    "config": str(NATIVE_CONFIG),
+                    "config_sha256": sha256(NATIVE_CONFIG),
+                    "checkpoint": str(MASA_CHECKPOINT),
+                    "checkpoint_sha256": sha256(MASA_CHECKPOINT),
+                    "prediction": str(prediction),
+                    "prediction_sha256": sha256(prediction),
+                    "summary": str(summary),
+                    "summary_sha256": sha256(summary),
+                    "metrics": parse_summary(summary, annotation),
+                    "source_state": str(state_root / "state.json"),
+                    "source_state_sha256": sha256(state_root / "state.json"),
+                    "created_at": iso(),
+                }
+                old = rows.get(split)
+                if old is None or row["summary_sha256"] > old["summary_sha256"]:
+                    rows[split] = row
+        if set(rows) != set(ANNOTATIONS):
+            return None
+        return [rows[split] for split in ("val", "test")]
+
+    def adopt_sharded_tempo(self) -> bool:
+        """Adopt exact sharded Tempo plus audited native sidecar outputs."""
+        aggregate_path = SHARDED_TEMPO_ROOT / "masa_tempo_sharded_results.json"
+        aggregate = read_json(aggregate_path)
+        if not isinstance(aggregate, dict) or aggregate.get("status") != "PASS":
+            return False
+        tempo_rows = aggregate.get("rows", [])
+        if not isinstance(tempo_rows, list) or {str(row.get("split")) for row in tempo_rows if isinstance(row, dict)} != set(ANNOTATIONS):
+            return False
+        tempo_by_split: dict[str, dict[str, Any]] = {}
+        for row in tempo_rows:
+            if not isinstance(row, dict) or row.get("status") != "PASS" or row.get("method") != "tempo_sharded":
+                return False
+            split = str(row.get("split"))
+            if split in tempo_by_split:
+                return False
+            annotation = ANNOTATIONS.get(split)
+            if annotation is None:
+                return False
+            prediction = Path(str(row.get("prediction", ""))).resolve()
+            summary = Path(str(row.get("summary", ""))).resolve()
+            if not prediction.is_file() or not summary.is_file():
+                return False
+            if row.get("prediction_sha256") != sha256(prediction) or row.get("summary_sha256") != sha256(summary):
+                return False
+            ann = row.get("annotation", {})
+            if not isinstance(ann, dict) or ann.get("sha256") != sha256(annotation):
+                return False
+            if row.get("config") != str(TEMPO_CONFIG) or row.get("config_sha256") != sha256(TEMPO_CONFIG):
+                return False
+            if row.get("checkpoint") != str(MASA_CHECKPOINT) or row.get("checkpoint_sha256") != sha256(MASA_CHECKPOINT):
+                return False
+            tempo_by_split[split] = dict(row)
+            tempo_by_split[split]["method"] = "tempo"
+            tempo_by_split[split]["protocol"] = "tempo_memory_only_complete_video_shards_adopted"
+        native_rows = self._completed_native_rows()
+        if native_rows is None:
+            return False
+        rows: list[dict[str, Any]] = []
+        for row in native_rows:
+            rows.append(row)
+        for split in ("val", "test"):
+            rows.append(tempo_by_split[split])
+        for row in rows:
+            atomic_json(DOWNSTREAM_ROOT / f"masa_{row['split']}_{row['method']}_result.json", row)
+        atomic_json(
+            DOWNSTREAM_ROOT / "masa_results.json",
+            {
+                "status": "PASS",
+                "rows": rows,
+                "adoption": {
+                    "tempo_source": str(aggregate_path),
+                    "tempo_source_sha256": sha256(aggregate_path),
+                    "native_source_states": [str(path / "state.json") for path in EARLY_NATIVE_STATE_ROOTS],
+                },
+                "created_at": iso(),
+            },
+        )
+        self.state["adoption"] = {
+            "status": "PASS",
+            "tempo_source": str(aggregate_path),
+            "tempo_source_sha256": sha256(aggregate_path),
+            "native_rows": [row.get("source_state") for row in native_rows],
+        }
+        return True
+
     def run(self) -> int:
         self.wait_ov()
         if not MASA_CHECKPOINT.is_file():
             self.state["status"] = "BLOCKED"
             self.save(current_stage="MASA_PREFLIGHT", next_action="MASA checkpoint missing")
             return 2
+        if self.adopt_sharded_tempo():
+            self.state["status"] = "COMPLETED"
+            self.save(current_stage="COMPLETED", next_action="generate final V10.4 report from adopted MASA rows")
+            self.state["completed_at"] = iso()
+            self.save()
+            return 0
         jobs = [(split, method) for split in ("val", "test") for method in ("native", "tempo")]
         if not self.run_parallel(jobs):
             self.state["status"] = "BLOCKED"

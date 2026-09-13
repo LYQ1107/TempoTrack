@@ -42,6 +42,7 @@ MASA_CHECKPOINT = canonical.MASA_CHECKPOINT
 TEMPO_CONFIG = canonical.TEMPO_CONFIG
 IMAGE_PREFIX = canonical.IMAGE_PREFIX
 RUN_CWD = canonical.RUN_CWD
+TETA_SOURCE = Path("/data2/usr_for_deadline/tet_a62a9c0_clean/teta")
 
 ANNOTATIONS = dict(canonical.ANNOTATIONS)
 PUBLIC_DETECTIONS = dict(canonical.PUBLIC_DETECTIONS)
@@ -141,7 +142,10 @@ def common_env() -> dict[str, str]:
             ),
         }
     )
-    entries = [str(HARD_REPO), str(canonical.CLEAN_TETA)]
+    # ``eval_ovmot_teta.py`` and the parser import their dependencies from
+    # the hardened repository; keep this environment independent of any
+    # optional constant in the canonical runner module.
+    entries = [str(HARD_REPO), str(TETA_SOURCE)]
     if env.get("PYTHONPATH"):
         entries.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(entries)
