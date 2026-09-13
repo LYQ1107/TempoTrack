@@ -119,6 +119,7 @@ def main() -> int:
                 pending.append(key)
 
     state["helper"] = "v10_v104_ov_takeover"
+    state["pid"] = os.getpid()
     state["takeover_started_at"] = base.iso()
     state["takeover_max_active"] = max(1, int(args.max_active))
     state["status"] = "RUNNING"

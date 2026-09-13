@@ -870,3 +870,29 @@ failure.
   shared project worker.  Host memory was about 125G total, 57G available
   and 7.8G immediately free; therefore no additional overlapping writer was
   admitted merely to inflate concurrency or risk an output/memory collision.
+
+## OV worker expansion handoff — 2026-09-13 17:21 CST
+
+- The OV prefetch coordinator's real frame rate was approximately 0.8--0.9
+  frames/s, so leaving its fixed `--max-active 3` would serialize the other
+  complete-video shards for many additional hours.  Before expansion, the
+  coordinator command and all three child commands were re-checked by PID.
+- Only the project-owned coordinator PID `33377` was terminated.  No signal
+  was sent to its healthy inference children; PIDs `33381`, `33382`, and
+  `33383` immediately became PPID 1 and continued running on their original
+  output directories.
+- `tools/v10_v104_ov_takeover.py` then adopted those three PIDs from the
+  authoritative `state.json` active list and admitted five new disjoint
+  complete-video shards (PIDs `20641`--`20645`) on GPUs 0--4.  The takeover
+  state is now written by PID `21438`, with 8 active workers and 8 pending
+  shards.  Each new shard has its own output directory and receipt; no active
+  shard has a second writer.
+- The takeover source was syntax-checked and pushed as commit
+  `396baf0dd7a9881bce79b1f1a37a00e86391a1e6`.  A metadata correction for the
+  takeover PID is present in the working source; the running process was
+  restarted as a coordinator-only handoff after verifying all eight workers
+  remained alive, and the state now reports PID `21438`.
+- Immediately after expansion, host `MemAvailable` was about 33G and each
+  GPU retained more than 33G free VRAM.  The dynamic takeover pauses new
+  admissions below a 20G host-memory floor.  GPU8--9 remained occupied by
+  COV workers; no external process was killed, stopped, reniced, or reset.
