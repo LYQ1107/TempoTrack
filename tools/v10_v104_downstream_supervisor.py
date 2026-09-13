@@ -454,6 +454,17 @@ class DownstreamSupervisor:
                         command[gpu_position] = gpu
                 env = dict(job.get("env", common_env()))
                 env["CUDA_VISIBLE_DEVICES"] = gpu
+                # The streaming entry points fail closed when their audited
+                # work/transport roots do not exist.  Materialize those
+                # experiment-owned roots before spawning the worker; a
+                # missing directory is a scheduler bug, not a model failure.
+                for env_name in ("V10_WORK_DIR", "V10_STREAM_RESULTS_DIR"):
+                    raw_root = env.get(env_name)
+                    if raw_root:
+                        root = Path(raw_root).expanduser().resolve()
+                        if not root.is_absolute():
+                            raise RuntimeError(f"{env_name} must be absolute: {root}")
+                        root.mkdir(parents=True, exist_ok=True)
                 log = self.log_root / f"{name.lower()}_{index:02d}.log"
                 log.parent.mkdir(parents=True, exist_ok=True)
                 handle = log.open("a", encoding="utf-8")
