@@ -18,6 +18,7 @@ PRIMARY_STATE = V10_ROOT / "v104_persistent_supervisor" / "state.json"
 DOWNSTREAM_STATE = V10_ROOT / "v104_downstream_supervisor" / "state.json"
 MASA_STATE = V10_ROOT / "v104_masa_downstream_supervisor" / "state.json"
 LEGACY_ROOT = V10_ROOT / "search" / "covtrack_test_q1_fixed_20260912"
+WAVE2_ROOT = V10_ROOT / "search" / "covtrack_q1_fixed_20260913_wave2"
 
 
 def read_json(path: Path) -> Any | None:
@@ -78,6 +79,34 @@ def legacy_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def wave2_rows() -> list[dict[str, Any]]:
+    """Include the post-contract Wave2 receipts in the final audit table."""
+    rows = []
+    for receipt_path in sorted(WAVE2_ROOT.glob("*/receipt.json")):
+        value = load_receipt(receipt_path)
+        if not value:
+            continue
+        metrics_value = value.get("metrics", {})
+        rows.append({
+            "trial_id": value.get("trial_id", receipt_path.parent.name),
+            "status": value.get("status"),
+            "stage": value.get("stage"),
+            "gpu": value.get("gpu"),
+            "base": metrics_value.get("base", {}) if isinstance(metrics_value, dict) else {},
+            "novel": metrics_value.get("novel", {}) if isinstance(metrics_value, dict) else {},
+            "prediction_sha256": value.get("prediction_sha256") or value.get("outputs", {}).get("prediction_sha256"),
+            "receipt": str(receipt_path),
+        })
+    return rows
+
+
+def search_rows() -> list[dict[str, Any]]:
+    return [
+        *({**row, "source": "legacy"} for row in legacy_rows()),
+        *({**row, "source": "wave2"} for row in wave2_rows()),
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=HARD_REPO / "reports/tempotrack_v10/FINAL_V10_4_FULL_SEARCH.md")
@@ -106,7 +135,7 @@ def main() -> int:
         f"- Upstream hardened supervisor: `{primary.get('status', 'MISSING')}` at stage `{primary.get('current_stage', 'MISSING')}`.",
         f"- Downstream COV/OV supervisor: `{downstream.get('status', 'MISSING')}` at stage `{downstream.get('current_stage', 'MISSING')}`.",
         f"- MASA downstream supervisor: `{masa.get('status', 'MISSING')}` at stage `{masa.get('current_stage', 'MISSING')}`.",
-        f"- Legacy receipt count: `{len(legacy_rows())}`; root: `{LEGACY_ROOT}`.",
+        f"- Legacy receipt count: `{len(legacy_rows())}`; Wave2 receipt count: `{len(wave2_rows())}`.",
         "",
         "## Validity and protocol",
         "",
@@ -147,8 +176,8 @@ def main() -> int:
         lines.append("- No selected COV configuration receipt was found.")
 
     lines.extend(["", "## Upstream search receipt status", "", "| trial | status | stage | GPU | Base AssocA | Novel AssocA | prediction SHA |", "|---|---|---|---:|---:|---:|---|"])
-    for row in legacy_rows():
-        lines.append(f"| `{row['trial_id']}` | `{row['status']}` | `{row['stage']}` | `{row['gpu']}` | {fmt(row['base'].get('AssocA'))} | {fmt(row['novel'].get('AssocA'))} | `{row['prediction_sha256'] or '—'}` |")
+    for row in search_rows():
+        lines.append(f"| `{row['source']}/{row['trial_id']}` | `{row['status']}` | `{row['stage']}` | `{row['gpu']}` | {fmt(row['base'].get('AssocA'))} | {fmt(row['novel'].get('AssocA'))} | `{row['prediction_sha256'] or '—'}` |")
     lines.extend(["", "## Artifact binding", ""])
     for label, value in (("COV Test", cov_test), ("COV Val", cov_val), ("OV Test", ov_test), ("OV Val", ov_val)):
         if isinstance(value, dict):
