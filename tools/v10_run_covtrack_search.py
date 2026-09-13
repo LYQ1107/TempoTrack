@@ -73,7 +73,16 @@ def _validate_external_source_checkout(source: Path, expected_commit: str | None
     raw = _git_value(source, "status", "--porcelain", "--untracked-files=all")
     if raw is None:
         raise RuntimeError("EXTERNAL_COV_SOURCE_STATUS_UNAVAILABLE")
-    lines = sorted(line for line in raw.splitlines() if line)
+    # Existing COV/OV workers may have regenerated interpreter bytecode in
+    # this shared pinned checkout.  It is not source provenance and must not
+    # be deleted while those workers are alive.  Ignore only explicit
+    # ``__pycache__`` entries; every source/config/data/model change remains a
+    # hard failure below.
+    lines = sorted(
+        line
+        for line in raw.splitlines()
+        if line and "__pycache__/" not in line and not line.endswith(".pyc")
+    )
     if not lines:
         return {"status": "CLEAN", "source": str(source), "git_status": []}
 
