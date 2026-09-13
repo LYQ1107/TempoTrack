@@ -802,3 +802,41 @@ failure.
   available is about 21 GB after launch, with each new worker adding about
   3.1 GB VRAM on top of the diagnostic workers; no external process was
   signalled.
+
+## V10.4 cross-lane execution — 2026-09-13 16:52 CST
+
+- The already-defined OVTrack/VOV native + Tempo memory-only path is now
+  running concurrently with the COV and MASA lanes. The isolated execution
+  helper is `tools/v10_v104_ov_prefetch.py`, pushed as commit `2f867c5` on
+  `codex/v104-search-hardening`; it reuses the pinned OV source at
+  `/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_full_source`, the
+  existing runtime/Tempo configs, the existing complete-video TAO shards, and
+  the official merge/TETA entry points. It changes no detector, tracker
+  parameter, bbox, score, label, or evaluation protocol.
+- The first attempt failed closed before inference because the helper had not
+  created the stream wrapper's required `V10_WORK_DIR`; its three logs are
+  preserved as setup-failure evidence. The directory creation fix was applied
+  before retry, and Test shard 0, Val shard 0, and Test shard 1 are now real
+  inference processes under the isolated root
+  `/data2/usr_for_deadline/tempotrack_v10_unified/v104_downstream/ov_early_parallel_20260913`.
+  Supervisor state, exact commands, PIDs, shared-GPU snapshot, and pending
+  complete-video shards are in that root's `state.json`.
+- This shared-GPU run was admitted only after the live snapshot showed about
+  34–37 GB free VRAM per selected card and about 57–58 GB host memory
+  available. It uses at most one prefetch worker on each of physical GPUs
+  5–7 and does not signal, stop, renice, or reset any external process. The
+  existing COV Test worker stage remains live with all eight complete-video
+  shards (the eighth was admitted on GPU6); MASA Test/Val Tempo workers remain
+  live.
+- A first completed official result is MASA-R50 association with the COV public
+  detection stream, Test native (no Tempo). Prediction and TETA summary are
+  under
+  `/data2/usr_for_deadline/tempotrack_v10_unified/v104_downstream/masa_early_parallel_20260913_retry01/masa_test_native/official_format`.
+  Parsed official TETA50 values in `[TETA, LocA, AssocA, ClsA]` order are
+  Base=`33.181984/54.296173/36.291408/8.958369` and
+  Novel=`26.995912/49.635061/27.886224/3.466488`.
+  Prediction SHA256 is
+  `d266e8bb9eb2b8caf5c7c446634eeaaedd8d28dcd05f160a78c0619735739f7c`;
+  summary SHA256 is
+  `c105f3d34bd83afe4fcbb7b6352d7c524d900ff35fa162c7a08cc6e78bd1c597`.
+  This is a completed native baseline result, not a TempoTrack gain claim.
