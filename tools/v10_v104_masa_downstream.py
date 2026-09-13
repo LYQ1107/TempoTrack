@@ -24,6 +24,12 @@ V10_ROOT = Path("/data2/usr_for_deadline/tempotrack_v10_unified")
 DOWNSTREAM_ROOT = V10_ROOT / "v104_downstream"
 OV_STATE = V10_ROOT / "v104_downstream_supervisor" / "state.json"
 SHARDED_TEMPO_ROOT = DOWNSTREAM_ROOT / "masa_tempo_sharded_20260913"
+# Failed attempts are immutable.  A later retry is discovered separately so
+# the canonical waiter can adopt it without overwriting the first receipt.
+SHARDED_TEMPO_ROOTS = (
+    SHARDED_TEMPO_ROOT,
+    DOWNSTREAM_ROOT / "masa_tempo_sharded_20260913__retry01",
+)
 EARLY_NATIVE_STATE_ROOTS = (
     V10_ROOT / "v104_masa_early_parallel_supervisor_retry01",
     V10_ROOT / "v104_masa_early_parallel_supervisor_retry02",
@@ -404,9 +410,16 @@ class MasaRunner:
 
     def adopt_sharded_tempo(self) -> bool:
         """Adopt exact sharded Tempo plus audited native sidecar outputs."""
-        aggregate_path = SHARDED_TEMPO_ROOT / "masa_tempo_sharded_results.json"
-        aggregate = read_json(aggregate_path)
-        if not isinstance(aggregate, dict) or aggregate.get("status") != "PASS":
+        aggregate_path = None
+        aggregate = None
+        for candidate_root in SHARDED_TEMPO_ROOTS:
+            candidate_path = candidate_root / "masa_tempo_sharded_results.json"
+            candidate = read_json(candidate_path)
+            if isinstance(candidate, dict) and candidate.get("status") == "PASS":
+                aggregate_path = candidate_path
+                aggregate = candidate
+                break
+        if aggregate_path is None or aggregate is None:
             return False
         tempo_rows = aggregate.get("rows", [])
         if not isinstance(tempo_rows, list) or {str(row.get("split")) for row in tempo_rows if isinstance(row, dict)} != set(ANNOTATIONS):

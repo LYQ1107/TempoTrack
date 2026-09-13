@@ -176,7 +176,12 @@ def command_for(
         "--cfg-options",
         f"model.public_det_path={PUBLIC_DETECTIONS[split]}",
         f"test_dataloader.dataset.ann_file={annotation}",
-        f"test_dataloader.dataset.data_prefix.img_path={IMAGE_PREFIX}/",
+        # MASA's official TAO public-detection lookup strips the literal
+        # ``data/tao/frames/`` prefix from the sample path.  Keep this
+        # relative setting identical to the canonical full-split runner;
+        # passing IMAGE_PREFIX here makes the lookup absolute and produces
+        # an invalid ``.../frames/<split>/.../*.pth`` path.
+        "test_dataloader.dataset.data_prefix.img_path=data/tao/frames/",
         "test_dataloader.num_workers=0",
         "test_dataloader.persistent_workers=False",
         f"test_evaluator.ann_file={annotation}",
