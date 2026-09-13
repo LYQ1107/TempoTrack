@@ -261,7 +261,12 @@ def gpu_candidates(leased: set[str]) -> list[str]:
     )
     if result.returncode != 0:
         return []
+    # Keep the physical index as the canonical candidate identity.  The
+    # compute-app query is keyed by UUID, so maintain the reverse mapping
+    # separately; sorting UUID strings as integer GPU indices raises on the
+    # first real nvidia-smi response.
     uuid_to_index: dict[str, str] = {}
+    indices: set[str] = set()
     blocked: set[str] = set(leased)
     for line in result.stdout.splitlines():
         fields = [part.strip() for part in line.split(",")]
@@ -269,6 +274,7 @@ def gpu_candidates(leased: set[str]) -> list[str]:
             continue
         index, uuid, free = fields
         uuid_to_index[uuid] = index
+        indices.add(index)
         try:
             if int(float(free)) < 10000:
                 blocked.add(index)
@@ -295,7 +301,7 @@ def gpu_candidates(leased: set[str]) -> list[str]:
                 blocked.add(uuid_to_index[fields[0]])
     return [
         index
-        for index in sorted(uuid_to_index, key=lambda value: int(value))
+        for index in sorted(indices, key=lambda value: int(value))
         if index not in blocked
     ]
 
