@@ -1,0 +1,52 @@
+{
+  "protocol": "TEST_TUNED_MODEL_SPECIFIC",
+  "unbiased_test": false,
+  "contract_mode": "hardened",
+  "contract_gate": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_hardened_contract_smoke_FINAL_20260913/contract_gate.json",
+  "contract_gate_sha256": "7fd0167fc57a54a82fbca9c5ff32b1b9aebff62bcded86efff40a94dd704bc1f",
+  "threshold_source": "post_fix_q1_2video_smoke_initialization_points",
+  "threshold_quantiles": {
+    "score_p05": 1.367088943719864,
+    "score_p25": 2.371457517147064,
+    "score_p50": 3.5821245908737183,
+    "margin_p05": 0.1311543583869934,
+    "margin_p25": 0.6632569432258606,
+    "margin_p50": 1.566097915172577
+  },
+  "expected_inputs": {
+    "subset_annotation_sha256": "6a1245c5bcc2e9838caf3c5f545256a216ff52003eafd9c47f64c95de3118938",
+    "full_test_annotation_sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+    "reranker_checkpoint_sha256": "ed2524af31c22d17b6fcb61dd118095274b1bb56ad9329b993f9cdc4579aa80f",
+    "external_cov_commit": "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b",
+    "external_checkpoint_sha256": "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c",
+    "external_config_sha256": "282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a",
+    "base_config_sha256": "af7a2a39c8449b7b3f14d8686081064aabe35e59d350ac8e91e49ee4ac677c9d",
+    "teta_source_root": "/data2/usr_for_deadline/tet_a62a9c0_clean/teta",
+    "teta_init_sha256": "68df242ab89cb19c7e392af3c8077dae93512c3966689051d13a489342c9d502",
+    "teta_git_commit": "a62a9c0affec3a97f2cd0263141c53bcfb9c79f7",
+    "teta_require_tracked_clean": true
+  },
+  "trials": [
+    {
+      "trial_id": "q1_topk4_full",
+      "max_gap": 360,
+      "candidate_top_k": 4,
+      "score_threshold": 2.371457517147064,
+      "margin_threshold": 0.6632569432258606
+    },
+    {
+      "trial_id": "q1_topk16_full",
+      "max_gap": 360,
+      "candidate_top_k": 16,
+      "score_threshold": 2.371457517147064,
+      "margin_threshold": 0.6632569432258606
+    },
+    {
+      "trial_id": "q1_gap240_full",
+      "max_gap": 240,
+      "candidate_top_k": 8,
+      "score_threshold": 2.371457517147064,
+      "margin_threshold": 0.6632569432258606
+    }
+  ]
+}
