@@ -419,54 +419,66 @@ class DownstreamSupervisor:
             return True
         if entry.get("status") == "FAILED":
             return False
-        while True:
-            free = gpu_candidates(set())
-            if len(free) >= len(jobs):
-                break
+        # Schedule complete-video shards incrementally.  The previous
+        # implementation waited for every GPU lease before launching any
+        # shard, which stranded available devices behind a long-running
+        # project job.  Each shard remains one exclusive project job per GPU;
+        # a later free lease simply admits the next pending shard.
+        entry.update({"status": "RUNNING", "started_at": iso(), "jobs": []})
+        pending = list(enumerate(jobs))
+        processes: list[tuple[dict[str, Any], subprocess.Popen[str], Any]] = []
+        failed = False
+        while pending or processes:
+            leased = {
+                str(record.get("gpu"))
+                for record, _process, _handle in processes
+                if record.get("gpu") is not None
+            }
+            free = gpu_candidates(leased)
+            while pending and free:
+                index, job = pending.pop(0)
+                gpu = free.pop(0)
+                command = list(job["command"])
+                if "--gpu" in command:
+                    gpu_position = command.index("--gpu") + 1
+                    if gpu_position < len(command) and command[gpu_position] == "__GPU__":
+                        command[gpu_position] = gpu
+                env = dict(job.get("env", common_env()))
+                env["CUDA_VISIBLE_DEVICES"] = gpu
+                log = self.log_root / f"{name.lower()}_{index:02d}.log"
+                log.parent.mkdir(parents=True, exist_ok=True)
+                handle = log.open("a", encoding="utf-8")
+                handle.write(f"\n[{iso()}] gpu={gpu} $ {' '.join(command)}\n")
+                handle.flush()
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(job["cwd"]),
+                    env=env,
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                record = {
+                    "index": index,
+                    "gpu": gpu,
+                    "pid": process.pid,
+                    "command": command,
+                    "cwd": str(job["cwd"]),
+                    "log": str(log),
+                    "status": "RUNNING",
+                    "started_at": iso(),
+                }
+                entry["jobs"].append(record)
+                processes.append((record, process, handle))
+            entry["pending_indices"] = [index for index, _job in pending]
             self.save(
                 current_stage=name,
-                next_action=f"wait for {len(jobs)} safe GPU leases; available={free}",
+                next_action=(
+                    "monitor parallel workers"
+                    if processes
+                    else f"wait for next safe GPU lease; pending={len(pending)}; available={free}"
+                ),
             )
-            time.sleep(30)
-        entry.update({"status": "RUNNING", "started_at": iso(), "jobs": []})
-        processes: list[tuple[dict[str, Any], subprocess.Popen[str], Any]] = []
-        for index, job in enumerate(jobs):
-            gpu = free[index]
-            command = list(job["command"])
-            if "--gpu" in command:
-                gpu_position = command.index("--gpu") + 1
-                if gpu_position < len(command) and command[gpu_position] == "__GPU__":
-                    command[gpu_position] = gpu
-            env = dict(job.get("env", common_env()))
-            env["CUDA_VISIBLE_DEVICES"] = gpu
-            log = self.log_root / f"{name.lower()}_{index:02d}.log"
-            log.parent.mkdir(parents=True, exist_ok=True)
-            handle = log.open("a", encoding="utf-8")
-            handle.write(f"\n[{iso()}] gpu={gpu} $ {' '.join(command)}\n")
-            handle.flush()
-            process = subprocess.Popen(
-                command,
-                cwd=str(job["cwd"]),
-                env=env,
-                stdout=handle,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            record = {
-                "index": index,
-                "gpu": gpu,
-                "pid": process.pid,
-                "command": command,
-                "cwd": str(job["cwd"]),
-                "log": str(log),
-                "status": "RUNNING",
-                "started_at": iso(),
-            }
-            entry["jobs"].append(record)
-            processes.append((record, process, handle))
-        self.save(current_stage=name, next_action="monitor parallel workers")
-        failed = False
-        while processes:
             remaining: list[tuple[dict[str, Any], subprocess.Popen[str], Any]] = []
             for record, process, handle in processes:
                 code = process.poll()
@@ -483,8 +495,11 @@ class DownstreamSupervisor:
                 )
                 failed = failed or code != 0
             processes = remaining
-            self.save(current_stage=name, next_action="monitor parallel workers")
-            if processes:
+            if failed:
+                # Do not admit new shards after a worker failure; preserve
+                # completed evidence and let the stage fail closed.
+                pending.clear()
+            if processes or pending:
                 time.sleep(30)
         entry.update({"status": "FAILED" if failed else "COMPLETED", "ended_at": iso()})
         self.save(current_stage=name, next_action="advance" if not failed else "inspect worker logs")
