@@ -426,8 +426,15 @@ def _validate_expected_inputs(
             Path(args.source), expected.get("external_cov_commit")
         )
     annotation_sha = _sha256(Path(args.annotation).resolve())
-    if expected.get("subset_annotation_sha256") != annotation_sha:
-        raise RuntimeError("SEARCH_EXPECTED_INPUT_ANNOTATION_MISMATCH")
+    # The hardened Q1 gate was created against the 11,500-frame development
+    # subset, but the same production contract is also used for the explicit
+    # full-Test materialization/search.  Bind those two protocols separately
+    # instead of silently accepting a full annotation under a subset hash.
+    annotation_key = "subset_annotation_sha256"
+    if getattr(args, "stage", "subset") == "full" and expected.get("full_test_annotation_sha256"):
+        annotation_key = "full_test_annotation_sha256"
+    if expected.get(annotation_key) != annotation_sha:
+        raise RuntimeError(f"SEARCH_EXPECTED_INPUT_ANNOTATION_MISMATCH:{annotation_key}")
     external_commit = _git_value(Path(args.source).resolve(), "rev-parse", "HEAD")
     if expected.get("external_cov_commit") != external_commit:
         raise RuntimeError("SEARCH_EXPECTED_INPUT_EXTERNAL_COMMIT_MISMATCH")

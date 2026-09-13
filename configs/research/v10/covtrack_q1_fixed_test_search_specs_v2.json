@@ -21,6 +21,7 @@
   },
   "expected_inputs": {
     "subset_annotation_sha256": "6a1245c5bcc2e9838caf3c5f545256a216ff52003eafd9c47f64c95de3118938",
+    "full_test_annotation_sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
     "reranker_checkpoint_sha256": "ed2524af31c22d17b6fcb61dd118095274b1bb56ad9329b993f9cdc4579aa80f",
     "external_cov_commit": "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b",
     "external_checkpoint_sha256": "e4d0b65798844280ea13943e580ce6233ae5d331c4aa1d38eb226c3208dd567c",
