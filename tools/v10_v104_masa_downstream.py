@@ -199,11 +199,38 @@ class MasaRunner:
     def stage(self, name: str) -> dict[str, Any]:
         return self.state.setdefault("stages", {}).setdefault(name, {"status": "PENDING"})
 
+    @staticmethod
+    def _ov_result_done(value: Any, split: str) -> bool:
+        """Accept the worker-bound result key used by the repaired DAG.
+
+        Older supervisors called these nodes ``OV_TEST_RESULT`` and
+        ``OV_VAL_RESULT``.  The production downstream DAG now binds the
+        result to its worker execution node as
+        ``OV_TEST_WORKERS_RESULT``/``OV_VAL_WORKERS_RESULT``.  Waiting for
+        only the legacy names deadlocks MASA after OV has actually finished.
+        A result receipt is still required; this is only a naming
+        compatibility check, not a readiness shortcut.
+        """
+        if not isinstance(value, dict):
+            return False
+        stages = value.get("stages", {})
+        if not isinstance(stages, dict):
+            return False
+        stem = f"OV_{split.upper()}"
+        for key in (f"{stem}_WORKERS_RESULT", f"{stem}_RESULT"):
+            item = stages.get(key)
+            if isinstance(item, dict) and item.get("status") == "COMPLETED":
+                output = item.get("output")
+                if output and Path(str(output)).is_file():
+                    return True
+        receipt = V10_ROOT / "v104_downstream" / f"ov_{split.lower()}_result.json"
+        return receipt.is_file()
+
     def wait_ov(self) -> None:
         while True:
             value = read_json(OV_STATE)
-            test_done = isinstance(value, dict) and value.get("stages", {}).get("OV_TEST_RESULT", {}).get("status") == "COMPLETED"
-            val_done = isinstance(value, dict) and value.get("stages", {}).get("OV_VAL_RESULT", {}).get("status") == "COMPLETED"
+            test_done = self._ov_result_done(value, "test")
+            val_done = self._ov_result_done(value, "val")
             self.save(current_stage="WAIT_OV", next_action=f"wait OV test/val: {test_done}/{val_done}")
             if test_done and val_done:
                 return
