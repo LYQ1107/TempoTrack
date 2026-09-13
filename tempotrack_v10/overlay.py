@@ -42,13 +42,22 @@ def _cosine(left: np.ndarray, right: np.ndarray) -> float:
 
 
 def _bounded_quantiles(value: Any) -> dict[str, float] | None:
-    """Summarize a model diagnostic without retaining per-frame arrays."""
+    """Summarize scalar, dense, or ragged model diagnostics safely."""
     if value is None:
         return None
-    array = np.asarray(value, dtype=np.float32).reshape(-1)
-    array = array[np.isfinite(array)]
-    if not len(array):
+
+    items = value if isinstance(value, (list, tuple)) else (value,)
+    pieces: list[np.ndarray] = []
+    for item in items:
+        if item is None:
+            continue
+        array = np.asarray(item, dtype=np.float32).reshape(-1)
+        array = array[np.isfinite(array)]
+        if len(array):
+            pieces.append(array)
+    if not pieces:
         return None
+    array = np.concatenate(pieces, axis=0)
     return {
         name: float(np.percentile(array, percentile))
         for name, percentile in (("p05", 5), ("p50", 50), ("p95", 95))
@@ -988,6 +997,9 @@ class TempoTrackOverlay:
                 ),
                 "qdic_structured_score_quantiles": _bounded_quantiles(
                     [detail.get("structured_score") for detail in qdic_diagnostics if "structured_score" in detail]
+                ),
+                "qdic_variance_penalty_quantiles": _bounded_quantiles(
+                    [detail.get("variance_penalty") for detail in qdic_diagnostics if "variance_penalty" in detail]
                 ),
                 "competition_losers": int(competition_losers),
                 "frame_collision_rejections": int(sum(value == "frame_collision" for value in reasons)),

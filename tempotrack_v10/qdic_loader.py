@@ -26,6 +26,13 @@ from .query_distributional_calibrator import QueryDistributionalCalibrator
 
 
 QDIC_STATUS = "QDIC_V11_MODEL_CODE_AND_WEIGHTS"
+_QDIC_SOURCE_BASENAMES = (
+    "query_distributional_calibrator.py",
+    "qdic_features.py",
+    "qdic_trainer.py",
+    "qdic_loader.py",
+    "query_conditioned_reranker.py",
+)
 _REQUIRED_CONFIG = (
     "query_observations",
     "recent_k",
@@ -157,6 +164,10 @@ class QDICV11Artifact:
                 self.receipt_source_hashes, "qdic_trainer.py"
             )
             == _receipt_hash_for(self.source_hashes, "qdic_trainer.py"),
+            "shared_q1_source_hash_match": _receipt_hash_for(
+                self.receipt_source_hashes, "query_conditioned_reranker.py"
+            )
+            == _receipt_hash_for(self.source_hashes, "query_conditioned_reranker.py"),
             "training_protocol": self.receipt.get("protocol"),
             "training_split": self.receipt.get("training_split"),
             "paper_status": self.receipt.get("paper_status"),
@@ -176,12 +187,7 @@ class QDICV11Artifact:
 
 def _current_source_hashes() -> dict[str, str]:
     base = Path(__file__).resolve().parent
-    paths = (
-        base / "query_distributional_calibrator.py",
-        base / "qdic_features.py",
-        base / "qdic_trainer.py",
-        base / "qdic_loader.py",
-    )
+    paths = tuple(base / name for name in _QDIC_SOURCE_BASENAMES)
     return {str(path): _sha256(path) for path in paths}
 
 
@@ -256,12 +262,7 @@ def load_qdic_checkpoint(
     if not isinstance(raw_receipt_hashes, Mapping):
         raise SnapshotContractError("BLOCKED_QDIC_SOURCE_HASHES_MISSING")
     receipt_hashes = {str(key): str(value) for key, value in raw_receipt_hashes.items()}
-    for name in (
-        "query_distributional_calibrator.py",
-        "qdic_features.py",
-        "qdic_trainer.py",
-        "qdic_loader.py",
-    ):
+    for name in _QDIC_SOURCE_BASENAMES:
         expected = _receipt_hash_for(receipt_hashes, name)
         current = _receipt_hash_for(current_hashes, name)
         if expected is None or current != expected:
@@ -278,12 +279,7 @@ def load_qdic_checkpoint(
     state_hashes = state.get("source_hashes")
     if not isinstance(state_hashes, Mapping):
         raise SnapshotContractError("BLOCKED_QDIC_SOURCE_HASHES_MISSING")
-    for name in (
-        "query_distributional_calibrator.py",
-        "qdic_features.py",
-        "qdic_trainer.py",
-        "qdic_loader.py",
-    ):
+    for name in _QDIC_SOURCE_BASENAMES:
         if _receipt_hash_for(state_hashes, name) != _receipt_hash_for(receipt_hashes, name):
             raise SnapshotContractError(f"BLOCKED_QDIC_{Path(name).stem.upper()}_SOURCE_HASH_MISMATCH")
     try:
@@ -332,7 +328,12 @@ def load_qdic_checkpoint(
     provenance = artifact.provenance
     if not all(
         bool(provenance[key])
-        for key in ("model_source_hash_match", "feature_source_hash_match", "trainer_source_hash_match")
+        for key in (
+            "model_source_hash_match",
+            "feature_source_hash_match",
+            "trainer_source_hash_match",
+            "shared_q1_source_hash_match",
+        )
     ):
         raise SnapshotContractError("BLOCKED_QDIC_SOURCE_HASH_MISMATCH")
     return artifact

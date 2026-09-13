@@ -84,6 +84,9 @@ def _diagnostic_state(path: Path) -> dict[str, Any]:
             "qdic_structured_samples": [],
             "qdic_structured_seen": 0,
             "qdic_structured_rng": 0x56789ABC,
+            "qdic_variance_penalty_samples": [],
+            "qdic_variance_penalty_seen": 0,
+            "qdic_variance_penalty_rng": 0x6789ABCD,
             "reason_counts": {},
             "full_capability_status_counts": {},
             "reranker_status": None,
@@ -183,6 +186,7 @@ def _record_overlay_diagnostics(decision: Any) -> None:
     for diagnostic_name, reservoir_name in (
         ("qdic_alpha_quantiles", "qdic_alpha"),
         ("qdic_structured_score_quantiles", "qdic_structured"),
+        ("qdic_variance_penalty_quantiles", "qdic_variance_penalty"),
     ):
         quantiles = diagnostics.get(diagnostic_name)
         if isinstance(quantiles, Mapping):
@@ -262,6 +266,9 @@ def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> Non
         "qdic_status": state["qdic_status"],
         "qdic_alpha_quantiles": _quantiles(state["qdic_alpha_samples"]),
         "qdic_structured_score_quantiles": _quantiles(state["qdic_structured_samples"]),
+        "qdic_variance_penalty_quantiles": _quantiles(
+            state["qdic_variance_penalty_samples"]
+        ),
         "reason_counts": dict(sorted(state["reason_counts"].items())),
         "full_capability_status_counts": dict(sorted(state["full_capability_status_counts"].items())),
         "reranker_status": state["reranker_status"],

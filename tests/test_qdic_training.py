@@ -1,9 +1,11 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
+from tempotrack_v10 import SnapshotContractError
 from tempotrack_v10.qdic_features import QDIC_FEATURE_NAMES, QDIC_RAW_DIM
 from tempotrack_v10.qdic_loader import QDIC_STATUS, load_qdic_checkpoint
 from tempotrack_v10.qdic_trainer import _training_role, build_training_groups, sha256, train
@@ -127,8 +129,37 @@ def test_cpu_trainer_writes_loadable_base_only_artifact(tmp_path, monkeypatch):
     assert json.loads((output / "training.json").read_text())["checkpoint_hash"] == sha256(
         output / "best.pt"
     )
+    receipt_payload = json.loads((output / "training.json").read_text())
+    assert any(
+        Path(key).name == "query_conditioned_reranker.py"
+        for key in receipt_payload["source_hashes"]
+    )
+    checkpoint_state = torch.load(output / "best.pt", map_location="cpu")
+    assert any(
+        Path(key).name == "query_conditioned_reranker.py"
+        for key in checkpoint_state["source_hashes"]
+    )
     artifact = load_qdic_checkpoint(output / "best.pt", device="cpu")
     assert artifact.provenance["status"] == QDIC_STATUS
     assert artifact.provenance["paper_status"] == "VAL_BASE_PILOT"
     assert artifact.provenance["paper_valid"] is False
     assert artifact.provenance["diagnostic_only"] is True
+    assert artifact.provenance["shared_q1_source_hash_match"] is True
+
+
+def test_loader_rejects_tampered_shared_q1_source_hash(tmp_path, monkeypatch):
+    feature_root = _feature_cache(tmp_path)
+    monkeypatch.setattr("tempotrack_v10.qdic_trainer._memory_guard", lambda: None)
+    output = tmp_path / "training"
+    train(feature_root, output, device="cpu", epochs=1, seed=11)
+    receipt_path = output / "training.json"
+    receipt = json.loads(receipt_path.read_text())
+    source_key = next(
+        key
+        for key in receipt["source_hashes"]
+        if Path(key).name == "query_conditioned_reranker.py"
+    )
+    receipt["source_hashes"][source_key] = "0" * 64
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(SnapshotContractError, match="SOURCE_HASH_MISMATCH"):
+        load_qdic_checkpoint(output / "best.pt", device="cpu")

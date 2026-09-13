@@ -3,7 +3,11 @@ import pytest
 
 from tempotrack_research.streaming.partial_support import replay_fixed_dual_prototypes
 from tempotrack_v10 import PreAssociationSnapshot, SnapshotContractError
-from tempotrack_v10.overlay import TempoTrackConfig, TempoTrackOverlay
+from tempotrack_v10.overlay import (
+    TempoTrackConfig,
+    TempoTrackOverlay,
+    _bounded_quantiles,
+)
 from tempotrack_v10.qdic_features import QDIC_FEATURE_NAMES
 from tempotrack_v10.query_distributional_calibrator import QueryDistributionalCalibrator
 
@@ -234,3 +238,19 @@ def test_qdic_weight_is_an_exact_enable_switch():
 def test_qdic_and_legacy_reranker_are_mutually_exclusive():
     with pytest.raises(ValueError, match="mutually exclusive"):
         TempoTrackConfig(reranker_weight=1.0, qdic_weight=1.0)
+
+
+def test_qdic_bounded_quantiles_accept_ragged_candidate_arrays():
+    values = [
+        np.linspace(0.0, 1.0, 64, dtype=np.float32),
+        np.linspace(0.0, 1.0, 37, dtype=np.float32),
+        np.linspace(0.0, 1.0, 8, dtype=np.float32),
+    ]
+    expected = np.concatenate(values)
+    result = _bounded_quantiles(values)
+    assert result is not None
+    for name, percentile in (("p05", 5), ("p50", 50), ("p95", 95)):
+        assert result[name] == pytest.approx(np.percentile(expected, percentile))
+    assert _bounded_quantiles(None) is None
+    assert _bounded_quantiles([]) is None
+    assert _bounded_quantiles(np.asarray([1, 2, 3])) is not None

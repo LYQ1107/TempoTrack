@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -201,6 +200,27 @@ def _sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _current_sidecar_producer_hashes() -> dict[str, str]:
+    repo_root = Path(__file__).resolve().parents[1]
+    paths = (
+        repo_root / "tempotrack_research/orchestration/v9_parameter_search.py",
+        repo_root / "tempotrack_research/streaming/partial_support.py",
+        repo_root / "tempotrack_research/memory/fixed_dual.py",
+    )
+    return {str(path): _sha256(path) for path in paths}
+
+
+def _hash_for_basename(hashes: Mapping[str, Any], basename: str) -> str | None:
+    return next(
+        (
+            str(value)
+            for key, value in hashes.items()
+            if Path(str(key)).name == basename
+        ),
+        None,
+    )
+
+
 def _array_sha256(value: np.ndarray) -> str:
     array = np.ascontiguousarray(value)
     digest = hashlib.sha256()
@@ -216,7 +236,14 @@ def _object_sha256(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _load_cache(event_cache: str | Path | Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, np.ndarray], list[dict[str, Any]]]:
+def _load_cache(
+    event_cache: str | Path | Mapping[str, Any],
+) -> tuple[
+    dict[str, Any],
+    dict[str, np.ndarray],
+    list[dict[str, Any]] | None,
+    Path | None,
+]:
     """Load an existing V9.1 cache without accepting legacy dense caches."""
     if isinstance(event_cache, Mapping):
         metadata = dict(event_cache.get("metadata", {}))
@@ -224,7 +251,7 @@ def _load_cache(event_cache: str | Path | Mapping[str, Any]) -> tuple[dict[str, 
         rows = [dict(item) for item in event_cache.get("rows", [])]
         if not metadata or not arrays:
             raise ValueError("event_cache mapping must contain metadata, arrays and rows")
-        return metadata, arrays, rows
+        return metadata, arrays, rows, None
     from tempotrack_research.orchestration.v9_parameter_search import _load_event_cache
 
     metadata, arrays, _ = _load_event_cache(event_cache)
@@ -233,14 +260,7 @@ def _load_cache(event_cache: str | Path | Mapping[str, Any]) -> tuple[dict[str, 
     rows_path = Path(str(metadata.get("rows_path", metadata_path.parent / "events.jsonl")))
     if not rows_path.is_absolute():
         rows_path = metadata_path.parent / rows_path
-    rows = [
-        json.loads(line)
-        for line in rows_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    if len(rows) != int(arrays["mem_len"].shape[0]):
-        raise ValueError("event cache rows and arrays have different lengths")
-    return metadata, arrays, rows
+    return metadata, arrays, None, rows_path.resolve()
 
 
 def _load_sidecar(
@@ -286,6 +306,16 @@ def _load_sidecar(
                 raise ValueError(f"QDIC sidecar array hash mismatch: {array_path}")
             arrays[name] = np.load(array_path, mmap_mode="r", allow_pickle=False)
         metadata["metadata_hash"] = _sha256(metadata_path)
+        producer_hashes = metadata.get("producer_source_hashes")
+        if not isinstance(producer_hashes, Mapping):
+            raise ValueError("QDIC sidecar producer source hashes missing")
+        for name, current in _current_sidecar_producer_hashes().items():
+            basename = Path(name).name
+            expected = _hash_for_basename(producer_hashes, basename)
+            if expected is None or expected != current:
+                raise ValueError(
+                    f"QDIC sidecar producer source hash mismatch: {basename}"
+                )
     if metadata:
         artifact = metadata.get("artifact")
         if artifact is not None and artifact != "qdic_v11_projected_prototype_sidecar":
@@ -352,7 +382,10 @@ def build_qdic_features(
     if int(decision_candidate_top_k) != QDIC_DECISION_CANDIDATE_TOP_K:
         raise ValueError("QDIC V11 decision candidate top-K must be 8")
 
-    metadata, arrays, rows = _load_cache(event_cache)
+    metadata, arrays, inline_rows, rows_path = _load_cache(event_cache)
+    count = int(np.asarray(arrays["mem_len"]).shape[0])
+    if inline_rows is not None and len(inline_rows) != count:
+        raise ValueError("event cache rows and arrays have different lengths")
     if sidecar is None:
         value = metadata.get("qdic_sidecar")
         if value is None and not isinstance(event_cache, Mapping):
@@ -365,7 +398,7 @@ def build_qdic_features(
             root = root.parent if root.is_file() else root
             value = root / Path(str(value))
         sidecar = value
-    sidecar_metadata, sidecar_arrays = _load_sidecar(sidecar, expected_count=len(rows))
+    sidecar_metadata, sidecar_arrays = _load_sidecar(sidecar, expected_count=count)
 
     cosine = np.asarray(arrays["cosine"])
     evidence = np.asarray(arrays["evidence"])
@@ -375,27 +408,27 @@ def build_qdic_features(
         arrays.get("prefilter_rank_b1", arrays.get("prefilter_rank")), dtype=np.int64
     ).reshape(-1)
     group_ids = np.asarray(arrays["group_id"], dtype=np.int64).reshape(-1)
+    label_array = None
+    if "label" in arrays:
+        label_array = np.asarray(arrays["label"], dtype=np.int8).reshape(-1)
     if "target_base" not in arrays:
         raise ValueError("event cache is missing target_base; cannot prove Base-only supervision")
     target_base_array = np.asarray(arrays["target_base"], dtype=bool).reshape(-1)
     if cosine.ndim != 3 or evidence.ndim != 3 or evidence.shape[-1] != 7:
         raise ValueError("event cache cosine/evidence arrays have invalid shapes")
     if not all(
-        len(value) == len(rows)
+        len(value) == count
         for value in (cosine, evidence, mem_len, gap, rank, group_ids, target_base_array)
     ):
         raise ValueError("event cache arrays are not row aligned")
+    if label_array is not None and len(label_array) != count:
+        raise ValueError("event cache label array is not row aligned")
     if (
         sidecar_metadata.get("event_rows_hash") is not None
         and not isinstance(event_cache, Mapping)
-        and metadata.get("rows_path") is not None
+        and rows_path is not None
     ):
-        rows_hash_path = Path(str(metadata["rows_path"]))
-        if not rows_hash_path.is_absolute():
-            cache_root = Path(event_cache).resolve()
-            cache_root = cache_root.parent if cache_root.is_file() else cache_root
-            rows_hash_path = cache_root / rows_hash_path
-        if rows_hash_path.is_file() and _sha256(rows_hash_path) != str(sidecar_metadata["event_rows_hash"]):
+        if rows_path.is_file() and _sha256(rows_path) != str(sidecar_metadata["event_rows_hash"]):
             raise ValueError("QDIC sidecar event rows hash does not match event cache")
     event_metadata_hash = None if isinstance(event_cache, Mapping) else _sha256(
         Path(event_cache) if Path(event_cache).is_file() else Path(event_cache) / "metadata.json"
@@ -411,33 +444,82 @@ def build_qdic_features(
 
     # V9 retains a union of B1/B2/B4 rows.  QDIC V11 is explicitly Q=1, so
     # only the B1 Top64 view is allowed to contribute to event context.
-    source_indices_by_group: dict[int, list[int]] = defaultdict(list)
-    for index, group_id in enumerate(group_ids.tolist()):
-        if int(rank[index]) <= int(context_candidate_top_k):
-            source_indices_by_group[int(group_id)].append(index)
+    output_row_count = int(np.count_nonzero(rank <= int(context_candidate_top_k)))
+    if output_row_count < 1:
+        raise ValueError("QDIC feature cache has no Q=1 context rows")
 
-    feature_rows: list[np.ndarray] = []
-    labels: list[int] = []
-    allowed: list[bool] = []
-    candidate_base: list[bool] = []
-    target_base: list[bool] = []
-    videos: list[int] = []
-    output_group_ids: list[int] = []
+    output_path = Path(output).resolve()
+    output_path.mkdir(parents=True, exist_ok=False)
+    array_specs = {
+        "features": (np.float32, (output_row_count, QDIC_RAW_DIM)),
+        "labels": (np.int8, (output_row_count,)),
+        "supervision_allowed": (np.bool_, (output_row_count,)),
+        "candidate_base": (np.bool_, (output_row_count,)),
+        "target_base": (np.bool_, (output_row_count,)),
+        "group_ids": (np.int64, (output_row_count,)),
+    }
+    array_paths: dict[str, str] = {
+        name: str((output_path / f"{name}.npy").resolve())
+        for name in (
+            "features",
+            "labels",
+            "supervision_allowed",
+            "offsets",
+            "videos",
+            "candidate_base",
+            "target_base",
+            "group_ids",
+        )
+    }
+    maps = {
+        name: np.lib.format.open_memmap(
+            array_paths[name],
+            mode="w+",
+            dtype=dtype,
+            shape=shape,
+        )
+        for name, (dtype, shape) in array_specs.items()
+    }
+
+    def iter_event_rows():
+        if inline_rows is not None:
+            for index, row in enumerate(inline_rows):
+                yield index, row
+            return
+        if rows_path is None:
+            raise ValueError("path-based event cache is missing events.jsonl")
+        processed = 0
+        with rows_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                if processed >= count:
+                    raise ValueError("QDIC event rows exceed event cache array count")
+                row = json.loads(line)
+                index = processed
+                processed += 1
+                yield index, row
+        if processed != count:
+            raise ValueError("QDIC event rows and event cache arrays have different lengths")
+
+    written = 0
     event_videos: list[int] = []
     offsets = [0]
-    for group_id in sorted(source_indices_by_group, key=lambda value: source_indices_by_group[value][0]):
-        indices = source_indices_by_group[group_id]
-        if not indices:
-            continue
+    current_group_id: int | None = None
+    current_event_key: tuple[int, int] | None = None
+    current_items: list[tuple[int, Mapping[str, Any]]] = []
+    seen_groups: set[int] = set()
+
+    def flush_current_group() -> None:
+        nonlocal written
+        if current_group_id is None or not current_items:
+            return
         independent: list[np.ndarray] = []
         distributional: list[np.ndarray] = []
-        for index in indices:
+        for index, row in current_items:
             length = int(mem_len[index])
             if length < 1 or length > int(cosine.shape[2]) or length > int(evidence.shape[1]):
                 raise ValueError(f"invalid memory length at event row {index}: {length}")
-            row = rows[index]
-            if int(row.get("prefilter_rank_b1", rank[index])) != int(rank[index]):
-                raise ValueError("event row/rank array mismatch")
             qcos = np.asarray(cosine[index, :1, :length], dtype=np.float32)
             ev = np.asarray(evidence[index, :length], dtype=np.float32)
             moments = projected_distribution_moments(qcos, recent_k=int(recent_k))
@@ -467,58 +549,78 @@ def build_qdic_features(
             distributional.append(distributional_row)
 
         context = add_event_context(np.stack(independent, axis=0))
-        for local_index, index in enumerate(indices):
-            row = rows[index]
+        for local_index, (index, row) in enumerate(current_items):
             complete = np.concatenate((context[local_index], distributional[local_index])).astype(
                 np.float32, copy=False
             )
             if complete.shape != (QDIC_RAW_DIM,) or not np.isfinite(complete).all():
                 raise FloatingPointError("non-finite QDIC feature row")
-            feature_rows.append(complete)
             label = int(row["label"])
             cand_base = _candidate_base(row)
-            targ_base = bool(row.get("target_base", False))
+            targ_base = bool(row["target_base"])
             if targ_base != bool(target_base_array[index]):
                 raise ValueError("event row/target_base array mismatch")
-            labels.append(label)
-            candidate_base.append(cand_base)
-            target_base.append(targ_base)
-            allowed.append(bool(targ_base and cand_base and label in (0, 1)))
-            videos.append(int(row["video_id"]))
-            output_group_ids.append(int(group_id))
-        event_videos.append(int(rows[indices[0]]["video_id"]))
-        offsets.append(len(feature_rows))
+            maps["features"][written] = complete
+            maps["labels"][written] = label
+            maps["candidate_base"][written] = cand_base
+            maps["target_base"][written] = targ_base
+            maps["supervision_allowed"][written] = bool(targ_base and cand_base and label in (0, 1))
+            maps["group_ids"][written] = int(current_group_id)
+            written += 1
+        if current_event_key is None:
+            raise ValueError("QDIC event group is missing its video/target key")
+        event_videos.append(int(current_event_key[0]))
+        offsets.append(written)
 
-    if not feature_rows:
-        raise ValueError("QDIC feature cache has no Q=1 context rows")
-    output_path = Path(output).resolve()
-    output_path.mkdir(parents=True, exist_ok=False)
-    array_values = {
-        "features": np.stack(feature_rows, axis=0).astype(np.float32),
-        "labels": np.asarray(labels, dtype=np.int8),
-        "supervision_allowed": np.asarray(allowed, dtype=bool),
-        "offsets": np.asarray(offsets, dtype=np.int64),
-        "videos": np.asarray(event_videos, dtype=np.int64),
-        "candidate_base": np.asarray(candidate_base, dtype=bool),
-        "target_base": np.asarray(target_base, dtype=bool),
-        "group_ids": np.asarray(output_group_ids, dtype=np.int64),
-    }
-    array_paths: dict[str, str] = {}
-    for name, value in array_values.items():
-        path = output_path / f"{name}.npy"
-        np.save(path, value, allow_pickle=False)
-        array_paths[name] = str(path)
+    for index, row in iter_event_rows():
+        group_id = int(group_ids[index])
+        row_key = (int(row["video_id"]), int(row["target_serial"]))
+        if "label" not in row or "target_base" not in row:
+            raise ValueError(f"QDIC event row {index} is missing label/target_base")
+        if label_array is not None and int(row["label"]) != int(label_array[index]):
+            raise ValueError("event row/label array mismatch")
+        if bool(row["target_base"]) != bool(target_base_array[index]):
+            raise ValueError("event row/target_base array mismatch")
+        if int(row.get("prefilter_rank_b1", rank[index])) != int(rank[index]):
+            raise ValueError("event row/rank array mismatch")
+        if current_group_id is None:
+            current_group_id = group_id
+            current_event_key = row_key
+        elif group_id != current_group_id:
+            flush_current_group()
+            seen_groups.add(current_group_id)
+            if group_id in seen_groups:
+                raise ValueError("QDIC event groups are noncontiguous")
+            current_group_id = group_id
+            current_event_key = row_key
+            current_items = []
+        elif row_key != current_event_key:
+            raise ValueError("QDIC event group video_id/target_serial mismatch")
+        if int(rank[index]) <= int(context_candidate_top_k):
+            if len(current_items) >= int(context_candidate_top_k):
+                raise ValueError("QDIC event group exceeds context candidate top-K")
+            current_items.append((index, row))
+
+    flush_current_group()
+    if written != output_row_count:
+        raise ValueError(
+            f"QDIC feature row count mismatch: wrote {written}, expected {output_row_count}"
+        )
+    if len(offsets) != len(event_videos) + 1 or offsets[-1] != written:
+        raise ValueError("QDIC feature event offsets are inconsistent")
+    for value in maps.values():
+        value.flush()
+    del maps
+    np.save(array_paths["offsets"], np.asarray(offsets, dtype=np.int64), allow_pickle=False)
+    np.save(array_paths["videos"], np.asarray(event_videos, dtype=np.int64), allow_pickle=False)
 
     metadata_path = output_path / "features.json"
     source_metadata_path = None if isinstance(event_cache, Mapping) else (
         Path(event_cache) if Path(event_cache).is_file() else Path(event_cache) / "metadata.json"
     )
-    rows_path = metadata.get("rows_path")
-    if rows_path is not None and not Path(rows_path).is_absolute() and source_metadata_path is not None:
-        rows_path = str(source_metadata_path.parent / Path(rows_path))
     event_cache_hash = None if source_metadata_path is None else _sha256(source_metadata_path)
     manifest_hash = metadata.get("manifest_hash")
-    rows_hash = None if rows_path is None or not Path(rows_path).is_file() else _sha256(rows_path)
+    rows_hash = None if rows_path is None or not rows_path.is_file() else _sha256(rows_path)
     source_hashes = {
         "event_cache_metadata": event_cache_hash,
         "event_cache_manifest": manifest_hash,
@@ -567,7 +669,7 @@ def build_qdic_features(
         "event_cache_manifest_hash": manifest_hash,
         "qdic_sidecar": None if isinstance(sidecar, Mapping) else str(Path(sidecar).resolve()),
         "events": len(offsets) - 1,
-        "rows": len(feature_rows),
+        "rows": written,
         "arrays": array_paths,
     }
     result_metadata["array_hashes"] = {

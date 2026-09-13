@@ -16,7 +16,7 @@ import pickle
 import subprocess
 import time
 import bisect
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -36,6 +36,7 @@ V92_RELIABILITY_SCHEMA = 11
 GAP_BINS = ((0, 10, "0-10"), (10, 30, "10-30"), (30, 60, "30-60"),
             (60, 90, "60-90"), (90, 120, "90-120"), (120, 180, "120-180"),
             (180, 240, "180-240"), (240, 360, "240-360"))
+QDIC_PROTOTYPE_CACHE_LIMIT = 4096
 
 
 def _normalize_v91_protocol(value: str) -> str:
@@ -813,10 +814,130 @@ def _load_event_cache(path: str | Path) -> tuple[dict[str, Any], dict[str, np.nd
     return metadata, arrays, None
 
 
+class _QDICVideoFeatureSource:
+    """Lazily resolve native embeddings with a bounded per-video cache."""
+
+    def __init__(
+        self,
+        *,
+        shard_specs: Mapping[int, Mapping[str, Any]] | None = None,
+        arrays_by_video: Mapping[int, Any] | None = None,
+        shared_array: Any | None = None,
+        max_cached_videos: int = 2,
+    ) -> None:
+        self.shard_specs = {
+            int(video): dict(spec)
+            for video, spec in dict(shard_specs or {}).items()
+        }
+        self.arrays_by_video = arrays_by_video
+        if shared_array is None:
+            self.shared_array = None
+        elif np.asarray(shared_array).dtype == np.dtype(np.float32):
+            # Preserve an existing float32 ndarray/memmap; in particular, do
+            # not turn a .npy mmap into a process-sized dense copy.
+            self.shared_array = np.asarray(shared_array)
+        else:
+            self.shared_array = np.asarray(shared_array, dtype=np.float32)
+        self.max_cached_videos = max(1, int(max_cached_videos))
+        self._cache: OrderedDict[int, np.ndarray] = OrderedDict()
+        self._validated: set[Any] = set()
+        self._shared_validation_key = ("shared", id(self))
+        if self.shared_array is not None:
+            self._validate(self._shared_validation_key, self.shared_array, video=None)
+
+    def _validate(self, key: Any, value: np.ndarray, *, video: int | None) -> None:
+        if key in self._validated:
+            return
+        if value.ndim != 2 or value.shape[1] < 1:
+            label = "shared" if video is None else f"video {video}"
+            raise ValueError(f"QDIC feature source for {label} must be finite [N,D]")
+        if not np.isfinite(value).all():
+            label = "shared" if video is None else f"video {video}"
+            raise ValueError(f"QDIC feature source for {label} must be finite [N,D]")
+        self._validated.add(key)
+
+    def _load_video(self, video: int) -> np.ndarray:
+        video = int(video)
+        if self.arrays_by_video is not None:
+            if video not in self.arrays_by_video:
+                raise KeyError(f"QDIC features missing video {video}")
+            value = np.asarray(self.arrays_by_video[video], dtype=np.float32)
+            self._validate(video, value, video=video)
+            return value
+
+        if self.shared_array is not None:
+            return self.shared_array
+
+        spec = self.shard_specs.get(video)
+        if spec is None:
+            raise KeyError(f"QDIC features missing video {video}")
+        raw_path = spec.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise ValueError(f"QDIC feature shard path missing for video {video}")
+        path = Path(raw_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"QDIC native shard missing for video {video}: {path}")
+        validation_key = video
+        if validation_key not in self._validated and spec.get("sha256"):
+            if _sha256(path) != str(spec["sha256"]):
+                raise ValueError(f"QDIC native shard hash mismatch for video {video}: {path}")
+        if path.suffix.lower() == ".npy":
+            value = np.load(path, mmap_mode="r", allow_pickle=False)
+        else:
+            with np.load(path, allow_pickle=False) as archive:
+                if "embeddings_raw" not in archive:
+                    raise ValueError(
+                        f"QDIC native shard lacks embeddings_raw for video {video}: {path}"
+                    )
+                value = np.asarray(archive["embeddings_raw"], dtype=np.float32)
+        if np.asarray(value).dtype != np.dtype(np.float32):
+            value = np.asarray(value, dtype=np.float32)
+        else:
+            value = np.asarray(value)
+        self._validate(validation_key, value, video=video)
+        return value
+
+    def get(self, video: int, index: int) -> np.ndarray:
+        """Return one video's raw embeddings and retain only bounded state."""
+        video = int(video)
+        index = int(index)
+        try:
+            if self.arrays_by_video is not None or self.shared_array is not None:
+                return self._load_video(video)
+            value = self._cache.get(video)
+            if value is None:
+                value = self._load_video(video)
+                self._cache[video] = value
+                self._cache.move_to_end(video)
+                while len(self._cache) > self.max_cached_videos:
+                    self._cache.popitem(last=False)
+            else:
+                self._cache.move_to_end(video)
+            return value
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"QDIC feature source load failed for video {video} at event row {index}: {exc}"
+            ) from exc
+        except (IndexError, KeyError, ValueError) as exc:
+            raise type(exc)(
+                f"QDIC feature source load failed for video {video} at event row {index}: {exc}"
+            ) from exc
+
+
+def _qdic_sidecar_producer_hashes() -> dict[str, str]:
+    repo_package = Path(__file__).resolve().parents[1]
+    paths = (
+        Path(__file__).resolve(),
+        repo_package / "streaming/partial_support.py",
+        repo_package / "memory/fixed_dual.py",
+    )
+    return {str(path): _sha256(path) for path in paths}
+
+
 def _load_qdic_feature_source(
     metadata: Mapping[str, Any],
     source: Any | None,
-) -> tuple[dict[int, np.ndarray] | None, np.ndarray | None, dict[str, Any]]:
+) -> tuple[_QDICVideoFeatureSource, dict[str, Any]]:
     """Resolve raw native embeddings for the lightweight QDIC sidecar.
 
     ``candidate_rows`` and ``query_rows`` in ``events.jsonl`` are local to a
@@ -830,27 +951,38 @@ def _load_qdic_feature_source(
         manifest_value = metadata.get("manifest")
         if not manifest_value:
             raise ValueError("QDIC sidecar needs features or an event-cache native manifest")
-        manifest_path = Path(str(manifest_value))
+        manifest_path = Path(str(manifest_value)).expanduser().resolve()
         if not manifest_path.is_file():
             raise FileNotFoundError(f"QDIC native manifest missing: {manifest_path}")
         manifest = _json(manifest_path)
-        by_video: dict[int, np.ndarray] = {}
-        for shard in sorted(manifest.get("shards", []), key=lambda item: (int(item["video_id"]), str(item["path"]))):
+        shard_specs: dict[int, dict[str, Any]] = {}
+        for shard in sorted(
+            manifest.get("shards", []),
+            key=lambda item: (int(item["video_id"]), str(item["path"])),
+        ):
             video = int(shard["video_id"])
-            shard_path = Path(str(shard["path"]))
-            if not shard_path.is_file():
-                raise FileNotFoundError(f"QDIC native shard missing: {shard_path}")
-            if shard.get("sha256") and _sha256(shard_path) != shard["sha256"]:
-                raise ValueError(f"QDIC native shard hash mismatch: {shard_path}")
-            with np.load(shard_path, allow_pickle=False) as arrays:
-                if "embeddings_raw" not in arrays:
-                    raise ValueError(f"QDIC native shard lacks embeddings_raw: {shard_path}")
-                by_video[video] = np.asarray(arrays["embeddings_raw"], dtype=np.float32)
-            provenance.setdefault("manifest", str(manifest_path.resolve()))
-            provenance.setdefault("manifest_hash", _sha256(manifest_path))
-        if not by_video:
+            raw_path = shard.get("path")
+            if not isinstance(raw_path, str) or not raw_path.strip():
+                raise ValueError(f"QDIC native shard path missing for video {video}")
+            shard_path = Path(raw_path).expanduser()
+            if not shard_path.is_absolute():
+                shard_path = manifest_path.parent / shard_path
+            if video in shard_specs:
+                raise ValueError(f"QDIC native manifest duplicates video {video}")
+            shard_specs[video] = {
+                "path": str(shard_path.resolve()),
+                "sha256": None if shard.get("sha256") is None else str(shard["sha256"]),
+            }
+        if not shard_specs:
             raise ValueError("QDIC native manifest contains no feature shards")
-        return by_video, None, provenance
+        provenance.update(
+            {
+                "kind": "native_manifest_lazy",
+                "manifest": str(manifest_path),
+                "manifest_hash": _sha256(manifest_path),
+            }
+        )
+        return _QDICVideoFeatureSource(shard_specs=shard_specs, max_cached_videos=2), provenance
 
     if isinstance(source, Mapping):
         by_video = {
@@ -858,27 +990,29 @@ def _load_qdic_feature_source(
             for video, value in source.items()
         }
         provenance["kind"] = "mapping"
-        return by_video, None, provenance
+        return _QDICVideoFeatureSource(arrays_by_video=by_video), provenance
     if isinstance(source, np.ndarray):
+        shared = np.asarray(source, dtype=np.float32)
         provenance["kind"] = "array"
-        return None, np.asarray(source, dtype=np.float32), provenance
-    source_path = Path(source)
-    if source_path.is_file() and source_path.suffix == ".npy":
+        return _QDICVideoFeatureSource(shared_array=shared), provenance
+    source_path = Path(source).expanduser().resolve()
+    if source_path.is_file() and source_path.suffix.lower() == ".npy":
         provenance.update({"path": str(source_path.resolve()), "sha256": _sha256(source_path)})
-        return None, np.load(source_path, mmap_mode="r", allow_pickle=False), provenance
-    if source_path.is_file() and source_path.suffix == ".json":
+        shared = np.load(source_path, mmap_mode="r", allow_pickle=False)
+        return _QDICVideoFeatureSource(shared_array=shared), provenance
+    if source_path.is_file() and source_path.suffix.lower() == ".json":
         return _load_qdic_feature_source(json.loads(source_path.read_text(encoding="utf-8")), None)
     if source_path.is_dir():
-        by_video: dict[int, np.ndarray] = {}
+        shard_specs: dict[int, dict[str, Any]] = {}
         for path in sorted(source_path.glob("video_*.npy")):
             try:
                 video = int(path.stem.split("_", 1)[1])
             except (IndexError, ValueError):
                 continue
-            by_video[video] = np.load(path, mmap_mode="r", allow_pickle=False)
-        if by_video:
-            provenance["directory"] = str(source_path.resolve())
-            return by_video, None, provenance
+            shard_specs[video] = {"path": str(path.resolve()), "kind": "npy"}
+        if shard_specs:
+            provenance.update({"kind": "directory_lazy", "directory": str(source_path)})
+            return _QDICVideoFeatureSource(shard_specs=shard_specs, max_cached_videos=2), provenance
     raise FileNotFoundError(f"unsupported QDIC feature source: {source_path}")
 
 
@@ -917,79 +1051,95 @@ def precompute_qdic_sidecar(
     rows_path = Path(str(metadata.get("rows_path", metadata_path.parent / "events.jsonl")))
     if not rows_path.is_absolute():
         rows_path = metadata_path.parent / rows_path
-    rows = [
-        json.loads(line)
-        for line in rows_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
     count = int(np.asarray(arrays["mem_len"]).shape[0])
-    if len(rows) != count:
-        raise ValueError("QDIC sidecar rows and event cache arrays have different lengths")
 
-    by_video, shared_features, feature_provenance = _load_qdic_feature_source(
+    feature_source_obj, feature_provenance = _load_qdic_feature_source(
         metadata, features if features is not None else feature_source
     )
     from ..streaming.partial_support import replay_fixed_dual_prototypes
 
-    query_fast = np.empty(count, dtype=np.float32)
-    query_slow = np.empty(count, dtype=np.float32)
-    fast_slow = np.empty(count, dtype=np.float32)
-    prototype_cache: dict[tuple[int, tuple[int, ...]], tuple[np.ndarray, np.ndarray]] = {}
-
-    def source_for(video: int, index: int) -> np.ndarray:
-        if by_video is not None:
-            if video not in by_video:
-                raise KeyError(f"QDIC features missing video {video} at event row {index}")
-            value = np.asarray(by_video[video], dtype=np.float32)
-        else:
-            assert shared_features is not None
-            value = np.asarray(shared_features, dtype=np.float32)
-        if value.ndim != 2 or value.shape[1] < 1 or not np.isfinite(value).all():
-            raise ValueError(f"QDIC feature source for video {video} must be finite [N,D]")
-        return value
-
-    for index, row in enumerate(rows):
-        video = int(row["video_id"])
-        candidate_rows = tuple(int(value) for value in row.get("candidate_rows", ()))
-        query_rows = tuple(int(value) for value in row.get("query_rows", ()))
-        if not candidate_rows or not query_rows:
-            raise ValueError(f"QDIC event row {index} lacks candidate_rows/query_rows")
-        value = source_for(video, index)
-        all_rows = candidate_rows + query_rows
-        if min(all_rows) < 0 or max(all_rows) >= len(value):
-            raise IndexError(f"QDIC event row {index} references features outside video {video}")
-        key = (video, candidate_rows)
-        prototypes = prototype_cache.get(key)
-        if prototypes is None:
-            prototypes = replay_fixed_dual_prototypes(
-                value[np.asarray(candidate_rows, dtype=np.int64)],
-                alpha_fast=float(alpha_fast),
-                alpha_slow=float(alpha_slow),
-            )
-            prototype_cache[key] = prototypes
-        fast, slow = prototypes
-        query = value[query_rows[0]]
-        query = query / max(float(np.linalg.norm(query)), 1e-8)
-        fast = fast / max(float(np.linalg.norm(fast)), 1e-8)
-        slow = slow / max(float(np.linalg.norm(slow)), 1e-8)
-        query_fast[index] = float(np.dot(query, fast))
-        query_slow[index] = float(np.dot(query, slow))
-        fast_slow[index] = float(np.dot(fast, slow))
-    if not np.isfinite(np.stack((query_fast, query_slow, fast_slow))).all():
-        raise FloatingPointError("QDIC sidecar contains non-finite prototype evidence")
-
     output_path = Path(output).resolve()
     output_path.mkdir(parents=True, exist_ok=False)
-    values = {
-        "query_fast_cosine": query_fast,
-        "query_slow_cosine": query_slow,
-        "fast_slow_cosine": fast_slow,
+    array_paths = {
+        name: output_path / f"{name}.npy"
+        for name in (
+            "query_fast_cosine",
+            "query_slow_cosine",
+            "fast_slow_cosine",
+        )
     }
-    array_paths: dict[str, str] = {}
-    for name, value in values.items():
-        path = output_path / f"{name}.npy"
-        np.save(path, value, allow_pickle=False)
-        array_paths[name] = str(path)
+    maps = {
+        name: np.lib.format.open_memmap(
+            path,
+            mode="w+",
+            dtype=np.float32,
+            shape=(count,),
+        )
+        for name, path in array_paths.items()
+    }
+    prototype_cache: OrderedDict[
+        tuple[int, tuple[int, ...]], tuple[np.ndarray, np.ndarray]
+    ] = OrderedDict()
+
+    processed = 0
+    with rows_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            if processed >= count:
+                raise ValueError("QDIC sidecar event rows exceed cache event count")
+            index = processed
+            row = json.loads(line)
+            video = int(row["video_id"])
+            candidate_rows = tuple(int(value) for value in row.get("candidate_rows", ()))
+            query_rows = tuple(int(value) for value in row.get("query_rows", ()))
+            if not candidate_rows or not query_rows:
+                raise ValueError(f"QDIC event row {index} lacks candidate_rows/query_rows")
+            value = feature_source_obj.get(video, index)
+            all_rows = candidate_rows + query_rows
+            if min(all_rows) < 0 or max(all_rows) >= len(value):
+                raise IndexError(f"QDIC event row {index} references features outside video {video}")
+            key = (video, candidate_rows)
+            prototypes = prototype_cache.get(key)
+            if prototypes is None:
+                prototypes = replay_fixed_dual_prototypes(
+                    value[np.asarray(candidate_rows, dtype=np.int64)],
+                    alpha_fast=float(alpha_fast),
+                    alpha_slow=float(alpha_slow),
+                )
+                prototype_cache[key] = prototypes
+                prototype_cache.move_to_end(key)
+                while len(prototype_cache) > QDIC_PROTOTYPE_CACHE_LIMIT:
+                    prototype_cache.popitem(last=False)
+            else:
+                prototype_cache.move_to_end(key)
+            fast, slow = prototypes
+            query = value[query_rows[0]]
+            query = query / max(float(np.linalg.norm(query)), 1e-8)
+            fast = fast / max(float(np.linalg.norm(fast)), 1e-8)
+            slow = slow / max(float(np.linalg.norm(slow)), 1e-8)
+            direct = np.asarray(
+                [
+                    float(np.dot(query, fast)),
+                    float(np.dot(query, slow)),
+                    float(np.dot(fast, slow)),
+                ],
+                dtype=np.float32,
+            )
+            if not np.isfinite(direct).all():
+                raise FloatingPointError(f"QDIC sidecar row {index} contains non-finite prototype evidence")
+            maps["query_fast_cosine"][index] = direct[0]
+            maps["query_slow_cosine"][index] = direct[1]
+            maps["fast_slow_cosine"][index] = direct[2]
+            processed += 1
+
+    if processed != count:
+        raise ValueError("QDIC sidecar rows and event cache arrays have different lengths")
+    for value in maps.values():
+        value.flush()
+    del maps
+
+    array_path_strings = {name: str(path.resolve()) for name, path in array_paths.items()}
     sidecar_metadata: dict[str, Any] = {
         "schema_version": 11,
         "artifact": "qdic_v11_projected_prototype_sidecar",
@@ -1005,9 +1155,11 @@ def precompute_qdic_sidecar(
         "memory_dedup_cos": float(memory_dedup_cos),
         "prototype_history": "full causal raw candidate_rows; no canonical dedup",
         "query_observations": 1,
-        "arrays": array_paths,
-        "array_hashes": {name: _sha256(path) for name, path in array_paths.items()},
+        "arrays": array_path_strings,
+        "array_hashes": {name: _sha256(path) for name, path in array_path_strings.items()},
         "source_hashes": feature_provenance,
+        "feature_source_provenance": feature_provenance,
+        "producer_source_hashes": _qdic_sidecar_producer_hashes(),
     }
     (output_path / "metadata.json").write_text(
         json.dumps(sidecar_metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

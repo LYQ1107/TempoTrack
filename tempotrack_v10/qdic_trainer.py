@@ -167,6 +167,7 @@ def _source_hashes() -> dict[str, str]:
         base / "qdic_features.py",
         base / "qdic_trainer.py",
         base / "qdic_loader.py",
+        base / "query_conditioned_reranker.py",
     )
     return {str(path): sha256(path) for path in paths}
 
