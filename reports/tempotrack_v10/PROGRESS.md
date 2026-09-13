@@ -846,9 +846,10 @@ failure.
 - Other datasets are being evaluated concurrently rather than waiting for the
   COV lane to finish.  The isolated OVTrack/VOV path has Test shard 0,
   Val shard 0, and Test shard 1 live (PIDs 33381, 33382, 33383) with 13
-  complete-video shards pending; the latest observed progress was 48/74,
-  47/74, and 44/74 respectively.  Its supervisor is PID 33377 and writes
-  only under
+  complete-video shards pending.  The earlier `/74` counters were a
+  pre-inference setup phase; the actual frame counters at the latest audit
+  were approximately Test shard 0 `94/6516`, Val shard 0 `72/4543`, and Test
+  shard 1 `20/6516`.  Its supervisor is PID 33377 and writes only under
   `/data2/usr_for_deadline/tempotrack_v10_unified/v104_downstream/ov_early_parallel_20260913`.
 - COV Test has all eight complete-video workers live under supervisor PID
   15918.  Observed shard progress was approximately 3462/6516,
