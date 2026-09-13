@@ -19,6 +19,10 @@ DOWNSTREAM_STATE = V10_ROOT / "v104_downstream_supervisor" / "state.json"
 MASA_STATE = V10_ROOT / "v104_masa_downstream_supervisor" / "state.json"
 LEGACY_ROOT = V10_ROOT / "search" / "covtrack_test_q1_fixed_20260912"
 WAVE2_ROOT = V10_ROOT / "search" / "covtrack_q1_fixed_20260913_wave2"
+FULL_SEARCH_ROOTS = (
+    V10_ROOT / "search" / "covtrack_test_full_20260914_10way",
+    V10_ROOT / "search" / "covtrack_test_full_20260914_10way_supplement",
+)
 
 
 def read_json(path: Path) -> Any | None:
@@ -58,6 +62,76 @@ def table_row(label: str, data: dict[str, Any] | None) -> str:
 def load_receipt(path: Path) -> dict[str, Any] | None:
     value = read_json(path)
     return value if isinstance(value, dict) else None
+
+
+def full_search_status() -> dict[str, Any]:
+    """Return a fail-closed view of the extra full-Test search.
+
+    The V10.4 final report must not be emitted while the separately launched
+    7+3 full-Test coordinators are still producing observations.  A status
+    file alone is insufficient: every coordinator job must also be terminal.
+    """
+    rows: list[dict[str, Any]] = []
+    terminal_states = {"COMPLETED", "FAILED", "BLOCKED"}
+    all_terminal = True
+    for root in FULL_SEARCH_ROOTS:
+        status_path = root / "coordinator_status.json"
+        value = read_json(status_path)
+        if not isinstance(value, dict):
+            all_terminal = False
+            rows.append({"root": str(root), "status": "MISSING", "jobs": {}})
+            continue
+        jobs = value.get("jobs", {})
+        if not isinstance(jobs, dict):
+            jobs = {}
+        job_states = {str(key): str(item.get("state", "MISSING")) for key, item in jobs.items() if isinstance(item, dict)}
+        coordinator_state = str(value.get("status", "MISSING"))
+        root_terminal = coordinator_state in terminal_states and all(
+            state in terminal_states for state in job_states.values()
+        ) and bool(job_states)
+        all_terminal = all_terminal and root_terminal
+        rows.append(
+            {
+                "root": str(root),
+                "status": coordinator_state,
+                "completed": value.get("completed"),
+                "failed": value.get("failed"),
+                "updated_at_unix": value.get("updated_at_unix"),
+                "jobs": job_states,
+                "terminal": root_terminal,
+            }
+        )
+    return {"terminal": all_terminal, "roots": rows}
+
+
+def full_search_rows() -> list[dict[str, Any]]:
+    """Collect both coordinator roots without treating RUNNING as results."""
+    rows: list[dict[str, Any]] = []
+    for root in FULL_SEARCH_ROOTS:
+        for receipt_path in sorted(root.glob("*/receipt.json")):
+            value = load_receipt(receipt_path)
+            if not value:
+                continue
+            metric_value = value.get("metrics", {})
+            outputs = value.get("outputs", {})
+            if not isinstance(metric_value, dict):
+                metric_value = {}
+            if not isinstance(outputs, dict):
+                outputs = {}
+            rows.append(
+                {
+                    "trial_id": value.get("trial_id", receipt_path.parent.name),
+                    "status": value.get("status"),
+                    "stage": value.get("stage"),
+                    "gpu": value.get("gpu"),
+                    "base": metric_value.get("base", {}),
+                    "novel": metric_value.get("novel", {}),
+                    "prediction_sha256": value.get("prediction_sha256") or outputs.get("prediction_sha256"),
+                    "receipt": str(receipt_path),
+                    "source": "full_10way",
+                }
+            )
+    return rows
 
 
 def legacy_rows() -> list[dict[str, Any]]:
@@ -104,6 +178,7 @@ def search_rows() -> list[dict[str, Any]]:
     return [
         *({**row, "source": "legacy"} for row in legacy_rows()),
         *({**row, "source": "wave2"} for row in wave2_rows()),
+        *full_search_rows(),
     ]
 
 
@@ -111,6 +186,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=HARD_REPO / "reports/tempotrack_v10/FINAL_V10_4_FULL_SEARCH.md")
     args = parser.parse_args()
+    full_search = full_search_status()
+    if not full_search["terminal"]:
+        raise RuntimeError(
+            "V10_4_FULL_SEARCH_NOT_TERMINAL: "
+            + json.dumps(full_search, ensure_ascii=False, sort_keys=True)
+        )
     primary = read_json(PRIMARY_STATE) or {}
     downstream = read_json(DOWNSTREAM_STATE) or {}
     masa = read_json(MASA_STATE) or {}
@@ -136,6 +217,7 @@ def main() -> int:
         f"- Downstream COV/OV supervisor: `{downstream.get('status', 'MISSING')}` at stage `{downstream.get('current_stage', 'MISSING')}`.",
         f"- MASA downstream supervisor: `{masa.get('status', 'MISSING')}` at stage `{masa.get('current_stage', 'MISSING')}`.",
         f"- Legacy receipt count: `{len(legacy_rows())}`; Wave2 receipt count: `{len(wave2_rows())}`.",
+        f"- Full-Test 10-way search: `{json.dumps(full_search['roots'], ensure_ascii=False, sort_keys=True)}`.",
         "",
         "## Validity and protocol",
         "",

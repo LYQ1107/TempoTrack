@@ -16,6 +16,10 @@ V10_ROOT = Path("/data2/usr_for_deadline/tempotrack_v10_unified")
 DOWNSTREAM_STATE = V10_ROOT / "v104_downstream_supervisor" / "state.json"
 MASA_STATE = V10_ROOT / "v104_masa_downstream_supervisor" / "state.json"
 STATE_ROOT = V10_ROOT / "v104_finalize_supervisor"
+FULL_SEARCH_ROOTS = (
+    V10_ROOT / "search" / "covtrack_test_full_20260914_10way",
+    V10_ROOT / "search" / "covtrack_test_full_20260914_10way_supplement",
+)
 
 
 def read_json(path: Path):
@@ -42,6 +46,21 @@ def atomic_json(path: Path, value):
             pass
 
 
+def full_search_terminal() -> bool:
+    terminal = {"COMPLETED", "FAILED", "BLOCKED"}
+    for root in FULL_SEARCH_ROOTS:
+        path = root / "coordinator_status.json"
+        value = read_json(path)
+        if not isinstance(value, dict) or str(value.get("status")) not in terminal:
+            return False
+        jobs = value.get("jobs")
+        if not isinstance(jobs, dict) or not jobs:
+            return False
+        if any(not isinstance(item, dict) or str(item.get("state")) not in terminal for item in jobs.values()):
+            return False
+    return True
+
+
 def main() -> int:
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
     state_path = STATE_ROOT / "state.json"
@@ -52,16 +71,17 @@ def main() -> int:
         masa = read_json(MASA_STATE) or {}
         downstream_done = downstream.get("status") == "COMPLETED"
         masa_done = masa.get("status") == "COMPLETED"
+        full_done = full_search_terminal()
         state.update({
             "status": "RUNNING",
             "current_stage": "WAIT_RESULTS",
-            "next_action": f"wait downstream/MASA: {downstream_done}/{masa_done}",
+            "next_action": f"wait downstream/MASA/full-search: {downstream_done}/{masa_done}/{full_done}",
             "downstream_state": str(DOWNSTREAM_STATE),
             "masa_state": str(MASA_STATE),
             "heartbeat": time.time(),
         })
         atomic_json(state_path, state)
-        if downstream_done and masa_done:
+        if downstream_done and masa_done and full_done:
             break
         time.sleep(30)
 
