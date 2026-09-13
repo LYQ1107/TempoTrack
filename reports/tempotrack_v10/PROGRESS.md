@@ -840,3 +840,32 @@ failure.
   summary SHA256 is
   `c105f3d34bd83afe4fcbb7b6352d7c524d900ff35fa162c7a08cc6e78bd1c597`.
   This is a completed native baseline result, not a TempoTrack gain claim.
+
+## Concurrent cross-dataset continuation — 2026-09-13 17:05 CST
+
+- Other datasets are being evaluated concurrently rather than waiting for the
+  COV lane to finish.  The isolated OVTrack/VOV path has Test shard 0,
+  Val shard 0, and Test shard 1 live (PIDs 33381, 33382, 33383) with 13
+  complete-video shards pending; the latest observed progress was 48/74,
+  47/74, and 44/74 respectively.  Its supervisor is PID 33377 and writes
+  only under
+  `/data2/usr_for_deadline/tempotrack_v10_unified/v104_downstream/ov_early_parallel_20260913`.
+- COV Test has all eight complete-video workers live under supervisor PID
+  15918.  Observed shard progress was approximately 3462/6516,
+  3375/6516, 3494/6515, 3429/6527, 3134/6515, 3473/6524,
+  2562/6514, and 937/6528.  These are disjoint shard writers; no duplicate
+  Test writer was started.
+- MASA-R50+COV-detection Val/Test Tempo sidecars remain live (PIDs 13464 and
+  12856), while the canonical MASA coordinator waits for both OV result
+  receipts.  The waiter itself was safely replaced only after confirming it
+  had no children and was not doing inference.  It now accepts the actual
+  worker-bound `OV_TEST_WORKERS_RESULT`/`OV_VAL_WORKERS_RESULT` DAG keys,
+  requires a completed output receipt, and is PID 3671 in `WAIT_OV`.
+- The waiter correction passed `py_compile` and `git diff --check` and was
+  pushed as commit `7b29f103f5df4dad105c055e7be574b0848e0e46`
+  (`Unblock MASA after worker-bound OV results`).  The unrelated generated
+  `reports/build_check_repair.json` remains uncommitted by design.
+- At this snapshot all ten physical GPUs had project work or an admitted
+  shared project worker.  Host memory was about 125G total, 57G available
+  and 7.8G immediately free; therefore no additional overlapping writer was
+  admitted merely to inflate concurrency or risk an output/memory collision.
