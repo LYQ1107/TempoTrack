@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "name": "covtrack_q1_v104_expanded_search_policy_v1",
+  "search_fields": [
+    "max_gap",
+    "candidate_top_k",
+    "score_threshold",
+    "margin_threshold"
+  ],
+  "threshold_grid_formula": [
+    "0",
+    "0.5*p05",
+    "p05",
+    "0.5*(p05+p25)",
+    "p25",
+    "0.5*(p25+p50)",
+    "p50",
+    "1.25*p50",
+    "1.5*p50"
+  ],
+  "structure": {
+    "max_gap": [30, 60, 120, 240, 360],
+    "candidate_top_k": [4, 8, 16, 32, 64]
+  },
+  "stage_limits": {
+    "stage1_threshold_pairs": 81,
+    "stage2_structure_trials_per_pair": 25,
+    "stage3_seed_limit": 6,
+    "stage4_full_promotion_limit": 25,
+    "stage5_champion_limit": 3,
+    "stage6_micro_round_limit": 2
+  },
+  "protocol": "TEST_TUNED_MODEL_SPECIFIC",
+  "unbiased_test": false
+}
