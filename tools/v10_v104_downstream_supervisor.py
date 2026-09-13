@@ -902,7 +902,18 @@ class DownstreamSupervisor:
             except (KeyError, TypeError, ValueError):
                 continue
             command = [str(item) for item in job.get("command", [])]
-            if str(OV_RUNTIME) not in command or str(OV_TEMPO) not in command or str(checkpoint) not in command:
+            # Runtime is passed as a positional argument, while the Tempo
+            # config is deliberately passed through MMEngine's
+            # ``key=<exact path>`` override.  Checking only argv equality
+            # rejects valid early artifacts and prevents adoption after the
+            # healthy worker has already completed.  Keep the path binding
+            # exact, but accept either a standalone argument or the audited
+            # ``key=path`` form.
+            def mentions_exact_path(path: Path) -> bool:
+                expected = str(path)
+                return any(item == expected or item.endswith("=" + expected) for item in command)
+
+            if not mentions_exact_path(OV_RUNTIME) or not mentions_exact_path(OV_TEMPO) or not mentions_exact_path(checkpoint):
                 return False
             output = Path(str(job.get("output", ""))).resolve()
             if not output.is_file():
