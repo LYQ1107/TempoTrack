@@ -1,8 +1,12 @@
 """Structured Query-Conditioned Distributional Identity Calibration (QDIC).
 
-QDIC-MO keeps the projected Gaussian-moment evidence explicit.  The learned
+QDIC-MO keeps the projected Gaussian-Moment/MGF-inspired evidence explicit.
+The learned
 part only chooses the fast/slow mixture and calibrates the resulting identity
 score with a residual network; it is not a replacement black-box reranker.
+The projected MO values are evidence features, not a Gaussian likelihood or a
+fixed positive identity reward; the residual learns complex competition and
+MO interactions left by the structured score.
 """
 
 from __future__ import annotations
@@ -25,7 +29,20 @@ from .qdic_features import (
 
 
 GATE_INPUT_DIM = 9
-GATE_FEATURE_INDICES = (24, 25, 26, 27, 28, 29, 30, 17, 9)
+FEATURE_INDEX = {name: index for index, name in enumerate(QDIC_FEATURE_NAMES)}
+GATE_FEATURE_NAMES = (
+    "query_fast_cosine",
+    "query_slow_cosine",
+    "fast_slow_cosine",
+    "projected_fast_mean",
+    "projected_fast_variance",
+    "projected_slow_mean",
+    "projected_slow_variance",
+    "gap_over_max_gap",
+    "memory_length_over_64",
+)
+GATE_FEATURE_INDICES = tuple(FEATURE_INDEX[name] for name in GATE_FEATURE_NAMES)
+assert len(GATE_FEATURE_INDICES) == GATE_INPUT_DIM
 RESIDUAL_INPUT_DIM = QDIC_RAW_DIM + 2
 
 
@@ -51,7 +68,9 @@ class QueryDistributionalCalibrator(nn.Module):
     The public ``forward`` accepts raw 33-D rows.  ``score_event`` additionally
     accepts candidate payloads and constructs the same 33-D rows used by the
     offline feature builder, which keeps the online boundary small and
-    frontend-independent.
+    frontend-independent.  Projected MO is evidence, not a Gaussian likelihood
+    or fixed positive identity reward; the residual learns complex
+    competition/MO interactions.
     """
 
     feature_names = tuple(QDIC_FEATURE_NAMES)
@@ -95,6 +114,11 @@ class QueryDistributionalCalibrator(nn.Module):
         self.structured_scale = nn.Parameter(
             torch.tensor(_inverse_softplus(1.0), dtype=torch.float32)
         )
+        # A positive, learnable uncertainty penalty keeps projected variance
+        # from acting as an unconditional reward.  The initial penalty is 0.1.
+        self.variance_penalty_raw = nn.Parameter(
+            torch.tensor(_inverse_softplus(0.1), dtype=torch.float32)
+        )
         nn.init.zeros_(self.gate[-2].weight)
         nn.init.zeros_(self.gate[-2].bias)
         nn.init.zeros_(self.residual_calibrator[-1].weight)
@@ -122,8 +146,15 @@ class QueryDistributionalCalibrator(nn.Module):
         normalized = (flat - self.feature_mean) / self.feature_scale
         gate_values = flat[:, GATE_FEATURE_INDICES]
         alpha = self.gate(gate_values).squeeze(-1)
-        fast_branch = 0.5 * (flat[:, 24] + flat[:, 31])
-        slow_branch = 0.5 * (flat[:, 25] + flat[:, 32])
+        q_fast = flat[:, FEATURE_INDEX["query_fast_cosine"]]
+        q_slow = flat[:, FEATURE_INDEX["query_slow_cosine"]]
+        fast_mean = flat[:, FEATURE_INDEX["projected_fast_mean"]]
+        fast_variance = flat[:, FEATURE_INDEX["projected_fast_variance"]]
+        slow_mean = flat[:, FEATURE_INDEX["projected_slow_mean"]]
+        slow_variance = flat[:, FEATURE_INDEX["projected_slow_variance"]]
+        variance_penalty = F.softplus(self.variance_penalty_raw)
+        fast_branch = 0.5 * (q_fast + fast_mean) - variance_penalty * fast_variance
+        slow_branch = 0.5 * (q_slow + slow_mean) - variance_penalty * slow_variance
         structured_score = alpha * fast_branch + (1.0 - alpha) * slow_branch
         residual_input = torch.cat((normalized, alpha[:, None], structured_score[:, None]), dim=-1)
         delta = self.residual_calibrator(residual_input).squeeze(-1)
@@ -136,6 +167,7 @@ class QueryDistributionalCalibrator(nn.Module):
             "structured_score": structured_score.reshape(leading),
             "fast_branch": fast_branch.reshape(leading),
             "slow_branch": slow_branch.reshape(leading),
+            "variance_penalty": variance_penalty.expand_as(alpha).reshape(leading),
             "residual": delta.reshape(leading),
         }
 
@@ -223,6 +255,8 @@ class QueryDistributionalCalibrator(nn.Module):
 
 
 __all__ = [
+    "FEATURE_INDEX",
+    "GATE_FEATURE_NAMES",
     "GATE_FEATURE_INDICES",
     "GATE_INPUT_DIM",
     "RESIDUAL_INPUT_DIM",

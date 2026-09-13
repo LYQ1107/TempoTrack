@@ -45,6 +45,31 @@ def _memory_guard(spare_gib: int = 12) -> None:
         raise MemoryError(f"Available RAM {available / 2**30:.2f} GiB below {spare_gib} GiB reserve")
 
 
+def _training_role(split: Any) -> dict[str, object]:
+    """Return paper-validity metadata for an allowed QDIC training split."""
+    value = str(split or "").strip().lower()
+    if (
+        not value
+        or value.startswith("test")
+        or "novel" in value
+        or value in {"full", "all"}
+    ):
+        raise ValueError("QDIC Test/Novel/full features are forbidden for optimizer")
+    if value.startswith("train"):
+        return {
+            "paper_status": "BASE_TRAIN",
+            "paper_valid": True,
+            "diagnostic_only": False,
+        }
+    if value.startswith("val") or value.startswith("dev"):
+        return {
+            "paper_status": "VAL_BASE_PILOT",
+            "paper_valid": False,
+            "diagnostic_only": True,
+        }
+    raise ValueError(f"unsupported QDIC training split: {split!r}")
+
+
 def _load_feature_arrays(root: Path) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
     metadata_path = root / "features.json"
     if not metadata_path.is_file():
@@ -56,9 +81,7 @@ def _load_feature_arrays(root: Path) -> tuple[dict[str, Any], dict[str, np.ndarr
         raise ValueError("QDIC feature schema mismatch")
     if int(metadata.get("feature_dim", -1)) != QDIC_RAW_DIM:
         raise ValueError("QDIC feature dimension mismatch")
-    split = str(metadata.get("split", "")).lower()
-    if not split or split.startswith("test"):
-        raise ValueError("QDIC Test features are forbidden for optimizer")
+    _training_role(metadata.get("split"))
     if not metadata.get("base_only_supervision") or metadata.get("novel_gt_used_for_optimizer"):
         raise ValueError("QDIC feature cache is not Base-only")
     validate_qdic_feature_config(metadata.get("feature_config"))
@@ -160,6 +183,7 @@ def train(
     root = Path(features_dir).resolve()
     out = Path(output).resolve()
     metadata, arrays = _load_feature_arrays(root)
+    training_role = _training_role(metadata.get("split"))
     feature_config = validate_qdic_feature_config(metadata["feature_config"])
     train_groups, holdout_groups = build_training_groups(metadata, arrays)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -295,6 +319,7 @@ def train(
                         "base_only_supervision": True,
                         "novel_gt_used": False,
                         "test_weights_used": False,
+                        **training_role,
                         "source_hashes": source_hashes,
                         "epoch": epoch + 1,
                         "optimizer_steps": optimizer_steps,
@@ -311,8 +336,7 @@ def train(
         "artifact": "qdic_v11_training",
         "protocol": "QDIC_V11_BASE_ONLY_TRAINING",
         "training_split": metadata["split"],
-        "diagnostic_only": False,
-        "paper_valid": True,
+        **training_role,
         "training_groups": len(train_groups),
         "holdout_groups": len(holdout_groups),
         "train_video_ids": sorted({int(videos[group]) for group in train_groups}),
@@ -358,4 +382,4 @@ def train(
     return result
 
 
-__all__ = ["build_training_groups", "sha256", "train"]
+__all__ = ["_training_role", "build_training_groups", "sha256", "train"]

@@ -1,11 +1,12 @@
 import json
 
 import numpy as np
+import pytest
 import torch
 
 from tempotrack_v10.qdic_features import QDIC_FEATURE_NAMES, QDIC_RAW_DIM
 from tempotrack_v10.qdic_loader import QDIC_STATUS, load_qdic_checkpoint
-from tempotrack_v10.qdic_trainer import build_training_groups, sha256, train
+from tempotrack_v10.qdic_trainer import _training_role, build_training_groups, sha256, train
 from tempotrack_v10.query_conditioned_reranker import group_ranking_loss
 
 
@@ -50,6 +51,9 @@ def _feature_cache(tmp_path):
         "memory_dedup_cos": 0.95,
         "context_candidate_top_k": 64,
         "decision_candidate_top_k": 8,
+        "top_r": 3,
+        "min_gap": 0,
+        "max_gap": 360,
     }
     metadata = {
         "artifact": "qdic_v11_feature_cache",
@@ -89,6 +93,24 @@ def test_unknown_label_is_masked_out_of_group_loss_gradient():
     assert logits.grad[0, 1].item() == 0.0
 
 
+def test_training_role_is_explicit_and_unknown_or_forbidden_splits_are_rejected():
+    for split in ("train", "train_base"):
+        assert _training_role(split) == {
+            "paper_status": "BASE_TRAIN",
+            "paper_valid": True,
+            "diagnostic_only": False,
+        }
+    for split in ("val", "val_base_internal", "dev"):
+        assert _training_role(split) == {
+            "paper_status": "VAL_BASE_PILOT",
+            "paper_valid": False,
+            "diagnostic_only": True,
+        }
+    for split in ("", "test", "test_base", "novel", "novel_base", "full", "all", "mystery"):
+        with pytest.raises(ValueError):
+            _training_role(split)
+
+
 def test_cpu_trainer_writes_loadable_base_only_artifact(tmp_path, monkeypatch):
     feature_root = _feature_cache(tmp_path)
     monkeypatch.setattr("tempotrack_v10.qdic_trainer._memory_guard", lambda: None)
@@ -96,6 +118,9 @@ def test_cpu_trainer_writes_loadable_base_only_artifact(tmp_path, monkeypatch):
     receipt = train(feature_root, output, device="cpu", epochs=1, seed=7)
     assert receipt["status"] == "COMPLETED"
     assert receipt["base_only_supervision"] is True
+    assert receipt["paper_status"] == "VAL_BASE_PILOT"
+    assert receipt["paper_valid"] is False
+    assert receipt["diagnostic_only"] is True
     assert receipt["novel_gt_used"] is False
     assert receipt["test_weights_used"] is False
     assert (output / "best.pt").is_file()
@@ -104,3 +129,6 @@ def test_cpu_trainer_writes_loadable_base_only_artifact(tmp_path, monkeypatch):
     )
     artifact = load_qdic_checkpoint(output / "best.pt", device="cpu")
     assert artifact.provenance["status"] == QDIC_STATUS
+    assert artifact.provenance["paper_status"] == "VAL_BASE_PILOT"
+    assert artifact.provenance["paper_valid"] is False
+    assert artifact.provenance["diagnostic_only"] is True

@@ -2533,6 +2533,31 @@ def dispatch_psmr_v9(args) -> int:
             memory_capacity=args.memory_capacity,
             memory_dedup_cos=args.memory_dedup_cos,
         )
+    elif action == "build-qdic-features":
+        from tempotrack_v10.qdic_features import build_qdic_features
+
+        result = build_qdic_features(
+            event_cache=args.event_cache,
+            output=args.output,
+            sidecar=args.sidecar,
+            recent_k=args.recent_k,
+            alpha_fast=args.alpha_fast,
+            alpha_slow=args.alpha_slow,
+            memory_capacity=args.memory_capacity,
+            memory_dedup_cos=args.memory_dedup_cos,
+            context_candidate_top_k=args.context_candidate_top_k,
+            decision_candidate_top_k=args.decision_candidate_top_k,
+        )
+    elif action == "train-qdic":
+        from tempotrack_v10.qdic_trainer import train
+
+        result = train(
+            features_dir=args.features_dir,
+            output=args.output,
+            device=args.device,
+            epochs=args.epochs,
+            seed=args.seed,
+        )
     elif action == "precompute-reliability":
         result = precompute_reliability_cache(event_cache=args.event_cache, checkpoint=args.checkpoint, output=args.output, device=args.device, chunk_events=args.chunk_events)
     elif action == "sweep-psmr":

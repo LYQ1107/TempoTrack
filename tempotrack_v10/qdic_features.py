@@ -2,9 +2,10 @@
 
 The module deliberately keeps the statistical part separate from the learned
 model.  A QDIC row is the existing 24-dimensional Q1 evidence vector followed
-by nine causal distributional identity features.  The projected moments are
-computed from the already canonicalized query/memory cosine matrix; no
-high-dimensional covariance is materialized.
+by nine causal distributional identity features.  The projected
+Gaussian-Moment/MGF-inspired moments are evidence features, not a Gaussian
+likelihood or fixed positive identity reward; no high-dimensional covariance is
+materialized.
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ def projected_distribution_moments(
     *,
     recent_k: int = 8,
 ) -> tuple[float, float, float, float, float, float]:
-    """Return ``mu/variance/MO`` for recent and full projected history.
+    """Return projected ``mu/variance/MO`` evidence for recent and full history.
 
     ``cosine`` is ``q @ Z.T``.  QDIC V11 uses one query observation, but this
     helper accepts ``[Q,L]`` and deterministically uses its first query row so
@@ -207,6 +208,12 @@ def _array_sha256(value: np.ndarray) -> str:
     digest.update(str(array.shape).encode())
     digest.update(array.tobytes(order="C"))
     return digest.hexdigest()
+
+
+def _object_sha256(value: Any) -> str:
+    """Hash a JSON object canonically so metadata exposes a real digest."""
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _load_cache(event_cache: str | Path | Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, np.ndarray], list[dict[str, Any]]]:
@@ -566,9 +573,7 @@ def build_qdic_features(
     result_metadata["array_hashes"] = {
         name: _sha256(path) for name, path in array_paths.items()
     }
-    result_metadata["arrays_hash"] = json.dumps(
-        result_metadata["array_hashes"], sort_keys=True, separators=(",", ":")
-    )
+    result_metadata["arrays_hash"] = _object_sha256(result_metadata["array_hashes"])
     metadata_path.write_text(
         json.dumps(result_metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

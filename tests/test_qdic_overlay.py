@@ -9,13 +9,14 @@ from tempotrack_v10.query_distributional_calibrator import QueryDistributionalCa
 
 
 class _FakeQDIC:
-    def __init__(self):
+    def __init__(self, **feature_config_updates):
         self.model = QueryDistributionalCalibrator()
         self.calls = []
+        self.feature_config_updates = feature_config_updates
 
     @property
     def provenance(self):
-        return {
+        result = {
             "status": "QDIC_V11_MODEL_CODE_AND_WEIGHTS",
             "feature_names": list(QDIC_FEATURE_NAMES),
             "feature_dim": 33,
@@ -29,6 +30,7 @@ class _FakeQDIC:
                 "context_candidate_top_k": 64,
                 "decision_candidate_top_k": 8,
                 "top_r": 3,
+                "min_gap": 0,
                 "max_gap": 360,
             },
             "training_protocol": "QDIC_V11_BASE_ONLY_TRAINING",
@@ -36,6 +38,8 @@ class _FakeQDIC:
             "novel_gt_used": False,
             "test_weights_used": False,
         }
+        result["feature_config"].update(self.feature_config_updates)
+        return result
 
     def score_event(self, candidates, **kwargs):
         self.calls.append(list(candidates))
@@ -179,6 +183,52 @@ def test_qdic_native_memo_bootstrap_is_fail_closed():
             )
         )
     assert overlay._qdic_native_memo_bootstrap_count == 1
+
+
+def test_qdic_missing_context_evidence_is_fail_closed():
+    fake = _FakeQDIC()
+    overlay = TempoTrackOverlay(_config(), qdic=fake)
+    snapshot = _snapshot(
+        histories=(
+            np.asarray([[1.0, 0.0]], dtype=np.float32),
+            np.asarray([[0.0, 1.0]], dtype=np.float32),
+        )
+    )
+    snapshot.metadata["memory_evidence"].pop(43)
+    with pytest.raises(SnapshotContractError, match="BLOCKED_QDIC_CONTEXT_EVIDENCE_MISSING"):
+        overlay.propose(snapshot)
+
+
+def test_qdic_misaligned_history_and_evidence_is_fail_closed():
+    fake = _FakeQDIC()
+    overlay = TempoTrackOverlay(_config(), qdic=fake)
+    snapshot = _snapshot(
+        histories=(np.asarray([[1.0, 0.0], [0.9, 0.1], [0.8, 0.2]], dtype=np.float32),)
+    )
+    snapshot.metadata["memory_evidence"][42] = np.ones((2, 7), dtype=np.float32)
+    with pytest.raises(SnapshotContractError, match="BLOCKED_QDIC_HISTORY_EVIDENCE_MISALIGNED"):
+        overlay.propose(snapshot)
+
+
+@pytest.mark.parametrize(
+    ("name", "checkpoint_value", "runtime_value"),
+    (("top_r", 5, 3), ("min_gap", 1, 0), ("max_gap", 180, 360)),
+)
+def test_qdic_runtime_contract_compares_top_r_and_gap_bounds(
+    name, checkpoint_value, runtime_value
+):
+    with pytest.raises(SnapshotContractError, match=f"BLOCKED_QDIC_{name.upper()}_MISMATCH"):
+        TempoTrackOverlay(
+            _config(**{name: runtime_value}),
+            qdic=_FakeQDIC(**{name: checkpoint_value}),
+        )
+
+
+def test_qdic_weight_is_an_exact_enable_switch():
+    assert TempoTrackConfig(qdic_weight=0).qdic_weight == 0
+    assert TempoTrackConfig(qdic_weight=1).qdic_weight == 1
+    with pytest.raises(ValueError, match="qdic_weight must be 0 or 1"):
+        TempoTrackConfig(qdic_weight=0.5)
 
 
 def test_qdic_and_legacy_reranker_are_mutually_exclusive():

@@ -35,6 +35,9 @@ _REQUIRED_CONFIG = (
     "memory_dedup_cos",
     "context_candidate_top_k",
     "decision_candidate_top_k",
+    "top_r",
+    "min_gap",
+    "max_gap",
 )
 
 
@@ -70,6 +73,9 @@ def validate_qdic_feature_config(value: Mapping[str, Any] | None) -> dict[str, A
             "memory_capacity",
             "context_candidate_top_k",
             "decision_candidate_top_k",
+            "top_r",
+            "min_gap",
+            "max_gap",
         ):
             raw = result[key]
             integer = int(raw)
@@ -79,7 +85,7 @@ def validate_qdic_feature_config(value: Mapping[str, Any] | None) -> dict[str, A
         result["alpha_fast"] = float(result["alpha_fast"])
         result["alpha_slow"] = float(result["alpha_slow"])
         result["memory_dedup_cos"] = float(result["memory_dedup_cos"])
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise SnapshotContractError("BLOCKED_QDIC_FEATURE_CONFIG_INVALID") from exc
     if result["query_observations"] != QDIC_QUERY_OBSERVATIONS:
         raise SnapshotContractError("BLOCKED_QDIC_QUERY_PROTOCOL_MISMATCH")
@@ -103,6 +109,8 @@ def validate_qdic_feature_config(value: Mapping[str, Any] | None) -> dict[str, A
         raise SnapshotContractError("BLOCKED_QDIC_CONTEXT_K_MISMATCH")
     if result["decision_candidate_top_k"] != QDIC_DECISION_CANDIDATE_TOP_K:
         raise SnapshotContractError("BLOCKED_QDIC_DECISION_K_MISMATCH")
+    if result["top_r"] < 1 or result["min_gap"] < 0 or result["max_gap"] < result["min_gap"]:
+        raise SnapshotContractError("BLOCKED_QDIC_FEATURE_CONFIG_INVALID: top_r/gap bounds")
     return result
 
 
@@ -151,6 +159,9 @@ class QDICV11Artifact:
             == _receipt_hash_for(self.source_hashes, "qdic_trainer.py"),
             "training_protocol": self.receipt.get("protocol"),
             "training_split": self.receipt.get("training_split"),
+            "paper_status": self.receipt.get("paper_status"),
+            "paper_valid": bool(self.receipt.get("paper_valid", False)),
+            "diagnostic_only": bool(self.receipt.get("diagnostic_only", False)),
             "base_only_supervision": bool(self.receipt.get("base_only_supervision", False)),
             "novel_gt_used": bool(self.receipt.get("novel_gt_used", True)),
             "test_weights_used": bool(self.receipt.get("test_weights_used", True)),
@@ -204,6 +215,27 @@ def load_qdic_checkpoint(
         or training_split in {"full", "all"}
     ):
         raise SnapshotContractError("BLOCKED_QDIC_TEST_WEIGHTS")
+    if training_split.startswith("train"):
+        expected_paper_role = {
+            "paper_status": "BASE_TRAIN",
+            "paper_valid": True,
+            "diagnostic_only": False,
+        }
+    elif training_split.startswith("val") or training_split.startswith("dev"):
+        expected_paper_role = {
+            "paper_status": "VAL_BASE_PILOT",
+            "paper_valid": False,
+            "diagnostic_only": True,
+        }
+    else:
+        raise SnapshotContractError("BLOCKED_QDIC_TRAINING_SPLIT_INVALID")
+    for key, expected in expected_paper_role.items():
+        if key == "paper_status":
+            valid = receipt.get(key) == expected
+        else:
+            valid = receipt.get(key) is expected
+        if not valid:
+            raise SnapshotContractError(f"BLOCKED_QDIC_{key.upper()}_MISMATCH")
     if receipt.get("base_only_supervision") is not True:
         raise SnapshotContractError("BLOCKED_QDIC_INVALID_SUPERVISION_PROVENANCE")
     if receipt.get("novel_gt_used") is not False or receipt.get("test_weights_used") is not False:
@@ -267,7 +299,16 @@ def load_qdic_checkpoint(
         raise SnapshotContractError("BLOCKED_QDIC_FEATURE_CONFIG_MISSING")
     if validate_qdic_feature_config(receipt_config) != feature_config:
         raise SnapshotContractError("BLOCKED_QDIC_FEATURE_CONFIG_MISMATCH")
-    for key in ("training_split", "protocol", "base_only_supervision", "novel_gt_used", "test_weights_used"):
+    for key in (
+        "training_split",
+        "protocol",
+        "paper_status",
+        "paper_valid",
+        "diagnostic_only",
+        "base_only_supervision",
+        "novel_gt_used",
+        "test_weights_used",
+    ):
         if key not in state or state[key] != receipt.get(key):
             raise SnapshotContractError(f"BLOCKED_QDIC_{key.upper()}_MISMATCH")
     if "model_state" not in state:

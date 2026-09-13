@@ -1,3 +1,6 @@
+import json
+import re
+
 import numpy as np
 
 from tempotrack_v10.qdic_features import (
@@ -89,6 +92,33 @@ def test_qdic_candidate_and_event_schema_is_33d_and_finite():
     assert np.isfinite(event).all()
 
 
+def test_qdic_mo_features_remain_in_the_33d_schema_with_the_projected_identity():
+    row = build_qdic_candidate_features(
+        np.asarray([[0.9, 0.1, 0.4]], dtype=np.float32),
+        np.ones((3, 7), dtype=np.float32),
+        5,
+        1,
+        query_fast_cosine=0.8,
+        query_slow_cosine=0.7,
+        fast_slow_cosine=0.95,
+    )
+    event = build_qdic_event_features(
+        [{"base_features": row[:19], "distributional_features": row[19:]}]
+    )[0]
+    names = tuple(QDIC_FEATURE_NAMES)
+    fast_mean = event[names.index("projected_fast_mean")]
+    fast_var = event[names.index("projected_fast_variance")]
+    slow_mean = event[names.index("projected_slow_mean")]
+    slow_var = event[names.index("projected_slow_variance")]
+    assert event.shape == (33,)
+    np.testing.assert_allclose(
+        event[names.index("projected_fast_mo")], fast_mean + 0.5 * fast_var, atol=1e-7
+    )
+    np.testing.assert_allclose(
+        event[names.index("projected_slow_mo")], slow_mean + 0.5 * slow_var, atol=1e-7
+    )
+
+
 def test_qdic_fast_moments_use_last_eight_and_slow_moments_use_full_memory():
     projected = np.arange(10, dtype=np.float32) / 10.0
     fast_mean, fast_var, fast_mo, slow_mean, slow_var, slow_mo = projected_distribution_moments(
@@ -120,3 +150,5 @@ def test_qdic_feature_cache_filters_to_q1_b1_top64_and_preserves_supervision_fla
     np.testing.assert_array_equal(offsets, [0, 2, 3])
     np.testing.assert_array_equal(videos, [10, 11])
     np.testing.assert_array_equal(allowed, [True, False, True])
+    metadata = json.loads((tmp_path / "features" / "features.json").read_text())
+    assert re.fullmatch(r"[0-9a-f]{64}", metadata["arrays_hash"])

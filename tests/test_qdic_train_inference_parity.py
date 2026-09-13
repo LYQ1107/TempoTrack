@@ -75,7 +75,14 @@ def test_offline_feature_cache_and_online_payload_are_numerically_identical(tmp_
         [payload], return_diagnostics=True
     )
     np.testing.assert_allclose(online_logits, offline_logits, rtol=0.0, atol=1e-6)
-    for key in ("alpha", "structured_score", "fast_branch", "slow_branch", "residual"):
+    for key in (
+        "alpha",
+        "structured_score",
+        "fast_branch",
+        "slow_branch",
+        "variance_penalty",
+        "residual",
+    ):
         np.testing.assert_allclose(
             online_diagnostics[key], offline_diagnostics[key].detach().numpy(), rtol=0.0, atol=1e-6
         )

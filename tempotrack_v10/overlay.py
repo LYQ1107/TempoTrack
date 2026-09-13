@@ -100,8 +100,10 @@ class TempoTrackConfig:
             raise ValueError("score weights must be non-negative")
         if self.reranker_weight < 0:
             raise ValueError("reranker_weight must be non-negative")
-        if self.qdic_weight < 0:
-            raise ValueError("qdic_weight must be non-negative")
+        if not np.isfinite(float(self.qdic_weight)) or float(self.qdic_weight) not in (0.0, 1.0):
+            raise ValueError(
+                "QDIC is a mutually-exclusive learned path; qdic_weight must be 0 or 1"
+            )
         if self.reranker_weight > 0.0 and self.qdic_weight > 0.0:
             raise ValueError("reranker_weight and qdic_weight are mutually exclusive")
         if self.qdic_recent_k < 1:
@@ -245,6 +247,9 @@ class TempoTrackOverlay:
                 ("memory_capacity", self.config.memory_capacity),
                 ("context_candidate_top_k", self.config.qdic_context_top_k),
                 ("decision_candidate_top_k", self.config.candidate_top_k),
+                ("top_r", self.config.top_r),
+                ("min_gap", self.config.min_gap),
+                ("max_gap", self.config.max_gap),
             ):
                 if key not in feature_config:
                     raise SnapshotContractError(f"BLOCKED_QDIC_FEATURE_CONFIG_MISSING: {key}")
@@ -456,6 +461,12 @@ class TempoTrackOverlay:
                     snapshot, "evidence_by_memory", index, int(memory_id), len(snapshot.memory_ids)
                 )
             evidence = self._evidence_value(evidence_value, "memory_evidence")
+            if (
+                self.config.qdic_weight > 0.0
+                and evidence_value is not None
+                and len(raw_history) != len(evidence)
+            ):
+                raise SnapshotContractError("BLOCKED_QDIC_HISTORY_EVIDENCE_MISALIGNED")
             root_value = self._indexed_metadata(
                 snapshot, "memory_root_ids", index, int(memory_id), len(snapshot.memory_ids)
             )
@@ -718,10 +729,11 @@ class TempoTrackOverlay:
         for rank, (_, candidate) in enumerate(context_candidates, start=1):
             history = candidate.record.reranker_history
             evidence = candidate.record.reranker_evidence_history
-            length = min(len(history), len(evidence))
-            if length < 1:
-                missing += 1
-                continue
+            if len(history) != len(evidence):
+                raise SnapshotContractError("BLOCKED_QDIC_HISTORY_EVIDENCE_MISALIGNED")
+            if not history:
+                raise SnapshotContractError("BLOCKED_QDIC_CONTEXT_EVIDENCE_MISSING")
+            length = len(history)
             memory = np.stack(history[-length:], axis=0).astype(np.float32)
             memory = memory / np.maximum(np.linalg.norm(memory, axis=1, keepdims=True), 1e-8)
             evidence_array = np.stack(evidence[-length:], axis=0).astype(np.float32)
@@ -743,8 +755,7 @@ class TempoTrackOverlay:
             )
             candidate_ids.append(int(candidate.memory_id))
         if not payload:
-            self._last_qdic_diagnostics = {}
-            return None, missing, {}
+            raise SnapshotContractError("BLOCKED_QDIC_CONTEXT_EVIDENCE_MISSING")
         try:
             scored = self._qdic.score_event(payload, return_diagnostics=True)
         except TypeError:
@@ -759,10 +770,15 @@ class TempoTrackOverlay:
         details = scored[1] if len(scored) > 1 and isinstance(scored[1], Mapping) else {}
         self._last_qdic_diagnostics = dict(details)
         by_memory_id = {memory_id: float(logit) for memory_id, logit in zip(candidate_ids, logits)}
-        aligned = np.full(len(decision_candidates), np.nan, dtype=np.float32)
+        if len(payload) != len(context_candidates):
+            raise SnapshotContractError("BLOCKED_QDIC_CONTEXT_TRUNCATED")
+        aligned = np.empty(len(decision_candidates), dtype=np.float32)
         for index, (_, candidate) in enumerate(decision_candidates):
-            if int(candidate.memory_id) in by_memory_id:
-                aligned[index] = by_memory_id[int(candidate.memory_id)]
+            if int(candidate.memory_id) not in by_memory_id:
+                raise SnapshotContractError("BLOCKED_QDIC_DECISION_SCORE_MISSING")
+            aligned[index] = by_memory_id[int(candidate.memory_id)]
+        if not np.isfinite(aligned).all():
+            raise FloatingPointError("QDIC decision scores are non-finite")
         return aligned, missing, details
 
     def propose(self, snapshot: PreAssociationSnapshot) -> OverlayProposal:
@@ -865,7 +881,7 @@ class TempoTrackOverlay:
                     reranker_score = None
                 if self.config.qdic_weight > 0.0:
                     if qdic_logits is None or rank - 1 >= len(qdic_logits) or not np.isfinite(qdic_logits[rank - 1]):
-                        continue
+                        raise SnapshotContractError("BLOCKED_QDIC_DECISION_SCORE_MISSING")
                     qdic_score = float(qdic_logits[rank - 1])
                 else:
                     qdic_score = None
