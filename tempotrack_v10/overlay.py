@@ -591,14 +591,6 @@ class TempoTrackOverlay:
             # QDIC's structured score and residual are already combined by the
             # model.  Do not blend it with the heuristic or legacy Q1 logit.
             return float(qdic_score)
-        if self.config.reranker_weight > 0.0:
-            if reranker_score is None:
-                raise SnapshotContractError("BLOCKED_QUERY_RERANKER_EVIDENCE_MISSING")
-            # V9's production replay uses the query-conditioned model logit as
-            # the decision score.  A positive weight is an explicit opt-in to
-            # that exact path; it must not silently blend the V9 model with
-            # V10's heuristic score.
-            return float(self.config.reranker_weight * float(reranker_score))
         query = snapshot.embeddings[observation_index]
         active = 0.70 * _cosine(query, candidate.record.state.fast.detach().cpu().numpy()) + 0.30 * _cosine(
             query, candidate.record.state.slow.detach().cpu().numpy()
@@ -623,6 +615,14 @@ class TempoTrackOverlay:
                 score += self.config.reliability_weight * float(
                     np.log(max(float(values[candidate.memory_index]), 1e-6))
                 )
+        if self.config.reranker_weight > 0.0:
+            if reranker_score is None:
+                raise SnapshotContractError("BLOCKED_QUERY_RERANKER_EVIDENCE_MISSING")
+            # V9's production replay uses the query-conditioned model logit as
+            # the decision score.  A positive weight is an explicit opt-in to
+            # that exact path; it must not silently blend the V9 model with
+            # V10's heuristic score.
+            return float(self.config.reranker_weight * float(reranker_score))
         return float(score)
 
     def _query_sequence(self, snapshot: PreAssociationSnapshot, observation_index: int) -> np.ndarray:
