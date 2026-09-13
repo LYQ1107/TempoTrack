@@ -922,6 +922,9 @@ class DownstreamSupervisor:
 
     def run(self) -> int:
         DOWNSTREAM_ROOT.mkdir(parents=True, exist_ok=True)
+        # A restart after a recoverable stage failure must not inherit the
+        # old terminal BLOCKED label while it is actively executing again.
+        self.state["status"] = "RUNNING"
         self.write_inventory()
         self.save(current_stage="WAIT_PRIMARY", next_action="wait for final hardened Wave2 rank")
         self.wait_primary()
