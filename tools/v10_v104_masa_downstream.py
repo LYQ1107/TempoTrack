@@ -28,7 +28,11 @@ ANNOTATIONS = {
     "test": Path("/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json"),
 }
 PUBLIC_DETECTIONS = {
-    "val": V10_ROOT / "covtrack_public_dets_for_masa" / "val",
+    # MASA strips the relative ``data/tao/frames/`` prefix from a TAO image
+    # path, so validation paths retain their leading ``val/`` component.
+    # The audited export stores those files below the common parent, whereas
+    # the test sharded export already has its own ``test/`` component.
+    "val": V10_ROOT / "covtrack_public_dets_for_masa",
     "test": V10_ROOT / "covtrack_public_dets_for_masa" / "test_sharded_reference",
 }
 MASA_PY = "/home/lwr/anaconda3/envs/masaenv/bin/python"
@@ -37,6 +41,11 @@ NATIVE_CONFIG = HARD_REPO / "configs/research/v10/masa_r50_covdet_native.py"
 TEMPO_CONFIG = HARD_REPO / "configs/research/v10/masa_r50_covdet_tempo_memory_only.py"
 MASA_CHECKPOINT = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa/saved_models/masa_models/masa_r50.pth")
 IMAGE_PREFIX = Path("/data1/LWR/vranlee/SERVER_ONLY/avis/TAO/TAO-download/TAO-Amodal/frames")
+# MASA's official TAO loader derives the public-detection filename by
+# stripping the relative ``data/tao/frames/`` prefix from ``img_path``.
+# Keep the production command's cwd explicit so this relative path resolves
+# through the existing data/tao/frames symlink in the runtime checkout.
+RUN_CWD = HARD_REPO
 
 
 def now() -> float:
@@ -217,7 +226,7 @@ class MasaRunner:
             "--cfg-options",
             f"model.public_det_path={det_root}",
             f"test_dataloader.dataset.ann_file={annotation}",
-            f"test_dataloader.dataset.data_prefix.img_path={IMAGE_PREFIX}/",
+            "test_dataloader.dataset.data_prefix.img_path=data/tao/frames/",
             f"test_evaluator.ann_file={annotation}",
             f"test_evaluator.outfile_prefix={official}",
         ]
@@ -244,7 +253,7 @@ class MasaRunner:
             handle = log.open("a", encoding="utf-8")
             handle.write(f"\n[{iso()}] gpu={free[index]} $ {' '.join(command)}\n")
             handle.flush()
-            process = subprocess.Popen(command, cwd=str(HARD_REPO), env=env, stdout=handle, stderr=subprocess.STDOUT, text=True)
+            process = subprocess.Popen(command, cwd=str(RUN_CWD), env=env, stdout=handle, stderr=subprocess.STDOUT, text=True)
             record = {"split": split, "method": method, "gpu": free[index], "pid": process.pid, "command": command, "output": str(output), "log": str(log), "status": "RUNNING", "started_at": iso()}
             entry["jobs"].append(record)
             processes.append((record, process, handle))
