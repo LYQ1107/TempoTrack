@@ -254,7 +254,14 @@ def combine_ranks(contract: dict[str, Any], output: Path) -> dict[str, Any]:
 
 
 def gpu_candidates(leased: set[str]) -> list[str]:
-    """Find free-enough physical GPUs, excluding project-owned workers."""
+    """Find physical GPUs with enough *currently free* VRAM.
+
+    The default remains conservative and excludes GPUs carrying another
+    TempoTrack worker.  Validation-only downstream stages may opt into
+    explicit shared-GPU admission with ``V10_ALLOW_SHARED_PROJECT_GPU=1``;
+    this does not reserve or signal another process, and the free-VRAM gate
+    above remains mandatory.
+    """
     result = subprocess.run(
         ["nvidia-smi", "--query-gpu=index,uuid,memory.free", "--format=csv,noheader,nounits"],
         capture_output=True,
@@ -287,8 +294,9 @@ def gpu_candidates(leased: set[str]) -> list[str]:
         capture_output=True,
         text=True,
     )
+    allow_shared_project_gpu = os.environ.get("V10_ALLOW_SHARED_PROJECT_GPU", "0") == "1"
     project_needles = ("tempotrack", "v10_", str(HARD_REPO), str(LIVE_REPO), "masa_r50")
-    if apps.returncode == 0:
+    if apps.returncode == 0 and not allow_shared_project_gpu:
         for line in apps.stdout.splitlines():
             fields = [part.strip() for part in line.split(",")]
             if len(fields) != 2 or fields[0] not in uuid_to_index:
