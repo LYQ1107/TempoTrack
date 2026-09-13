@@ -494,6 +494,51 @@ def coordinator_status(stage_dir: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {"status": "INVALID", "jobs": {}}
 
 
+def _proc_cmdline(pid: int) -> list[str]:
+    """Read one process command line without invoking a broad process search."""
+    try:
+        raw = (Path("/proc") / str(pid) / "cmdline").read_bytes()
+    except (OSError, ValueError):
+        return []
+    return [item.decode("utf-8", errors="replace") for item in raw.split(b"\0") if item]
+
+
+def _pid_alive(pid: int) -> bool:
+    return (Path("/proc") / str(pid)).exists()
+
+
+def existing_coordinator_pid(stage_dir: Path) -> int | None:
+    """Find an already-running exact coordinator for one stage directory.
+
+    The controller may be resumed after its own process exits while the
+    coordinator continues to own its workers.  Matching the exact script and
+    ``--output-root`` prevents a resume from launching a duplicate 10-way
+    search.  This intentionally does not inspect or signal unrelated jobs.
+    """
+    target = str(stage_dir.resolve())
+    proc_root = Path("/proc")
+    try:
+        entries = sorted(proc_root.iterdir(), key=lambda item: int(item.name) if item.name.isdigit() else -1)
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        command = _proc_cmdline(int(entry.name))
+        if not command or not any(Path(token).name == "v10_run_covtrack_search.py" for token in command):
+            continue
+        for index, token in enumerate(command[:-1]):
+            if token != "--output-root":
+                continue
+            candidate = command[index + 1]
+            try:
+                if str(Path(candidate).resolve()) == target:
+                    return int(entry.name)
+            except (OSError, ValueError):
+                continue
+    return None
+
+
 def _metrics_from_receipt(receipt: Mapping[str, Any]) -> bool:
     metrics = receipt.get("metrics")
     if not isinstance(metrics, Mapping):
@@ -875,6 +920,12 @@ def run_coordinator(
     all_rows: list[dict[str, Any]],
     failed_trials: list[dict[str, Any]],
 ) -> str:
+    try:
+        plan_key = str(stage_dir.resolve().relative_to(args.output_root.resolve()))
+    except ValueError as exc:
+        raise RuntimeError(f"EXPANDED_SEARCH_STAGE_OUTSIDE_OUTPUT_ROOT:{stage_dir}") from exc
+    if plan_key not in plans:
+        raise RuntimeError(f"EXPANDED_SEARCH_PLAN_ENTRY_MISSING:{plan_key}")
     status = coordinator_status(stage_dir)
     if status.get("status") in TERMINAL_COORDINATOR_STATES:
         return str(status["status"])
@@ -902,6 +953,59 @@ def run_coordinator(
     if env.get("PYTHONPATH"):
         pythonpath.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+
+    def update_from_status(current: Mapping[str, Any], coordinator_pid: int) -> None:
+        current_jobs = current.get("jobs", {})
+        if isinstance(current_jobs, Mapping):
+            stage_failed = [
+                {"trial_id": key, "status": item.get("state"), "returncode": item.get("returncode")}
+                for key, item in current_jobs.items()
+                if isinstance(item, Mapping) and item.get("state") == "FAILED"
+            ]
+        else:
+            stage_failed = []
+        update_controller_state(
+            state_path,
+            current_stage=plan_key,
+            stage_status=str(current.get("status", "RUNNING")),
+            plans=plans,
+            rows=all_rows,
+            failed_trials=[*failed_trials, *stage_failed],
+            next_action=(
+                f"coordinator active; stage={plan_key}; pid={coordinator_pid}; "
+                f"completed={current.get('completed', 0)} failed={current.get('failed', 0)}"
+            ),
+        )
+
+    # A previous controller can exit independently of its coordinator.  Adopt
+    # that exact coordinator and wait for it; never launch a duplicate stage.
+    adopted_pid = existing_coordinator_pid(stage_dir)
+    if adopted_pid is not None:
+        plans[plan_key]["coordinator_pid"] = adopted_pid
+        update_controller_state(
+            state_path,
+            current_stage=plan_key,
+            stage_status="RUNNING",
+            plans=plans,
+            rows=all_rows,
+            failed_trials=failed_trials,
+            next_action=f"adopt existing coordinator; stage={plan_key}; pid={adopted_pid}",
+        )
+        while _pid_alive(adopted_pid):
+            update_from_status(coordinator_status(stage_dir), adopted_pid)
+            time.sleep(max(5.0, args.poll_seconds * 3.0))
+        current = coordinator_status(stage_dir)
+        if current.get("status") not in TERMINAL_COORDINATOR_STATES:
+            current["status"] = "FAILED"
+            atomic_json(stage_dir / "coordinator_status_controller_receipt.json", {
+                "status": "FAILED",
+                "reason": "adopted coordinator exited without terminal status",
+                "stage": stage,
+                "coordinator_pid": adopted_pid,
+                "timestamp": now_iso(),
+            })
+        return str(current.get("status", "FAILED"))
+
     with log_path.open("a", encoding="utf-8") as log:
         log.write(f"\n[{now_iso()}] launch {' '.join(command)}\n")
         log.flush()
@@ -913,10 +1017,10 @@ def run_coordinator(
             stderr=subprocess.STDOUT,
             text=True,
         )
-        plans[stage]["coordinator_pid"] = process.pid
+        plans[plan_key]["coordinator_pid"] = process.pid
         update_controller_state(
             state_path,
-            current_stage=stage,
+            current_stage=plan_key,
             stage_status="RUNNING",
             plans=plans,
             rows=all_rows,
@@ -924,25 +1028,7 @@ def run_coordinator(
             next_action=f"wait for {stage} coordinator; pid={process.pid}",
         )
         while process.poll() is None:
-            current = coordinator_status(stage_dir)
-            current_jobs = current.get("jobs", {})
-            if isinstance(current_jobs, Mapping):
-                stage_failed = [
-                    {"trial_id": key, "status": item.get("state"), "returncode": item.get("returncode")}
-                    for key, item in current_jobs.items()
-                    if isinstance(item, Mapping) and item.get("state") == "FAILED"
-                ]
-            else:
-                stage_failed = []
-            update_controller_state(
-                state_path,
-                current_stage=stage,
-                stage_status=str(current.get("status", "RUNNING")),
-                plans=plans,
-                rows=all_rows,
-                failed_trials=[*failed_trials, *stage_failed],
-                next_action=f"coordinator active; stage={stage}; completed={current.get('completed', 0)} failed={current.get('failed', 0)}",
-            )
+            update_from_status(coordinator_status(stage_dir), process.pid)
             time.sleep(max(5.0, args.poll_seconds * 3.0))
     returncode = int(process.returncode or 0)
     current = coordinator_status(stage_dir)
