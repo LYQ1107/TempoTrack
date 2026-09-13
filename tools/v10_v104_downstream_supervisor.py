@@ -46,6 +46,7 @@ AUDIT_PY = "/home/lwr/anaconda3/envs/masaenv/bin/python"
 OV_SOURCE = Path("/data2/usr_for_deadline/tempotrack_v10_unified/ovtrack_full_source")
 OV_RUNTIME = HARD_REPO / "configs/research/v10/ovtrack_full_runtime.py"
 OV_TEMPO = HARD_REPO / "configs/research/v10/ovtrack_full_tempo_memory_only.yaml"
+OV_EARLY_ROOT = DOWNSTREAM_ROOT / "ov_early_parallel_20260913"
 OV_CHECKPOINT_ALTERNATES = (
     Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa/ovtrack/saved_models/ovtrack_detpro_prompt.pth"),
     Path("/data1/LWR/vranlee/SERVER_ONLY/avis/LocateMOT/references/l3/OVTrack/saved_models/ovtrack_detpro_prompt.pth"),
@@ -843,7 +844,120 @@ class DownstreamSupervisor:
             jobs.append({"cwd": HARD_REPO, "command": command, "env": env})
         return jobs
 
+    def adopt_ov_early(self, split: str, annotation: Path) -> bool:
+        """Adopt the independently supervised OV shard run after full audit.
+
+        The takeover supervisor is a separate producer with immutable output
+        roots.  Adoption is allowed only after its complete-video merge and
+        official TETA evaluation are both PASS, and every shard has a
+        completed receipt with the same runtime contract.  A partial or stale
+        early state is never treated as a canonical result.
+        """
+        state_path = OV_EARLY_ROOT / "state.json"
+        state = read_json(state_path)
+        if not isinstance(state, dict) or state.get("status") != "COMPLETED":
+            return False
+        lane = state.get("lanes", {}).get(split)
+        if not isinstance(lane, dict) or lane.get("status") != "PASS":
+            return False
+        if set(int(x) for x in lane.get("completed_shards", [])) != set(range(8)):
+            return False
+        checkpoint = Path(str(state.get("checkpoint", ""))).resolve()
+        expected_checkpoint = next((item for item in OV_CHECKPOINT_ALTERNATES if item.is_file()), None)
+        if expected_checkpoint is None or checkpoint != expected_checkpoint.resolve():
+            return False
+        if state.get("checkpoint_sha256") != sha256(checkpoint):
+            return False
+        if lane.get("annotation_sha256") != sha256(annotation):
+            return False
+
+        # The takeover state retains the failed first attempt for audit.  For
+        # each shard, require at least one later completed job whose command
+        # still names the exact runtime/config/checkpoint contract.
+        completed: dict[int, dict[str, Any]] = {}
+        for job in lane.get("jobs", []):
+            if not isinstance(job, dict) or job.get("status") != "COMPLETED":
+                continue
+            try:
+                index = int(job["index"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            command = [str(item) for item in job.get("command", [])]
+            if str(OV_RUNTIME) not in command or str(OV_TEMPO) not in command or str(checkpoint) not in command:
+                return False
+            output = Path(str(job.get("output", ""))).resolve()
+            if not output.is_file():
+                return False
+            completed[index] = job
+        if set(completed) != set(range(8)):
+            return False
+
+        prediction = Path(str(lane.get("prediction", ""))).resolve()
+        summary = Path(str(lane.get("summary", ""))).resolve()
+        if not prediction.is_file() or not summary.is_file():
+            return False
+        if lane.get("prediction_sha256") != sha256(prediction):
+            return False
+        if lane.get("summary_sha256") != sha256(summary):
+            return False
+
+        checkpoint = expected_checkpoint.resolve()
+        worker_stage = "OV_" + split.upper() + "_WORKERS"
+        result = {
+            "status": "PASS",
+            "split": split,
+            "method": "OVTrack native + Tempo memory-only (reranker disabled)",
+            "protocol": "EARLY_PARALLEL_ADOPTED_VALIDATION",
+            "unbiased_test": False if split == "test" else None,
+            "annotation": annotation_inventory(annotation),
+            "prediction": str(prediction),
+            "prediction_sha256": sha256(prediction),
+            "summary": str(summary),
+            "summary_sha256": sha256(summary),
+            "metrics": self.parse_summary(summary, annotation),
+            "patched_source": str(OV_SOURCE),
+            "patched_source_head": git_head(OV_SOURCE),
+            "runtime_config": str(OV_RUNTIME),
+            "runtime_config_sha256": sha256(OV_RUNTIME),
+            "tempo_config": str(OV_TEMPO),
+            "tempo_config_sha256": sha256(OV_TEMPO),
+            "checkpoint": str(checkpoint),
+            "checkpoint_sha256": sha256(checkpoint),
+            "adopted_from": str(OV_EARLY_ROOT),
+            "adopted_state": str(state_path),
+            "adopted_state_sha256": sha256(state_path),
+            "adoption_completed_shards": sorted(completed),
+            "created_at": iso(),
+        }
+        output = DOWNSTREAM_ROOT / ("ov_" + split.lower() + "_result.json")
+        atomic_json(output, result)
+        self.stage(worker_stage).update({
+            "status": "COMPLETED",
+            "reused": True,
+            "adopted_from": str(OV_EARLY_ROOT),
+            "completed_shards": sorted(completed),
+        })
+        self.stage(worker_stage + "_MERGE").update({
+            "status": "COMPLETED",
+            "reused": True,
+            "output": str(prediction),
+        })
+        self.stage(worker_stage + "_EVAL").update({
+            "status": "COMPLETED",
+            "reused": True,
+            "output": str(summary),
+        })
+        self.stage(worker_stage + "_RESULT").update({
+            "status": "COMPLETED",
+            "output": str(output),
+            "reused": True,
+        })
+        self.save(current_stage=worker_stage + "_RESULT", next_action="advance")
+        return True
+
     def ov_full_or_val(self, split: str, annotation: Path) -> bool:
+        if self.adopt_ov_early(split, annotation):
+            return True
         shard_root = self.make_shards("OV_" + split.lower(), annotation)
         if shard_root is None:
             return False
