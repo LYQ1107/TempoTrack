@@ -25,7 +25,12 @@ def main() -> int:
     while True:
         if report.is_file():
             text = report.read_text(encoding="utf-8")
-            if "controller_status: COMPLETED" in text and "status | Base TETA" in text:
+            if (
+                "controller_status: COMPLETED" in text
+                and "status | Base TETA" in text
+                and "## Original full COV native baseline" in text
+                and "## Full-Test deltas vs original full COV native baseline" in text
+            ):
                 break
         time.sleep(args.poll_seconds)
     staged = run(["git", "add", "--", str(report.relative_to(repo))], repo)
