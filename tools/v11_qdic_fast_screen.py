@@ -189,11 +189,14 @@ def main() -> None:
         if (
             video_manifest.get("status") != "PASS"
             or str(video_manifest.get("trial_id")) != str(args.trial_id)
+            or _video_key(video_manifest.get("video_id")) != key
             or video_manifest.get("cache_manifest_sha256") != cache_hash
             or float(video_manifest["thresholds"]["score_threshold"]) != float(args.score_threshold)
             or float(video_manifest["thresholds"]["margin_threshold"]) != float(args.margin_threshold)
         ):
             raise RuntimeError(f"reusable video artifact contract mismatch for {video_id}")
+        if video_manifest.get("prediction_sha256") != sha256_file(prediction_path):
+            raise RuntimeError(f"reusable video prediction hash mismatch for {video_id}")
         local_rows = _read_json(prediction_path)
         if not isinstance(local_rows, list):
             raise RuntimeError(f"video prediction must be a JSON list: {prediction_path}")
