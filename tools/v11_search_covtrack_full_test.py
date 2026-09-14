@@ -2891,14 +2891,128 @@ def _baseline_from_summary(
     scope: str,
     *,
     preflight: Mapping[str, Any] | None = None,
+    require_full_test_provenance: bool = False,
 ) -> dict[str, Any]:
     if not path.is_file():
-        return {"name": name, "status": "MISSING", "path": str(path), "scope": scope}
+        return {
+            "name": name,
+            "status": "MISSING",
+            "path": str(path),
+            "scope": "UNKNOWN" if require_full_test_provenance else scope,
+            "comparison_eligible": False,
+        }
     try:
         metrics = _parse_summary(args, path, annotation, preflight=preflight)
-        return {"name": name, "status": "PASS", "path": str(path), "scope": scope, "metrics": metrics}
+        row: dict[str, Any] = {
+            "name": name,
+            "status": "PASS",
+            "path": str(path),
+            "scope": scope,
+            "metrics": metrics,
+            "comparison_eligible": not require_full_test_provenance,
+        }
+        if require_full_test_provenance:
+            evidence = _full_test_provenance(
+                path,
+                expected_annotation_sha256=str(preflight["full_test_annotation"]["sha256"]),
+                expected_frames=int(preflight["full_test_annotation"]["frames"]),
+            )
+            row["provenance"] = evidence
+            if evidence.get("status") != "PASS":
+                row["scope"] = "PROVENANCE_MISMATCH"
+                row["comparison_eligible"] = False
+            else:
+                row["scope"] = "FULL_TEST_ORIGINAL_BASELINE"
+                row["comparison_eligible"] = True
+        return row
     except Exception as exc:
-        return {"name": name, "status": "INVALID", "path": str(path), "scope": scope, "error": str(exc)}
+        return {
+            "name": name,
+            "status": "INVALID",
+            "path": str(path),
+            "scope": scope,
+            "comparison_eligible": False,
+            "error": str(exc),
+        }
+
+
+def _full_test_provenance(
+    summary: Path, *, expected_annotation_sha256: str, expected_frames: int
+) -> dict[str, Any]:
+    """Find machine-readable evidence that a summary covers the full Test set.
+
+    A TETA ``.pth`` file does not retain the annotation path or frame count.
+    The adjacent receipt/merge artifacts do, so a summary is eligible for a
+    baseline delta only when one of those artifacts binds it to the audited
+    full-Test annotation and frame count.  This prevents a subset summary from
+    being mislabeled ``FULL_TEST`` merely because it uses the same categories.
+    """
+
+    candidates: list[Path] = []
+    current = summary.parent
+    for _ in range(6):
+        for name in ("receipt.json", "merge_manifest.json", "full_result.json"):
+            candidate = current / name
+            if candidate.is_file() and candidate not in candidates:
+                candidates.append(candidate)
+        current = current.parent
+
+    def collect(value: Any, shas: set[str], counts: set[int], stages: set[str]) -> None:
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                key_text = str(key).lower()
+                if isinstance(item, str):
+                    if "annotation_sha256" in key_text or key_text in {
+                        "annotation_hash",
+                        "parent_annotation_hash",
+                    }:
+                        shas.add(item)
+                    if key_text in {"stage", "scope"}:
+                        stages.add(item.lower())
+                elif isinstance(item, bool):
+                    continue
+                elif isinstance(item, (int, float)):
+                    if key_text in {
+                        "annotation_image_count",
+                        "image_count",
+                        "images",
+                        "frame_count",
+                        "frames",
+                    }:
+                        counts.add(int(item))
+                elif isinstance(item, (Mapping, list)):
+                    collect(item, shas, counts, stages)
+        elif isinstance(value, list):
+            for item in value:
+                collect(item, shas, counts, stages)
+
+    for evidence_path in candidates:
+        try:
+            evidence = _read_json(evidence_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        shas: set[str] = set()
+        counts: set[int] = set()
+        stages: set[str] = set()
+        collect(evidence, shas, counts, stages)
+        if expected_annotation_sha256 in shas and expected_frames in counts:
+            if any("subset" in stage for stage in stages):
+                continue
+            return {
+                "status": "PASS",
+                "evidence_path": str(evidence_path),
+                "annotation_sha256": expected_annotation_sha256,
+                "frames": expected_frames,
+                "stages": sorted(stages),
+            }
+
+    return {
+        "status": "FAIL",
+        "reason": "no adjacent receipt/merge artifact binds summary to the audited full-Test annotation and frame count",
+        "expected_annotation_sha256": expected_annotation_sha256,
+        "expected_frames": expected_frames,
+        "checked": [str(path) for path in candidates],
+    }
 
 
 def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -2911,14 +3025,16 @@ def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) ->
             annotation,
             "FULL_TEST",
             preflight=preflight,
+            require_full_test_provenance=True,
         ),
         _baseline_from_summary(
             args,
             "Q1 OP00",
             _path(args.q1_op00_summary),
             annotation,
-            "FULL_TEST" if Path(args.q1_op00_summary).is_file() else "UNKNOWN",
+            "FULL_TEST",
             preflight=preflight,
+            require_full_test_provenance=True,
         ),
     ]
     candidate_path = _path(args.q1_tuned_candidate)
@@ -2933,13 +3049,15 @@ def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) ->
                     "name": "Q1 tuned champion",
                     "status": "PASS" if isinstance(metrics, Mapping) else "INVALID",
                     "path": str(candidate_path),
-                    "scope": "FULL_TEST" if parent_sha == preflight["full_test_annotation"]["sha256"] else "PROVENANCE_MISMATCH",
+                    "scope": "FULL_TEST_TUNED_REFERENCE" if parent_sha == preflight["full_test_annotation"]["sha256"] else "PROVENANCE_MISMATCH",
                     "metrics": metrics,
                     "spec": data.get("spec"),
+                    "comparison_eligible": False,
+                    "exclusion_reason": "tuned Q1 is not the original baseline used for deltas",
                 }
             )
         except Exception as exc:
-            rows.append({"name": "Q1 tuned champion", "status": "INVALID", "path": str(candidate_path), "scope": "UNKNOWN", "error": str(exc)})
+            rows.append({"name": "Q1 tuned champion", "status": "INVALID", "path": str(candidate_path), "scope": "UNKNOWN", "comparison_eligible": False, "error": str(exc)})
     fast_metrics_path = _path(args.qdic_fast_metrics)
     if fast_metrics_path.is_file():
         try:
@@ -2954,10 +3072,12 @@ def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) ->
                             "path": str(fast_metrics_path),
                             "scope": "SUBSET_SHARD0_NOT_FULL_TEST",
                             "metrics": {"overall": metrics[key].get("overall"), "base": metrics[key].get("base"), "novel": metrics[key].get("novel")},
+                            "comparison_eligible": False,
+                            "exclusion_reason": "diagnostic subset/shard result; never use for Full-Test deltas",
                         }
                     )
         except Exception as exc:
-            rows.append({"name": "QDIC fast-screen artifacts", "status": "INVALID", "path": str(fast_metrics_path), "scope": "SUBSET", "error": str(exc)})
+            rows.append({"name": "QDIC fast-screen artifacts", "status": "INVALID", "path": str(fast_metrics_path), "scope": "SUBSET", "comparison_eligible": False, "error": str(exc)})
     if args.qdic_op00_summary:
         rows.append(
             _baseline_from_summary(
@@ -2967,6 +3087,7 @@ def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) ->
                 annotation,
                 "FULL_TEST",
                 preflight=preflight,
+                require_full_test_provenance=True,
             )
         )
     return rows
@@ -2994,7 +3115,12 @@ def _full_results(args: argparse.Namespace, state: Mapping[str, Any], preflight:
     if champion is not None:
         winner = {"name": "V11 Full-Test tuned champion", "metrics": champion.get("metrics")}
         for baseline in baselines:
-            comparisons.append({"against": baseline.get("name"), "scope": baseline.get("scope"), "delta": _delta(winner, baseline)})
+            if (
+                baseline.get("status") == "PASS"
+                and baseline.get("comparison_eligible") is True
+                and baseline.get("scope") == "FULL_TEST_ORIGINAL_BASELINE"
+            ):
+                comparisons.append({"against": baseline.get("name"), "scope": baseline.get("scope"), "delta": _delta(winner, baseline)})
     start = state.get("first_full_trial_start_unix")
     end = state.get("search_end_unix") or time.time()
     return {
@@ -3125,7 +3251,16 @@ def _write_report(root: Path, results: Mapping[str, Any]) -> None:
                 "",
             ]
         )
-    lines.extend(["### Champion deltas", "", "| Against | Scope | Overall TETA delta | Base TETA delta | Novel TETA delta |", "|---|---|---:|---:|---:|"])
+    lines.extend(
+        [
+            "### Champion deltas",
+            "",
+            "Only `FULL_TEST_ORIGINAL_BASELINE` rows are used below. Subset, shard, and tuned-reference rows are retained for provenance but are never used for these deltas.",
+            "",
+            "| Against | Scope | Overall TETA delta | Base TETA delta | Novel TETA delta |",
+            "|---|---|---:|---:|---:|",
+        ]
+    )
     for item in results.get("comparisons", []):
         delta = item.get("delta") or {}
         lines.append(
@@ -3560,7 +3695,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--q1-op00-summary",
-        default="/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_fixed_20260913_wave2/q1_full_no_gate/evaluation/COV_V10_TEMPO/teta_summary_results.pth",
+        default="/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_test_full_20260914_10way/q1_full_no_gate/evaluation/COV_V10_TEMPO/teta_summary_results.pth",
     )
     parser.add_argument(
         "--q1-tuned-candidate",
