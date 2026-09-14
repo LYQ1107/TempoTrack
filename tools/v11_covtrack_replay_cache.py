@@ -155,10 +155,19 @@ def _materialize_video(
     cfg: Any,
     device: Any,
     category_ids: list[int],
+    tempo_override: TempoTrackConfig | None = None,
 ) -> tuple[list[dict[str, Any]], int, int, int]:
     import torch
 
     tracker = _reset_tracker(model, cfg, video_id)
+    if tempo_override is not None:
+        adapter = getattr(tracker, "_v10_cov_adapter", None)
+        if adapter is None:
+            raise RuntimeError("replay tracker lacks the TempoTrack adapter")
+        # Threshold trials share the loaded scorer but receive a fresh
+        # immutable runtime config after each fresh-video reset.  The only
+        # changed fields are the two explicitly searched thresholds.
+        adapter.overlay.config = tempo_override
     per_track: dict[int, list[dict[str, Any]]] = defaultdict(list)
     frame_count = 0
     match_count = 0
