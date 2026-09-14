@@ -18,7 +18,9 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -65,7 +67,10 @@ DEFAULT_QDIC_TRAINING_ROOT = Path(
 DEFAULT_TETA_SOURCE_ROOT = Path("/data2/usr_for_deadline/tet_a62a9c0_clean/teta")
 DEFAULT_STREAM_PYTHON = "/home/lwr/anaconda3/envs/ovtr/bin/python"
 DEFAULT_EVALUATOR_PYTHON = "/home/lwr/anaconda3/envs/masaenv/bin/python"
-DEFAULT_SCALABEL_ROOT = "/data1/usr_for_deadline/LLM/scalabel-scalabel-evalAPI"
+DEFAULT_V10_RUNTIME_RECEIPT = Path(
+    "/data2/usr_for_deadline/tempotrack_v10_unified/search/"
+    "covtrack_v104_best20h_20260914/full/s03_m01/trials/shard_00/receipt.json"
+)
 EXPECTED_ANNOTATION_SHA256 = "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2"
 EXPECTED_COV_COMMIT = "9b0ced5779ee36f5dd73dbe39b5ae5d57abb4b3b"
 EXPECTED_COV_CONFIG_SHA256 = "282468d93c21b153b755047398b2fe8e95a8d67c003175309e337f9ed5bb600a"
@@ -150,6 +155,342 @@ def _now_iso(unix: float | None = None) -> str:
 
 def _path(value: str | Path) -> Path:
     return Path(value).expanduser().resolve()
+
+
+def _proc_cmdline(pid: int) -> list[str] | None:
+    try:
+        raw = (Path("/proc") / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return None
+    return [item.decode("utf-8", errors="replace") for item in raw.split(b"\0") if item]
+
+
+def _proc_environ(pid: int) -> dict[str, str] | None:
+    try:
+        raw = (Path("/proc") / str(pid) / "environ").read_bytes()
+    except OSError:
+        return None
+    values: dict[str, str] = {}
+    for item in raw.split(b"\0"):
+        if b"=" not in item:
+            continue
+        key, value = item.split(b"=", 1)
+        values[key.decode("utf-8", errors="replace")] = value.decode(
+            "utf-8", errors="replace"
+        )
+    return values
+
+
+def _find_live_stream_pid(stream_script: Path, output_path: Path) -> int | None:
+    """Find the live pinned V10 stream process for one audited receipt."""
+
+    for process_dir in sorted(Path("/proc").glob("[0-9]*"), key=lambda item: int(item.name)):
+        try:
+            pid = int(process_dir.name)
+        except ValueError:
+            continue
+        command = _proc_cmdline(pid)
+        if not command or str(stream_script) not in command:
+            continue
+        if str(output_path) not in command:
+            continue
+        return pid
+    return None
+
+
+def _command_value(command: list[Any], prefix: str) -> str | None:
+    for value in command:
+        text = str(value)
+        if text.startswith(prefix):
+            return text[len(prefix) :]
+    return None
+
+
+def _resolved_pythonpath_entries(value: str) -> list[str]:
+    return [str(_path(item)) for item in str(value).split(os.pathsep) if item]
+
+
+def _runtime_identity(runtime: Mapping[str, Any]) -> dict[str, Any]:
+    """Return stable parity fields, excluding transient PID/capture timestamps."""
+
+    return {
+        key: runtime.get(key)
+        for key in (
+            "ld_preload",
+            "stream_python",
+            "reference_stream_script",
+            "stream_cwd",
+            "reference_pythonpath",
+            "pythonpath",
+            "scalabel_root",
+            "reference_cov_source",
+            "reference_cov_config",
+            "reference_cov_checkpoint",
+            "reference_img_prefix",
+            "stream_source_sha256",
+            "cov_source_commit",
+            "cov_config_sha256",
+            "cov_checkpoint_sha256",
+        )
+    }
+
+
+def _audit_v10_runtime_environment(
+    *, args: argparse.Namespace, repo: Path
+) -> dict[str, Any]:
+    """Capture the actual environment of the currently running V10 Full job.
+
+    The V11 job needs the current V10 frontend environment, but its own repo
+    must remain first in PYTHONPATH so the QDIC overlay is the code being
+    imported.  The replacement is explicit and recorded below; all other
+    reference entries are preserved verbatim.
+    """
+
+    receipt_path = _path(args.v10_runtime_receipt)
+    if not receipt_path.is_file():
+        raise FileNotFoundError(f"V10 runtime reference receipt is missing: {receipt_path}")
+    receipt = _read_json(receipt_path)
+    if not isinstance(receipt, Mapping):
+        raise ValueError(f"V10 runtime reference receipt must be a mapping: {receipt_path}")
+    commands = receipt.get("commands")
+    inputs = receipt.get("inputs")
+    external_source = receipt.get("external_source")
+    if not isinstance(commands, Mapping) or not isinstance(inputs, Mapping):
+        raise RuntimeError("V10 runtime reference receipt lacks commands/inputs")
+    stream_command = commands.get("stream")
+    if not isinstance(stream_command, list) or len(stream_command) < 2:
+        raise RuntimeError("V10 runtime reference receipt lacks stream command")
+    stream_python = _path(str(stream_command[0]))
+    stream_script = _path(str(stream_command[1]))
+    stream_cwd = _path(str(commands.get("stream_cwd", "")))
+    output_path = _path(str(_command_value(stream_command, "--out=") or ""))
+    if "--out" in stream_command:
+        output_index = stream_command.index("--out")
+        if output_index + 1 < len(stream_command):
+            output_path = _path(str(stream_command[output_index + 1]))
+    if not stream_python.is_file() or not stream_script.is_file() or not stream_cwd.is_dir():
+        raise RuntimeError(
+            "V10 runtime reference command paths are not usable: "
+            f"python={stream_python}, script={stream_script}, cwd={stream_cwd}"
+        )
+    if not output_path.is_absolute() or str(output_path) == "/":
+        raise RuntimeError("V10 runtime reference stream output is not an audited absolute path")
+    reference_repo = _path(str(receipt.get("repo", {}).get("path", "")))
+    reference_source = _path(
+        str((external_source or {}).get("path") or inputs.get("external_source", ""))
+    )
+    reference_config = _path(str(inputs.get("external_config", "")))
+    reference_checkpoint = _path(str(inputs.get("external_checkpoint", "")))
+    reference_img_prefix_raw = _command_value(stream_command, "data.test.img_prefix=")
+    if reference_img_prefix_raw is None:
+        raise RuntimeError("V10 runtime reference stream command lacks data.test.img_prefix")
+    reference_img_prefix = _path(reference_img_prefix_raw.rstrip("/"))
+    if not all(
+        path.is_file() if path.suffix else path.is_dir()
+        for path in (reference_source, reference_config, reference_checkpoint, reference_img_prefix)
+    ):
+        raise RuntimeError(
+            "V10 runtime reference input paths are not usable: "
+            f"source={reference_source}, config={reference_config}, "
+            f"checkpoint={reference_checkpoint}, img_prefix={reference_img_prefix}"
+        )
+    expected = {
+        "stream_python": _path(args.stream_python),
+        "reference_cov_source": _path(args.cov_source),
+        "reference_cov_config": _path(args.external_config),
+        "reference_cov_checkpoint": _path(args.external_checkpoint),
+        "reference_img_prefix": _path(args.img_prefix),
+    }
+    actual = {
+        "stream_python": stream_python,
+        "reference_cov_source": reference_source,
+        "reference_cov_config": reference_config,
+        "reference_cov_checkpoint": reference_checkpoint,
+        "reference_img_prefix": reference_img_prefix,
+    }
+    for key, value in expected.items():
+        if actual[key] != value:
+            raise RuntimeError(f"V10/V11 runtime parity mismatch for {key}: {actual[key]} != {value}")
+
+    live_pid = _find_live_stream_pid(stream_script, output_path)
+    capture_source = "live_v10_stream_proc_environ"
+    if live_pid is not None:
+        environment = _proc_environ(live_pid)
+        if not environment:
+            raise RuntimeError(f"cannot read V10 stream environment from /proc/{live_pid}/environ")
+    else:
+        capture_path = _path(
+            args.v10_runtime_env_capture
+            or str(_path(args.root) / "v10_runtime_env_capture.json")
+        )
+        if not capture_path.is_file():
+            raise RuntimeError(
+                "V10 runtime reference stream process is no longer live and no audited "
+                f"environment capture exists: {capture_path}"
+            )
+        capture = _read_json(capture_path)
+        if not isinstance(capture, Mapping) or capture.get("capture_source") != "observed_live_proc_environ":
+            raise RuntimeError("V10 runtime environment capture is not an observed live /proc capture")
+        if _path(str(capture.get("reference_receipt", ""))) != receipt_path:
+            raise RuntimeError("V10 runtime environment capture receipt mismatch")
+        if _path(str(capture.get("reference_stream_script", ""))) != stream_script:
+            raise RuntimeError("V10 runtime environment capture stream script mismatch")
+        if _path(str(capture.get("stream_output", ""))) != output_path:
+            raise RuntimeError("V10 runtime environment capture stream output mismatch")
+        environment = capture.get("environment")
+        if not isinstance(environment, Mapping):
+            raise RuntimeError("V10 runtime environment capture lacks environment mapping")
+        live_pid = capture.get("captured_pid")
+        capture_source = "observed_live_proc_environ_sidecar"
+    ld_preload = environment.get("LD_PRELOAD", "").strip()
+    reference_pythonpath = environment.get("PYTHONPATH", "")
+    if not ld_preload or not reference_pythonpath:
+        raise RuntimeError("live V10 stream environment lacks LD_PRELOAD or PYTHONPATH")
+    pythonpath_entries = [item for item in reference_pythonpath.split(os.pathsep) if item]
+    scalabel_candidates = [
+        _path(item)
+        for item in pythonpath_entries
+        if Path(item).name == "scalabel-scalabel-evalAPI"
+    ]
+    if len({str(item) for item in scalabel_candidates}) != 1:
+        raise RuntimeError(
+            "live V10 PYTHONPATH must identify exactly one Scalabel root: "
+            f"{scalabel_candidates}"
+        )
+    scalabel_root = scalabel_candidates[0]
+    if not scalabel_root.is_dir():
+        raise FileNotFoundError(f"audited Scalabel root does not exist: {scalabel_root}")
+    tao_frames_root = _path(environment.get("V10_TAO_FRAMES_ROOT", str(reference_img_prefix)))
+    if tao_frames_root != reference_img_prefix:
+        raise RuntimeError(
+            f"V10 V10_TAO_FRAMES_ROOT mismatch: {tao_frames_root} != {reference_img_prefix}"
+        )
+    source_from_env = environment.get("V10_COV_SOURCE")
+    if source_from_env and _path(source_from_env) != reference_source:
+        raise RuntimeError("V10_COV_SOURCE differs from receipt source")
+
+    # Keep the V10 ordering and duplicate entries, replacing the old project
+    # checkout with this pinned V11 checkout so QDIC code cannot be shadowed.
+    v11_pythonpath_entries = [
+        str(repo) if _path(item) == reference_repo else item for item in pythonpath_entries
+    ]
+    if str(repo) not in {_path(item).__str__() for item in v11_pythonpath_entries}:
+        v11_pythonpath_entries.insert(0, str(repo))
+    runtime: dict[str, Any] = {
+        "status": "PASS",
+        "source": capture_source,
+        "captured_at_unix": time.time(),
+        "captured_pid": int(live_pid),
+        "reference_receipt": str(receipt_path),
+        "reference_receipt_status": receipt.get("status"),
+        "reference_trial_id": receipt.get("requested_trial_id", receipt.get("trial_id")),
+        "reference_repo": str(reference_repo),
+        "reference_stream_command": [str(item) for item in stream_command],
+        "reference_stream_script": str(stream_script),
+        "stream_source_sha256": _sha256(stream_script),
+        "stream_cwd": str(stream_cwd),
+        "stream_python": str(stream_python),
+        "stream_python_exists": stream_python.is_file(),
+        "ld_preload": ld_preload,
+        "ld_preload_exists": all(Path(item).is_file() for item in ld_preload.split()),
+        "reference_pythonpath": reference_pythonpath,
+        "pythonpath": os.pathsep.join(v11_pythonpath_entries),
+        "pythonpath_entries": v11_pythonpath_entries,
+        "scalabel_root": str(scalabel_root),
+        "scalabel_root_exists": scalabel_root.is_dir(),
+        "reference_cov_source": str(reference_source),
+        "reference_cov_config": str(reference_config),
+        "reference_cov_checkpoint": str(reference_checkpoint),
+        "reference_img_prefix": str(reference_img_prefix),
+        "cov_source_commit": _git_value(reference_source, "rev-parse", "HEAD"),
+        "cov_config_sha256": _sha256(reference_config),
+        "cov_checkpoint_sha256": _sha256(reference_checkpoint),
+        "v11_stream_source": str(repo / "tools" / "v10_covtrack_test_tempo_stream.py"),
+        "v11_stream_source_sha256": _sha256(repo / "tools" / "v10_covtrack_test_tempo_stream.py"),
+        "v11_runtime_source_sha256": _sha256(repo / "tempotrack_v10" / "covtrack_runtime.py"),
+        "v11_overlay_source_sha256": _sha256(repo / "tempotrack_v10" / "overlay.py"),
+    }
+    runtime["parity_sha256"] = _canonical_hash(_runtime_identity(runtime))
+    return runtime
+
+
+def _validate_runtime_environment(
+    *, args: argparse.Namespace, repo: Path, preflight: Mapping[str, Any]
+) -> dict[str, Any]:
+    runtime = preflight.get("runtime_environment")
+    if not isinstance(runtime, Mapping):
+        raise RuntimeError("preflight lacks V10/V11 runtime environment parity")
+    required = (
+        "ld_preload",
+        "stream_python",
+        "reference_stream_script",
+        "stream_cwd",
+        "reference_pythonpath",
+        "pythonpath",
+        "scalabel_root",
+        "reference_cov_source",
+        "reference_cov_config",
+        "reference_cov_checkpoint",
+        "reference_img_prefix",
+        "parity_sha256",
+    )
+    missing = [key for key in required if not runtime.get(key)]
+    if missing:
+        raise RuntimeError("runtime parity fields missing: " + ",".join(missing))
+    if runtime.get("parity_sha256") != _canonical_hash(_runtime_identity(runtime)):
+        raise RuntimeError("runtime parity identity hash mismatch")
+    if not bool(runtime.get("ld_preload_exists")):
+        raise RuntimeError("audited LD_PRELOAD path no longer exists")
+    if not all(Path(item).is_file() for item in str(runtime["ld_preload"]).split()):
+        raise RuntimeError("one or more audited LD_PRELOAD files no longer exist")
+    if not bool(runtime.get("stream_python_exists")) or not _path(str(runtime["stream_python"])).is_file():
+        raise RuntimeError("audited stream Python no longer exists")
+    if not bool(runtime.get("scalabel_root_exists")) or not _path(str(runtime["scalabel_root"])).is_dir():
+        raise RuntimeError("audited Scalabel root no longer exists")
+    if not _path(str(runtime.get("reference_receipt", ""))).is_file():
+        raise RuntimeError("audited V10 runtime reference receipt no longer exists")
+    reference_script = _path(str(runtime["reference_stream_script"]))
+    if not reference_script.is_file() or _sha256(reference_script) != runtime.get("stream_source_sha256"):
+        raise RuntimeError("audited V10 stream source changed or disappeared")
+    current_v11_stream = _path(str(runtime.get("v11_stream_source", repo / "tools" / "v10_covtrack_test_tempo_stream.py")))
+    if not current_v11_stream.is_file() or _sha256(current_v11_stream) != runtime.get("v11_stream_source_sha256"):
+        raise RuntimeError("V11 stream source changed after preflight")
+    for entry in _resolved_pythonpath_entries(str(runtime["pythonpath"])):
+        if not entry.exists():
+            raise RuntimeError(f"audited V11 PYTHONPATH entry no longer exists: {entry}")
+    expected_paths = {
+        "stream_python": _path(args.stream_python),
+        "reference_cov_source": _path(args.cov_source),
+        "reference_cov_config": _path(args.external_config),
+        "reference_cov_checkpoint": _path(args.external_checkpoint),
+        "reference_img_prefix": _path(args.img_prefix),
+    }
+    for key, expected in expected_paths.items():
+        if _path(str(runtime[key])) != expected:
+            raise RuntimeError(f"runtime parity argument mismatch for {key}")
+    if _path(str(runtime["scalabel_root"])) not in _resolved_pythonpath_entries(str(runtime["pythonpath"])):
+        raise RuntimeError("audited Scalabel root is absent from V11 PYTHONPATH")
+    if _path(str(runtime["reference_cov_source"])) != _path(str(preflight["cov"]["source"])):
+        raise RuntimeError("runtime parity COV source differs from preflight")
+    if _path(str(runtime["reference_cov_config"])) != _path(str(preflight["cov"]["config"])):
+        raise RuntimeError("runtime parity COV config differs from preflight")
+    if _path(str(runtime["reference_cov_checkpoint"])) != _path(str(preflight["cov"]["checkpoint"])):
+        raise RuntimeError("runtime parity COV checkpoint differs from preflight")
+    if _path(str(runtime["reference_img_prefix"])) != _path(str(args.img_prefix)):
+        raise RuntimeError("runtime parity image root differs from preflight")
+    if runtime.get("cov_source_commit") != preflight["cov"].get("commit"):
+        raise RuntimeError("runtime parity COV commit differs from preflight")
+    if runtime.get("cov_config_sha256") != preflight["cov"].get("config_sha256"):
+        raise RuntimeError("runtime parity COV config hash differs from preflight")
+    if runtime.get("cov_checkpoint_sha256") != preflight["cov"].get("checkpoint_sha256"):
+        raise RuntimeError("runtime parity COV checkpoint hash differs from preflight")
+    if runtime.get("v11_runtime_source_sha256") != _sha256(
+        repo / "tempotrack_v10" / "covtrack_runtime.py"
+    ):
+        raise RuntimeError("V11 runtime source changed after preflight")
+    if runtime.get("v11_overlay_source_sha256") != _sha256(repo / "tempotrack_v10" / "overlay.py"):
+        raise RuntimeError("V11 overlay source changed after preflight")
+    return dict(runtime)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -441,14 +782,20 @@ def _run_import_preflight(
     python: str,
     repo: Path,
     teta_root: Path,
+    scalabel_root: Path,
+    runtime_environment: Mapping[str, Any] | None,
     code: str,
     arguments: list[str],
 ) -> dict[str, Any]:
     env = os.environ.copy()
-    paths = [str(repo), str(teta_root), DEFAULT_SCALABEL_ROOT]
-    if env.get("PYTHONPATH"):
-        paths.append(env["PYTHONPATH"])
-    env["PYTHONPATH"] = os.pathsep.join(paths)
+    if runtime_environment is not None:
+        env["LD_PRELOAD"] = str(runtime_environment["ld_preload"])
+        env["PYTHONPATH"] = str(runtime_environment["pythonpath"])
+    else:
+        paths = [str(repo), str(teta_root), str(scalabel_root)]
+        if env.get("PYTHONPATH"):
+            paths.append(env["PYTHONPATH"])
+        env["PYTHONPATH"] = os.pathsep.join(paths)
     result = subprocess.run(
         [python, "-c", code, *arguments],
         cwd=str(repo),
@@ -464,7 +811,14 @@ def _run_import_preflight(
         raise RuntimeError(f"import preflight returned non-JSON output: {result.stdout[-1000:]}") from exc
 
 
-def _qdic_preflight(python: str, repo: Path, checkpoint: Path) -> dict[str, Any]:
+def _qdic_preflight(
+    python: str,
+    repo: Path,
+    checkpoint: Path,
+    *,
+    scalabel_root: Path,
+    runtime_environment: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     code = """
 import json
 import sys
@@ -476,6 +830,8 @@ print(json.dumps(artifact.provenance, sort_keys=True))
         python=python,
         repo=repo,
         teta_root=Path("/nonexistent"),
+        scalabel_root=scalabel_root,
+        runtime_environment=runtime_environment,
         code=code,
         arguments=[str(checkpoint)],
     )
@@ -488,7 +844,14 @@ print(json.dumps(artifact.provenance, sort_keys=True))
     return result
 
 
-def _teta_preflight(python: str, repo: Path, teta_root: Path) -> dict[str, Any]:
+def _teta_preflight(
+    python: str,
+    repo: Path,
+    teta_root: Path,
+    *,
+    scalabel_root: Path,
+    runtime_environment: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     expected = (teta_root / "teta" / "__init__.py").resolve()
     if not expected.is_file():
         raise FileNotFoundError(expected)
@@ -507,6 +870,8 @@ print(json.dumps({'teta_file': str(actual)}))
         python=python,
         repo=repo,
         teta_root=teta_root,
+        scalabel_root=scalabel_root,
+        runtime_environment=runtime_environment,
         code=code,
         arguments=[str(expected)],
     )
@@ -628,6 +993,8 @@ def _initial_plan() -> dict[str, Any]:
 
 
 def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, Any]:
+    """Create immutable preflight and initial search-plan artifacts."""
+
     annotation = _path(args.annotation)
     shard_manifest = _path(args.shard_manifest)
     cov_source = _path(args.cov_source)
@@ -658,14 +1025,17 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
         _path(args.qdic_fast_root),
         None if not args.qdic_checkpoint else _path(args.qdic_checkpoint),
     )
-    qdic_provenance = _qdic_preflight(args.stream_python, repo, qdic_checkpoint)
-    teta_provenance = _teta_preflight(args.evaluator_python, repo, teta_root)
     current_branch = _git_branch(repo)
     current_head = _git_value(repo, "rev-parse", "HEAD")
     if _git_status(repo, include_untracked=True) != "":
         raise RuntimeError("V11 repository must be clean before Full-Test run")
     if current_branch != "codex/v11-fulltest-20h-search":
         raise RuntimeError(f"wrong V11 branch: {current_branch}")
+    runtime_environment = _audit_v10_runtime_environment(args=args, repo=repo)
+    if runtime_environment["scalabel_root"]:
+        scalabel_root = _path(str(runtime_environment["scalabel_root"]))
+    else:  # pragma: no cover - the audit always supplies this field
+        raise RuntimeError("V10 runtime parity did not identify a Scalabel root")
     plan = _initial_plan()
     plan["full_test_annotation_sha256"] = full["sha256"]
     plan["qdic_checkpoint_sha256"] = _sha256(qdic_checkpoint)
@@ -673,6 +1043,20 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
     plan["created_at_unix"] = time.time()
     plan_path = root / "search_plan.json"
     _write_json(plan_path, plan)
+    qdic_provenance = _qdic_preflight(
+        args.stream_python,
+        repo,
+        qdic_checkpoint,
+        scalabel_root=scalabel_root,
+        runtime_environment=runtime_environment,
+    )
+    teta_provenance = _teta_preflight(
+        args.evaluator_python,
+        repo,
+        teta_root,
+        scalabel_root=scalabel_root,
+        runtime_environment=runtime_environment,
+    )
     preflight = {
         "schema_version": 1,
         "status": "PASS",
@@ -714,14 +1098,21 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
             "source_root": str(teta_root),
             "provenance": teta_provenance,
         },
+        "base_config": {
+            "path": str(base_config),
+            "sha256": _sha256(base_config),
+        },
+        "runtime_environment": runtime_environment,
         "runtime": {
             "fixed_fields": dict(plan["fixed_runtime"]),
             "search_fields": list(plan["search_fields"]),
             "frontend_cache_used": False,
+            "parity_sha256": runtime_environment["parity_sha256"],
         },
         "search_plan": {
             "path": str(plan_path),
             "sha256": _sha256(plan_path),
+            "initial_sha256": _sha256(plan_path),
             "status": "PASS",
         },
         "resource_gate": {
@@ -735,9 +1126,191 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
     print("QDIC_CHECKPOINT: PASS", flush=True)
     print("COV_PROVENANCE: PASS", flush=True)
     print("TETA_PROVENANCE: PASS", flush=True)
+    print("V10_V11_RUNTIME_PARITY: PASS", flush=True)
     print(f"SHARDS: PASS {len(shards)}/10", flush=True)
     print("SEARCH_PLAN: PASS", flush=True)
     return preflight
+
+
+def _validate_search_plan(plan: Mapping[str, Any], preflight: Mapping[str, Any]) -> None:
+    """Validate immutable plan fields without discarding dynamic trials."""
+
+    initial = _initial_plan()
+    for key in ("protocol", "unbiased_test", "search_fields", "fixed_runtime", "policy"):
+        if plan.get(key) != initial.get(key):
+            raise RuntimeError(f"resume search plan immutable field changed: {key}")
+    initial_trials = plan.get("trials")
+    if initial_trials != initial["trials"]:
+        raise RuntimeError("resume search plan initial margin grid changed")
+    if plan.get("full_test_annotation_sha256") != preflight["full_test_annotation"]["sha256"]:
+        raise RuntimeError("resume search plan annotation hash mismatch")
+    if plan.get("qdic_checkpoint_sha256") != preflight["qdic"]["checkpoint_sha256"]:
+        raise RuntimeError("resume search plan QDIC checkpoint hash mismatch")
+    if plan.get("repo_head") != preflight["repository"]["head"]:
+        raise RuntimeError("resume search plan repository HEAD mismatch")
+    derived = plan.get("derived_trials", [])
+    if not isinstance(derived, list):
+        raise RuntimeError("resume search plan derived_trials is not a list")
+    derived_ids = [str(item.get("trial_id")) for item in derived if isinstance(item, Mapping)]
+    if len(derived_ids) != len(derived) or len(set(derived_ids)) != len(derived_ids):
+        raise RuntimeError("resume search plan derived_trials contains invalid or duplicate IDs")
+
+
+def _validate_existing_preflight(
+    *, args: argparse.Namespace, root: Path, repo: Path
+) -> dict[str, Any]:
+    """Recompute and validate provenance while never rewriting artifacts."""
+
+    preflight_path = root / "preflight.json"
+    plan_path = root / "search_plan.json"
+    if not preflight_path.is_file() or not plan_path.is_file():
+        raise FileNotFoundError("resume requires existing preflight.json and search_plan.json")
+    preflight = _read_json(preflight_path)
+    plan = _read_json(plan_path)
+    if not isinstance(preflight, Mapping) or preflight.get("status") != "PASS":
+        raise RuntimeError("existing preflight is not PASS")
+    if not isinstance(plan, Mapping):
+        raise RuntimeError("existing search plan is not a mapping")
+    annotation = _path(args.annotation)
+    full = _annotation_summary(annotation)
+    if full["sha256"] != preflight["full_test_annotation"].get("sha256"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: full Test annotation changed")
+    if full["sha256"] != EXPECTED_ANNOTATION_SHA256:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: full Test annotation is not audited")
+    if _path(str(preflight["full_test_annotation"].get("path"))) != annotation:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: annotation path changed")
+    if _path(str(preflight["shards"].get("manifest"))) != _path(args.shard_manifest):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: shard manifest path changed")
+    shards = _validate_shards(
+        full_annotation=annotation,
+        shard_manifest=_path(args.shard_manifest),
+        full=full,
+    )
+    if _sha256(_path(args.shard_manifest)) != preflight["shards"].get("manifest_sha256"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: shard manifest changed")
+    if [(item["index"], item["sha256"]) for item in shards] != [
+        (item.get("index"), item.get("sha256")) for item in preflight["shards"].get("items", [])
+    ]:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: shard annotations changed")
+    cov_source = _path(args.cov_source)
+    cov_config = _path(args.external_config)
+    cov_checkpoint = _path(args.external_checkpoint)
+    if _path(str(preflight["cov"].get("source"))) != cov_source:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: COV source path changed")
+    if _path(str(preflight["cov"].get("config"))) != cov_config:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: COV config path changed")
+    if _path(str(preflight["cov"].get("checkpoint"))) != cov_checkpoint:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: COV checkpoint path changed")
+    if _git_value(cov_source, "rev-parse", "HEAD") != preflight["cov"].get("commit"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: COV source commit changed")
+    if _git_source_status(cov_source) != "":
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: COV tracked source became dirty")
+    if _sha256(cov_config) != preflight["cov"].get("config_sha256"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: COV config changed")
+    if _sha256(cov_checkpoint) != preflight["cov"].get("checkpoint_sha256"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: COV checkpoint changed")
+    base_config = _path(args.base_config)
+    if not base_config.is_file() or _sha256(base_config) != preflight.get("base_config", {}).get("sha256"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: V11 base config changed")
+    if _path(str(preflight.get("base_config", {}).get("path", ""))) != base_config:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: V11 base config path changed")
+    _validate_base_config(base_config)
+    runtime_environment = _validate_runtime_environment(args=args, repo=repo, preflight=preflight)
+    qdic_checkpoint, _binding = _resolve_qdic_checkpoint(
+        _path(args.qdic_fast_root), _path(str(preflight["qdic"]["checkpoint"]))
+    )
+    if _sha256(qdic_checkpoint) != preflight["qdic"].get("checkpoint_sha256"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: QDIC checkpoint changed")
+    _qdic_preflight(
+        args.stream_python,
+        repo,
+        qdic_checkpoint,
+        scalabel_root=_path(str(runtime_environment["scalabel_root"])),
+        runtime_environment=runtime_environment,
+    )
+    teta_root = _path(args.teta_source_root)
+    if _path(str(preflight["teta"].get("source_root"))) != teta_root:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: TETA source path changed")
+    teta = _teta_preflight(
+        args.evaluator_python,
+        repo,
+        teta_root,
+        scalabel_root=_path(str(runtime_environment["scalabel_root"])),
+        runtime_environment=runtime_environment,
+    )
+    if teta.get("git_commit") != preflight["teta"]["provenance"].get("git_commit"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: TETA commit changed")
+    if teta.get("init_sha256") != preflight["teta"]["provenance"].get("init_sha256"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: TETA package changed")
+    branch = _git_branch(repo)
+    head = _git_value(repo, "rev-parse", "HEAD")
+    if branch != preflight["repository"].get("branch") or head != preflight["repository"].get("head"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: V11 branch or HEAD changed")
+    if _git_status(repo, include_untracked=True) != "":
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: V11 repository is not clean")
+    _validate_search_plan(plan, preflight)
+    if preflight["search_plan"].get("initial_sha256") != preflight["search_plan"].get("sha256"):
+        raise RuntimeError("existing preflight initial search-plan hash is inconsistent")
+    # This is the only acceptable difference after Wave S: dynamic trials are
+    # appended to search_plan.derived_trials and therefore change its current
+    # file hash, while its immutable initial hash remains in preflight.
+    print("RESUME_PROVENANCE_PASS", flush=True)
+    return dict(preflight)
+
+
+def _validate_resume_state(
+    *, args: argparse.Namespace, root: Path, state: Mapping[str, Any], preflight: Mapping[str, Any]
+) -> None:
+    actual_preflight = _sha256(root / "preflight.json")
+    actual_plan = _sha256(root / "search_plan.json")
+    if state.get("preflight_sha256") != actual_preflight:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: state.preflight_sha256 is stale")
+    if state.get("search_plan_sha256") != actual_plan:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: state.search_plan_sha256 is stale")
+    if state.get("repo_head") != preflight["repository"].get("head"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: state repository HEAD mismatch")
+    if state.get("repo_branch") != preflight["repository"].get("branch"):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: state repository branch mismatch")
+    if list(state.get("selected_gpus", [])) != _parse_gpu_ids(args.gpus):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: selected GPU set changed")
+    plan = _read_json(root / "search_plan.json")
+    state_ids = {str(item.get("trial_id")) for item in state.get("trials", [])}
+    derived_ids = {
+        str(item.get("trial_id"))
+        for item in plan.get("derived_trials", [])
+        if isinstance(item, Mapping)
+    }
+    if not derived_ids.issubset(state_ids):
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: search state lost a derived trial")
+
+
+def _archive_pre_run_artifacts(root: Path) -> Path | None:
+    """Move only the previous never-started preparation aside, recoverably."""
+
+    state_path = root / "search_state.json"
+    if state_path.is_file():
+        state = _read_json(state_path)
+        if state.get("first_full_trial_start_unix") is not None:
+            raise RuntimeError("cannot reinitialize after a Full-Test timer has started")
+    trial_root = root / "trials"
+    if trial_root.is_dir() and any(trial_root.iterdir()):
+        raise RuntimeError("cannot reinitialize after Full-Test trial artifacts exist")
+    candidates = [
+        root / "preflight.json",
+        root / "search_plan.json",
+        root / "search_state.json",
+        root / "full_results.json",
+        root / "final_report.md",
+        root / "runtime_smoke.json",
+    ]
+    existing = [path for path in candidates if path.exists()]
+    if not existing:
+        return None
+    archive = root / "history" / f"superseded_{int(time.time())}"
+    archive.mkdir(parents=True, exist_ok=False)
+    for path in existing:
+        shutil.move(str(path), str(archive / path.name))
+    return archive
 
 
 def _new_state(args: argparse.Namespace, root: Path, preflight: Mapping[str, Any]) -> dict[str, Any]:
@@ -756,6 +1329,8 @@ def _new_state(args: argparse.Namespace, root: Path, preflight: Mapping[str, Any
         "deadline_hours": float(args.hours),
         "final_reserve_seconds": FINAL_RESERVE_SECONDS,
         "selected_gpus": _parse_gpu_ids(args.gpus),
+        "runtime_smoke_path": str(root / "runtime_smoke.json"),
+        "runtime_smoke_status": "PENDING",
         "first_full_trial_start_unix": None,
         "hard_deadline_unix": None,
         "search_end_unix": None,
@@ -827,12 +1402,74 @@ def _completed_shard(candidate_root: Path, index: int) -> tuple[Path, dict[str, 
     return best
 
 
+def _validate_completed_shard_receipt(
+    *, receipt: Mapping[str, Any], shard: Mapping[str, Any], preflight: Mapping[str, Any]
+) -> None:
+    if receipt.get("status") != "COMPLETED":
+        raise RuntimeError("completed shard receipt is not COMPLETED")
+    inputs = receipt.get("inputs", {})
+    if not isinstance(inputs, Mapping):
+        raise RuntimeError("completed shard receipt lacks inputs")
+    expected_inputs = {
+        "annotation": str(shard["path"]),
+        "annotation_sha256": str(shard["sha256"]),
+        "qdic_checkpoint": str(preflight["qdic"]["checkpoint"]),
+        "qdic_checkpoint_sha256": str(preflight["qdic"]["checkpoint_sha256"]),
+        "external_config": str(preflight["cov"]["config"]),
+        "external_config_sha256": str(preflight["cov"]["config_sha256"]),
+        "external_checkpoint": str(preflight["cov"]["checkpoint"]),
+        "external_checkpoint_sha256": str(preflight["cov"]["checkpoint_sha256"]),
+    }
+    for key, expected in expected_inputs.items():
+        if inputs.get(key) != expected:
+            raise RuntimeError(f"completed shard receipt input mismatch: {key}")
+    if str(receipt.get("external_source", {}).get("path")) != str(preflight["cov"]["source"]):
+        raise RuntimeError("completed shard COV source path mismatch")
+    if receipt.get("external_source", {}).get("commit") != preflight["cov"].get("commit"):
+        raise RuntimeError("completed shard COV source commit mismatch")
+    runtime = receipt.get("runtime_environment")
+    expected_runtime = preflight.get("runtime_environment")
+    if not isinstance(runtime, Mapping) or not isinstance(expected_runtime, Mapping):
+        raise RuntimeError("completed shard lacks runtime environment receipt")
+    for key in (
+        "ld_preload",
+        "pythonpath",
+        "scalabel_root",
+        "reference_receipt",
+        "reference_stream_script",
+    ):
+        if runtime.get(key) != expected_runtime.get(key):
+            raise RuntimeError(f"completed shard runtime parity mismatch: {key}")
+    outputs = receipt.get("outputs", {})
+    if not isinstance(outputs, Mapping):
+        raise RuntimeError("completed shard receipt lacks outputs")
+    prediction = _path(str(outputs.get("prediction", "")))
+    diagnostics = _path(str(outputs.get("diagnostics", "")))
+    stream_manifest = _path(str(outputs.get("stream_manifest", "")))
+    if not prediction.is_file() or _sha256(prediction) != outputs.get("prediction_sha256"):
+        raise RuntimeError("completed shard prediction is missing or has a hash mismatch")
+    if not diagnostics.is_file() or _sha256(diagnostics) != outputs.get("diagnostics_sha256"):
+        raise RuntimeError("completed shard diagnostics are missing or have a hash mismatch")
+    if not stream_manifest.is_file() or _sha256(stream_manifest) != outputs.get("stream_manifest_sha256"):
+        raise RuntimeError("completed shard stream manifest is missing or has a hash mismatch")
+    manifest = _read_json(stream_manifest)
+    if (
+        manifest.get("status") != "PASS"
+        or int(manifest.get("frames", -1)) != int(shard["frame_count"])
+        or int(manifest.get("videos", -1)) != int(shard["video_count"])
+    ):
+        raise RuntimeError("completed shard stream manifest count mismatch")
+
+
 def _next_shard_dir(candidate_root: Path, index: int) -> tuple[Path, int]:
     existing = _shard_dirs(candidate_root, index)
     if not existing:
         return candidate_root / "shards" / f"shard_{index:02d}", 1
     attempts: list[int] = []
     for directory in existing:
+        match = re.search(r"_retry(\d+)$", directory.name)
+        if match:
+            attempts.append(int(match.group(1)))
         path = directory / "receipt.json"
         if path.is_file():
             try:
@@ -840,6 +1477,8 @@ def _next_shard_dir(candidate_root: Path, index: int) -> tuple[Path, int]:
             except (OSError, json.JSONDecodeError, TypeError, ValueError):
                 pass
     attempt = max(attempts or [0]) + 1
+    while (candidate_root / "shards" / f"shard_{index:02d}_retry{attempt:02d}").exists():
+        attempt += 1
     return candidate_root / "shards" / f"shard_{index:02d}_retry{attempt:02d}", attempt
 
 
@@ -852,6 +1491,7 @@ def _worker_command(
     shard_dir: Path,
     attempt: int,
     gpu: str,
+    tempo_config: Path | None = None,
 ) -> list[str]:
     return [
         str(args.worker_python or sys.executable),
@@ -865,7 +1505,11 @@ def _worker_command(
         "--shard-dir",
         str(shard_dir),
         "--tempo-config",
-        str(_candidate_root(_path(args.root), str(trial["trial_id"])) / "config.yaml"),
+        str(
+            tempo_config
+            if tempo_config is not None
+            else _candidate_root(_path(args.root), str(trial["trial_id"])) / "config.yaml"
+        ),
         "--qdic-checkpoint",
         str(preflight["qdic"]["checkpoint"]),
         "--external-config",
@@ -894,6 +1538,16 @@ def _worker_command(
         str(args.stream_python),
         "--teta-source-root",
         str(args.teta_source_root),
+        "--ld-preload",
+        str(preflight["runtime_environment"]["ld_preload"]),
+        "--runtime-pythonpath",
+        str(preflight["runtime_environment"]["pythonpath"]),
+        "--scalabel-root",
+        str(preflight["runtime_environment"]["scalabel_root"]),
+        "--runtime-reference-receipt",
+        str(preflight["runtime_environment"]["reference_receipt"]),
+        "--runtime-reference-stream-script",
+        str(preflight["runtime_environment"]["reference_stream_script"]),
     ]
 
 
@@ -921,6 +1575,7 @@ def _candidate_receipt_base(
             "search_fields": ["score_threshold", "margin_threshold"],
             "fixed_runtime": _read_json(_path(args.root) / "search_plan.json")["fixed_runtime"],
         },
+        "runtime_environment": dict(preflight["runtime_environment"]),
         "repository": {
             "path": str(_path(args.repo)),
             "branch": str(preflight["repository"]["branch"]),
@@ -1007,6 +1662,9 @@ def _run_candidate(
         index = int(shard["index"])
         complete = _completed_shard(candidate_root, index)
         if complete is not None:
+            _validate_completed_shard_receipt(
+                receipt=complete[1], shard=shard, preflight=preflight
+            )
             continue
         running_path: Path | None = None
         for directory in _shard_dirs(candidate_root, index):
@@ -1171,6 +1829,9 @@ def _run_candidate(
             _write_state(root, state)
             return False
         directory, receipt = complete
+        _validate_completed_shard_receipt(
+            receipt=receipt, shard=shard, preflight=preflight
+        )
         completed_records.append(
             {
                 "index": int(shard["index"]),
@@ -1274,13 +1935,401 @@ def _run_candidate(
     return True
 
 
-def _evaluation_env(args: argparse.Namespace) -> dict[str, str]:
+def _write_runtime_smoke_annotation(
+    *, full_annotation: Path, output: Path, video_count: int
+) -> dict[str, Any]:
+    data = _read_json(full_annotation)
+    if not isinstance(data, Mapping):
+        raise ValueError("runtime smoke source annotation must be a mapping")
+    videos = data.get("videos", [])
+    if not isinstance(videos, list) or len(videos) < video_count:
+        raise RuntimeError(f"runtime smoke needs {video_count} complete videos")
+    selected_video_ids = [int(item["id"]) for item in videos[:video_count]]
+    selected_video_set = set(selected_video_ids)
+    images = [
+        dict(item)
+        for item in data.get("images", [])
+        if int(item.get("video_id", -1)) in selected_video_set
+    ]
+    image_ids = {int(item["id"]) for item in images}
+    selected_videos = [
+        dict(item) for item in videos if int(item.get("id", -1)) in selected_video_set
+    ]
+    if len(selected_videos) != video_count or not images:
+        raise RuntimeError("runtime smoke video selection is empty or incomplete")
+    smoke_data = dict(data)
+    smoke_data["videos"] = selected_videos
+    smoke_data["images"] = images
+    smoke_data["annotations"] = [
+        dict(item)
+        for item in data.get("annotations", [])
+        if int(item.get("image_id", -1)) in image_ids
+    ]
+    smoke_data["tracks"] = [
+        dict(item)
+        for item in data.get("tracks", [])
+        if int(item.get("video_id", -1)) in selected_video_set
+    ]
+    _write_json(output, smoke_data)
+    summary = _annotation_summary(output)
+    summary.update(
+        {
+            "source": str(full_annotation),
+            "source_sha256": _sha256(full_annotation),
+            "selected_video_ids": selected_video_ids,
+        }
+    )
+    return summary
+
+
+def _validate_smoke_diagnostics(
+    diagnostics_path: Path, *, expected_checkpoint_sha256: str, expected_frames: int
+) -> dict[str, Any]:
+    if not diagnostics_path.is_file():
+        raise FileNotFoundError(f"runtime smoke diagnostics missing: {diagnostics_path}")
+    diagnostics = _read_json(diagnostics_path)
+    failures: list[str] = []
+    if diagnostics.get("status") != "COMPLETED":
+        failures.append("status")
+    if int(diagnostics.get("frames", -1)) != int(expected_frames):
+        failures.append("frames")
+    if int(diagnostics.get("qdic_expected_query_observations", -1)) != 1:
+        failures.append("qdic_expected_query_observations")
+    if int(diagnostics.get("qdic_actual_query_observations", -1)) != 1:
+        failures.append("qdic_actual_query_observations")
+    if int(diagnostics.get("qdic_context_candidate_top_k", -1)) != 64:
+        failures.append("qdic_context_top_k")
+    if int(diagnostics.get("qdic_decision_candidate_top_k", -1)) != 8:
+        failures.append("qdic_decision_top_k")
+    if bool(diagnostics.get("qdic_context_contract_mismatch", True)):
+        failures.append("qdic_context_contract")
+    if int(diagnostics.get("qdic_missing_evidence", -1)) != 0:
+        failures.append("qdic_missing_evidence")
+    if int(diagnostics.get("qdic_native_memo_bootstrap_count", -1)) != 0:
+        failures.append("native_memo_bootstrap")
+    qdic_status = diagnostics.get("qdic_status")
+    if not isinstance(qdic_status, Mapping):
+        failures.append("qdic_status")
+    else:
+        if qdic_status.get("status") != "QDIC_V11_MODEL_CODE_AND_WEIGHTS":
+            failures.append("qdic_provenance_status")
+        if qdic_status.get("checkpoint_sha256") != expected_checkpoint_sha256:
+            failures.append("qdic_checkpoint_sha256")
+    capability = diagnostics.get("full_capability_status_counts")
+    if not isinstance(capability, Mapping):
+        failures.append("capability_missing")
+    elif set(capability) != {"FULL_QDIC_MO_RUNTIME_ACTIVE"}:
+        failures.append("capability_status")
+    elif sum(int(value) for value in capability.values()) != int(expected_frames):
+        failures.append("capability_coverage")
+    if failures:
+        raise RuntimeError("ACTUAL_RUNTIME_SMOKE_CONTRACT_FAILED: " + ",".join(failures))
+    return diagnostics
+
+
+def _runtime_smoke_record_valid(root: Path, preflight: Mapping[str, Any]) -> bool:
+    path = root / "runtime_smoke.json"
+    if not path.is_file():
+        return False
+    try:
+        record = _read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return False
+    checks = record.get("checks", {}) if isinstance(record, Mapping) else {}
+    required_checks = {
+        "qdic_checkpoint_sha256",
+        "full_qdic_mo_runtime_active",
+        "qdic_missing_evidence_zero",
+        "native_memo_bootstrap_zero",
+        "frame_count_exact",
+        "video_count_exact",
+        "prediction_exists",
+        "merge_pass",
+        "official_teta_pass",
+    }
+    return bool(
+        isinstance(record, Mapping)
+        and record.get("status") == "PASS"
+        and record.get("preflight_sha256") == _sha256(root / "preflight.json")
+        and record.get("repository", {}).get("head") == preflight["repository"].get("head")
+        and record.get("runtime_parity_sha256") == preflight["runtime_environment"].get("parity_sha256")
+        and record.get("source_annotation_sha256") == preflight["full_test_annotation"].get("sha256")
+        and isinstance(checks, Mapping)
+        and required_checks.issubset(set(checks))
+        and all(bool(checks.get(key)) for key in required_checks)
+    )
+
+
+def _require_runtime_smoke(root: Path, preflight: Mapping[str, Any]) -> dict[str, Any]:
+    path = root / "runtime_smoke.json"
+    if not _runtime_smoke_record_valid(root, preflight):
+        if not path.is_file():
+            raise RuntimeError("ACTUAL_RUNTIME_SMOKE_REQUIRED: runtime_smoke.json is missing")
+        raise RuntimeError("ACTUAL_RUNTIME_SMOKE_REQUIRED: runtime_smoke.json is not a valid PASS for this preflight")
+    record = _read_json(path)
+    print("ACTUAL_RUNTIME_SMOKE: PASS", flush=True)
+    return record
+
+
+def _run_runtime_smoke(
+    *, args: argparse.Namespace, root: Path, preflight: Mapping[str, Any]
+) -> bool:
+    """Run the fixed 3-video detector→QDIC→merge→official-TETA gate."""
+
+    if _runtime_smoke_record_valid(root, preflight):
+        print("ACTUAL_RUNTIME_SMOKE: PASS (reused audited result)", flush=True)
+        return True
+    smoke_root = root / "runtime_smoke"
+    smoke_root.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+    smoke_annotation = smoke_root / "annotation.json"
+    smoke_summary = _write_runtime_smoke_annotation(
+        full_annotation=_path(preflight["full_test_annotation"]["path"]),
+        output=smoke_annotation,
+        video_count=int(args.smoke_videos),
+    )
+    smoke_trial = {
+        "trial_id": "RUNTIME_SMOKE",
+        "wave": "SMOKE",
+        "score_threshold": 0.0,
+        "margin_threshold": float(_initial_plan()["trials"][0]["margin_threshold"]),
+    }
+    config_path = smoke_root / "config.yaml"
+    _materialize_config(
+        base_config=_path(args.base_config),
+        output=config_path,
+        qdic_checkpoint=_path(preflight["qdic"]["checkpoint"]),
+        trial_id="RUNTIME_SMOKE",
+        score_threshold=float(smoke_trial["score_threshold"]),
+        margin_threshold=float(smoke_trial["margin_threshold"]),
+    )
+    smoke_receipt_path = smoke_root / "receipt.json"
+    record: dict[str, Any] = {
+        "schema_version": 1,
+        "artifact": "v11_qdic_actual_runtime_smoke",
+        "status": "RUNNING",
+        "protocol": "ACTUAL_RUNTIME_SMOKE",
+        "selection_use": "NONE",
+        "preflight_sha256": _sha256(root / "preflight.json"),
+        "source_annotation": str(preflight["full_test_annotation"]["path"]),
+        "source_annotation_sha256": str(preflight["full_test_annotation"]["sha256"]),
+        "repository": dict(preflight["repository"]),
+        "runtime_parity_sha256": preflight["runtime_environment"]["parity_sha256"],
+        "runtime_environment": dict(preflight["runtime_environment"]),
+        "smoke_annotation": smoke_summary,
+        "spec": dict(smoke_trial),
+        "started_at_unix": started,
+    }
+    _write_json(root / "runtime_smoke.json", record)
+    try:
+        smoke_gpu = str(args.smoke_gpu)
+        if args.wait_for_gpus:
+            resource_snapshot = _wait_for_gpus([smoke_gpu])
+        else:
+            ready, resource_snapshot = _gpus_ready([smoke_gpu])
+            if not ready:
+                raise RuntimeError("ACTUAL_RUNTIME_SMOKE_RESOURCE_GATE_FAILED: smoke GPU is busy")
+        record["resource_gate"] = resource_snapshot
+        shard = {
+            "index": 0,
+            "path": str(smoke_annotation),
+            "sha256": smoke_summary["sha256"],
+            "video_count": smoke_summary["videos"],
+            "frame_count": smoke_summary["frames"],
+        }
+        existing = _completed_shard(smoke_root, 0)
+        if existing is None:
+            shard_dir, attempt = _next_shard_dir(smoke_root, 0)
+            log_path = smoke_root / f"worker_attempt{attempt:02d}.log"
+            command = _worker_command(
+                args=args,
+                preflight=preflight,
+                trial=smoke_trial,
+                shard=shard,
+                shard_dir=shard_dir,
+                attempt=attempt,
+                gpu=smoke_gpu,
+                tempo_config=config_path,
+            )
+            with log_path.open("w", encoding="utf-8") as log:
+                process = subprocess.run(
+                    command,
+                    cwd=str(_path(args.repo)),
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+            record["worker"] = {
+                "command": command,
+                "returncode": int(process.returncode),
+                "log": str(log_path),
+                "receipt": str(shard_dir / "receipt.json"),
+            }
+            if process.returncode != 0:
+                raise RuntimeError(f"runtime smoke worker failed rc={process.returncode}; see {log_path}")
+            existing = _completed_shard(smoke_root, 0)
+        if existing is None:
+            raise RuntimeError("runtime smoke worker did not produce a completed shard")
+        shard_dir, shard_receipt = existing
+        _validate_completed_shard_receipt(
+            receipt=shard_receipt, shard=shard, preflight=preflight
+        )
+        record["worker_receipt"] = str(shard_dir / "receipt.json")
+        prediction = _path(str(shard_receipt.get("outputs", {}).get("prediction", shard_dir / "stream" / "tao_track.json")))
+        diagnostics_path = _path(str(shard_receipt.get("outputs", {}).get("diagnostics", shard_dir / "diagnostics.json")))
+        stream_manifest_path = _path(str(shard_receipt.get("outputs", {}).get("stream_manifest", shard_dir / "stream" / "stream_manifest.json")))
+        if not prediction.is_file():
+            raise FileNotFoundError(f"runtime smoke prediction missing: {prediction}")
+        stream_manifest = _read_json(stream_manifest_path)
+        if (
+            stream_manifest.get("status") != "PASS"
+            or int(stream_manifest.get("frames", -1)) != smoke_summary["frames"]
+            or int(stream_manifest.get("videos", -1)) != smoke_summary["videos"]
+        ):
+            raise RuntimeError(f"runtime smoke stream manifest contract failed: {stream_manifest}")
+        diagnostics = _validate_smoke_diagnostics(
+            diagnostics_path,
+            expected_checkpoint_sha256=str(preflight["qdic"]["checkpoint_sha256"]),
+            expected_frames=int(smoke_summary["frames"]),
+        )
+        record["checks"] = {
+            "qdic_checkpoint_sha256": diagnostics["qdic_status"]["checkpoint_sha256"] == preflight["qdic"]["checkpoint_sha256"],
+            "full_qdic_mo_runtime_active": set(diagnostics["full_capability_status_counts"]) == {"FULL_QDIC_MO_RUNTIME_ACTIVE"},
+            "qdic_missing_evidence_zero": int(diagnostics["qdic_missing_evidence"]) == 0,
+            "native_memo_bootstrap_zero": int(diagnostics["qdic_native_memo_bootstrap_count"]) == 0,
+            "frame_count_exact": int(stream_manifest["frames"]) == int(smoke_summary["frames"]),
+            "video_count_exact": int(stream_manifest["videos"]) == int(smoke_summary["videos"]),
+            "prediction_exists": prediction.is_file() and prediction.stat().st_size > 0,
+        }
+        record["diagnostics"] = {
+            "path": str(diagnostics_path),
+            "sha256": _sha256(diagnostics_path),
+            "frames": int(diagnostics["frames"]),
+            "qdic_status": diagnostics.get("qdic_status"),
+        }
+        merged_dir = smoke_root / "merged"
+        merged_output = merged_dir / "tao_track.json"
+        merged_manifest_path = merged_dir / "merge_manifest.json"
+        merge_log = merged_dir / "merge.log"
+        merge_command = [
+            str(args.worker_python or sys.executable),
+            str(_path(args.repo) / "tools" / "v10_merge_complete_video_tao.py"),
+            "--annotation",
+            str(smoke_annotation),
+            "--output",
+            str(merged_output),
+            "--manifest",
+            str(merged_manifest_path),
+            "--shard",
+            str(smoke_annotation),
+            str(prediction),
+        ]
+        with merge_log.open("w", encoding="utf-8") as log:
+            merge_process = subprocess.run(
+                merge_command,
+                cwd=str(_path(args.repo)),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        if merge_process.returncode != 0:
+            raise RuntimeError(f"runtime smoke merge failed rc={merge_process.returncode}; see {merge_log}")
+        merge_manifest = _read_json(merged_manifest_path)
+        if (
+            merge_manifest.get("status") != "PASS"
+            or int(merge_manifest.get("images", -1)) != int(smoke_summary["frames"])
+            or _sha256(merged_output) != merge_manifest.get("output_sha256")
+        ):
+            raise RuntimeError(f"runtime smoke merge contract failed: {merge_manifest}")
+        record["checks"]["merge_pass"] = True
+        record["merge"] = {
+            "command": merge_command,
+            "manifest": str(merged_manifest_path),
+            "manifest_sha256": _sha256(merged_manifest_path),
+            "prediction": str(merged_output),
+            "prediction_sha256": _sha256(merged_output),
+            "images": int(merge_manifest["images"]),
+            "rows": int(merge_manifest["rows"]),
+        }
+        evaluation_root = smoke_root / "evaluation"
+        evaluation_name = "V11_RUNTIME_SMOKE"
+        summary_path = evaluation_root / evaluation_name / "teta_summary_results.pth"
+        evaluation_root.mkdir(parents=True, exist_ok=True)
+        evaluation_command = [
+            str(args.evaluator_python),
+            str(_path(args.repo) / "tools" / "eval_ovmot_teta.py"),
+            "--gt",
+            str(smoke_annotation),
+            "--pred",
+            str(merged_output),
+            "--out",
+            str(evaluation_root),
+            "--name",
+            evaluation_name,
+            "--cores",
+            str(min(int(args.evaluator_cores), 8)),
+        ]
+        evaluation_log = evaluation_root / "evaluation.log"
+        with evaluation_log.open("w", encoding="utf-8") as log:
+            evaluation_process = subprocess.run(
+                evaluation_command,
+                cwd=str(_path(args.repo)),
+                env=_evaluation_env(args, preflight),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        if evaluation_process.returncode != 0 or not summary_path.is_file():
+            raise RuntimeError(
+                f"runtime smoke official TETA failed rc={evaluation_process.returncode}; see {evaluation_log}"
+            )
+        smoke_metrics = _parse_summary(args, summary_path, smoke_annotation, preflight=preflight)
+        record["checks"]["official_teta_pass"] = True
+        record["evaluation"] = {
+            "status": "PASS",
+            "command": evaluation_command,
+            "summary": str(summary_path),
+            "summary_sha256": _sha256(summary_path),
+            "log": str(evaluation_log),
+            "metrics_recorded_for_diagnostic_only": smoke_metrics,
+        }
+        if not all(bool(value) for value in record["checks"].values()):
+            raise RuntimeError(f"runtime smoke checks failed: {record['checks']}")
+        record["status"] = "PASS"
+        record["ended_at_unix"] = time.time()
+        record["duration_seconds"] = record["ended_at_unix"] - started
+        _write_json(root / "runtime_smoke.json", record)
+        print(
+            f"ACTUAL_RUNTIME_SMOKE: PASS videos={smoke_summary['videos']} "
+            f"frames={smoke_summary['frames']} duration={record['duration_seconds'] / 60.0:.1f}min",
+            flush=True,
+        )
+        return True
+    except Exception as exc:
+        record["status"] = "FAILED"
+        record["error"] = f"{type(exc).__name__}: {exc}"
+        record["traceback"] = traceback.format_exc()
+        record["ended_at_unix"] = time.time()
+        record["duration_seconds"] = record["ended_at_unix"] - started
+        _write_json(root / "runtime_smoke.json", record)
+        print(f"ACTUAL_RUNTIME_SMOKE: FAILED {record['error']}", file=sys.stderr, flush=True)
+        return False
+
+
+def _evaluation_env(
+    args: argparse.Namespace, preflight: Mapping[str, Any] | None = None
+) -> dict[str, str]:
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = ""
-    values = [str(_path(args.repo)), str(_path(args.teta_source_root)), DEFAULT_SCALABEL_ROOT]
-    if env.get("PYTHONPATH"):
-        values.append(env["PYTHONPATH"])
-    env["PYTHONPATH"] = os.pathsep.join(values)
+    runtime = None if preflight is None else preflight.get("runtime_environment")
+    if isinstance(runtime, Mapping):
+        env["LD_PRELOAD"] = str(runtime["ld_preload"])
+        env["PYTHONPATH"] = str(runtime["pythonpath"])
+    else:
+        values = [str(_path(args.repo)), str(_path(args.teta_source_root))]
+        if env.get("PYTHONPATH"):
+            values.append(env["PYTHONPATH"])
+        env["PYTHONPATH"] = os.pathsep.join(values)
     return env
 
 
@@ -1306,7 +2355,13 @@ def _evaluation_command(args: argparse.Namespace, preflight: Mapping[str, Any], 
     return command, evaluation_root, summary
 
 
-def _parse_summary(args: argparse.Namespace, summary: Path, annotation: Path) -> dict[str, Any]:
+def _parse_summary(
+    args: argparse.Namespace,
+    summary: Path,
+    annotation: Path,
+    *,
+    preflight: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     code = r'''
 import hashlib
 import json
@@ -1327,7 +2382,7 @@ summary = Path(sys.argv[1])
 annotation = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 print(json.dumps(parse_teta_summary(summary, category_protocol=Protocol(annotation.get("categories", [])))))
 '''
-    env = _evaluation_env(args)
+    env = _evaluation_env(args, preflight)
     result = subprocess.run(
         [str(args.evaluator_python), "-c", code, str(summary), str(annotation)],
         cwd=str(_path(args.repo)),
@@ -1365,7 +2420,12 @@ def _finalize_evaluation(
         _append_event(state, "evaluation_failed", trial_id=trial["trial_id"], error=trial["error"])
         _write_json(candidate_root / "receipt.json", dict(trial))
         return
-    metrics = _parse_summary(args, summary, _path(preflight["full_test_annotation"]["path"]))
+    metrics = _parse_summary(
+        args,
+        summary,
+        _path(preflight["full_test_annotation"]["path"]),
+        preflight=preflight,
+    )
     evaluation.update(
         {
             "status": "PASS",
@@ -1417,7 +2477,7 @@ def _start_evaluation(
     process = subprocess.Popen(
         command,
         cwd=str(_path(args.repo)),
-        env=_evaluation_env(args),
+        env=_evaluation_env(args, preflight),
         stdout=log,
         stderr=subprocess.STDOUT,
         text=True,
@@ -1578,6 +2638,43 @@ def _score_distribution(trial: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _validate_score_off_trial(
+    *, root: Path, state: dict[str, Any], trial: dict[str, Any]
+) -> bool:
+    threshold = float(trial["score_threshold"])
+    distribution = _score_distribution(trial)
+    observed = float(distribution["winner_score_min"])
+    passed = observed > threshold
+    trial["score_off_validation"] = {
+        "status": "PASS" if passed else "SCORE_OFF_NOT_ACTUALLY_OFF",
+        "score_threshold": threshold,
+        "observed_full_test_winner_score_min": observed,
+        "strictly_above_threshold": passed,
+        "distribution": distribution,
+    }
+    receipt_path = _candidate_receipt_path(root, str(trial["trial_id"]))
+    if receipt_path.is_file():
+        receipt = _read_json(receipt_path)
+        receipt["score_off_validation"] = trial["score_off_validation"]
+        _write_json(receipt_path, receipt)
+    _append_event(
+        state,
+        "score_off_validated",
+        trial_id=trial["trial_id"],
+        status=trial["score_off_validation"]["status"],
+        observed_winner_score_min=observed,
+        score_threshold=threshold,
+    )
+    return passed
+
+
+def _lower_score_off_sentinel(trial: Mapping[str, Any]) -> float:
+    observed = float(trial["score_off_validation"]["observed_full_test_winner_score_min"])
+    current = float(trial["score_threshold"])
+    anchor = min(observed, current)
+    return anchor - max(1e-6, abs(anchor) * 1e-6)
+
+
 def _add_plan_trial(root: Path, state: dict[str, Any], trial: Mapping[str, Any], *, reason: str) -> dict[str, Any]:
     trial_id = str(trial["trial_id"])
     existing = _trial(state, trial_id)
@@ -1616,6 +2713,52 @@ def _capacity_allows(state: Mapping[str, Any]) -> bool:
     return remaining > 1.3 * median + FINAL_RESERVE_SECONDS
 
 
+def _local_axis_evidence(
+    completed: list[Mapping[str, Any]], winner: Mapping[str, Any], axis: str
+) -> dict[str, Any]:
+    other = "margin_threshold" if axis == "score_threshold" else "score_threshold"
+    winner_value = float(winner[axis])
+    winner_other = float(winner[other])
+    peers: list[dict[str, Any]] = []
+    for item in completed:
+        try:
+            if not math.isclose(float(item[other]), winner_other, rel_tol=0.0, abs_tol=1e-12):
+                continue
+            value = float(item[axis])
+            if math.isclose(value, winner_value, rel_tol=0.0, abs_tol=1e-12):
+                continue
+            teta = _metric(item, "overall", "TETA")
+            if not math.isfinite(teta):
+                continue
+            distance = abs(value - winner_value)
+            peers.append(
+                {
+                    "trial_id": item.get("trial_id"),
+                    "value": value,
+                    "distance": distance,
+                    "teta": teta,
+                    "delta_teta": teta - _metric(winner, "overall", "TETA"),
+                    "slope_abs": abs(teta - _metric(winner, "overall", "TETA")) / max(distance, 1e-12),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    peers.sort(key=lambda item: (float(item["distance"]), str(item["trial_id"])))
+    best_improvement = max((max(float(item["delta_teta"]), 0.0) for item in peers), default=0.0)
+    max_abs_delta = max((abs(float(item["delta_teta"])) for item in peers), default=0.0)
+    best_slope = max((float(item["slope_abs"]) for item in peers), default=0.0)
+    return {
+        "axis": axis,
+        "available": bool(peers),
+        "peer_count": len(peers),
+        "best_improvement": best_improvement,
+        "max_abs_delta": max_abs_delta,
+        "best_slope_abs": best_slope,
+        "nearest_peer": None if not peers else peers[0],
+        "peers": peers,
+    }
+
+
 def _local_trial(state: Mapping[str, Any], completed: list[Mapping[str, Any]]) -> dict[str, Any] | None:
     if not completed:
         return None
@@ -1624,36 +2767,68 @@ def _local_trial(state: Mapping[str, Any], completed: list[Mapping[str, Any]]) -
         return None
     winner_score = float(winner["score_threshold"])
     winner_margin = float(winner["margin_threshold"])
-    score_values = sorted({float(item["score_threshold"]) for item in completed})
-    margin_values = sorted({float(item["margin_threshold"]) for item in completed})
-    if len(score_values) >= 2:
-        neighbour = min((value for value in score_values if value != winner_score), key=lambda value: abs(value - winner_score))
-        value = (winner_score + neighbour) / 2.0
-        if not math.isclose(value, winner_score, abs_tol=1e-12):
-            return {
-                "trial_id": "FT_LOCAL",
-                "wave": "LOCAL",
-                "score_threshold": value,
-                "margin_threshold": winner_margin,
-            }
-    if len(margin_values) >= 2:
-        neighbour = min((value for value in margin_values if value != winner_margin), key=lambda value: abs(value - winner_margin))
-        value = (winner_margin + neighbour) / 2.0
-        if not math.isclose(value, winner_margin, abs_tol=1e-12):
-            return {
-                "trial_id": "FT_LOCAL",
-                "wave": "LOCAL",
-                "score_threshold": winner_score,
-                "margin_threshold": value,
-            }
-    return None
+    evidence = {
+        "score_threshold": _local_axis_evidence(completed, winner, "score_threshold"),
+        "margin_threshold": _local_axis_evidence(completed, winner, "margin_threshold"),
+    }
+    available = [item for item in evidence.values() if item["available"]]
+    if not available:
+        return None
+    # Prefer an axis with observed upward TETA potential.  If the current
+    # champion is already best on both axes, use the stronger local response
+    # (normalized by parameter distance) as the refinement signal.  The final
+    # margin tie-break makes the choice deterministic without hard-coding
+    # score as the preferred dimension.
+    selected = max(
+        available,
+        key=lambda item: (
+            float(item["best_improvement"]),
+            float(item["best_slope_abs"]),
+            float(item["max_abs_delta"]),
+            1 if item["axis"] == "margin_threshold" else 0,
+        ),
+    )
+    peer = selected["nearest_peer"]
+    if peer is None:
+        return None
+    if selected["axis"] == "score_threshold":
+        value = (winner_score + float(peer["value"])) / 2.0
+        if math.isclose(value, winner_score, rel_tol=0.0, abs_tol=1e-12):
+            return None
+        return {
+            "trial_id": "FT_LOCAL",
+            "wave": "LOCAL",
+            "score_threshold": value,
+            "margin_threshold": winner_margin,
+            "local_axis": "score_threshold",
+            "local_axis_evidence": evidence,
+        }
+    value = (winner_margin + float(peer["value"])) / 2.0
+    if math.isclose(value, winner_margin, rel_tol=0.0, abs_tol=1e-12):
+        return None
+    return {
+        "trial_id": "FT_LOCAL",
+        "wave": "LOCAL",
+        "score_threshold": winner_score,
+        "margin_threshold": value,
+        "local_axis": "margin_threshold",
+        "local_axis_evidence": evidence,
+    }
 
 
-def _baseline_from_summary(args: argparse.Namespace, name: str, path: Path, annotation: Path, scope: str) -> dict[str, Any]:
+def _baseline_from_summary(
+    args: argparse.Namespace,
+    name: str,
+    path: Path,
+    annotation: Path,
+    scope: str,
+    *,
+    preflight: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     if not path.is_file():
         return {"name": name, "status": "MISSING", "path": str(path), "scope": scope}
     try:
-        metrics = _parse_summary(args, path, annotation)
+        metrics = _parse_summary(args, path, annotation, preflight=preflight)
         return {"name": name, "status": "PASS", "path": str(path), "scope": scope, "metrics": metrics}
     except Exception as exc:
         return {"name": name, "status": "INVALID", "path": str(path), "scope": scope, "error": str(exc)}
@@ -1668,6 +2843,7 @@ def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) ->
             _path(args.cov_native_summary),
             annotation,
             "FULL_TEST",
+            preflight=preflight,
         ),
         _baseline_from_summary(
             args,
@@ -1675,6 +2851,7 @@ def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) ->
             _path(args.q1_op00_summary),
             annotation,
             "FULL_TEST" if Path(args.q1_op00_summary).is_file() else "UNKNOWN",
+            preflight=preflight,
         ),
     ]
     candidate_path = _path(args.q1_tuned_candidate)
@@ -1715,7 +2892,16 @@ def _baseline_catalog(args: argparse.Namespace, preflight: Mapping[str, Any]) ->
         except Exception as exc:
             rows.append({"name": "QDIC fast-screen artifacts", "status": "INVALID", "path": str(fast_metrics_path), "scope": "SUBSET", "error": str(exc)})
     if args.qdic_op00_summary:
-        rows.append(_baseline_from_summary(args, "QDIC OP00 full", _path(args.qdic_op00_summary), annotation, "FULL_TEST"))
+        rows.append(
+            _baseline_from_summary(
+                args,
+                "QDIC OP00 full",
+                _path(args.qdic_op00_summary),
+                annotation,
+                "FULL_TEST",
+                preflight=preflight,
+            )
+        )
     return rows
 
 
@@ -1750,6 +2936,12 @@ def _full_results(args: argparse.Namespace, state: Mapping[str, Any], preflight:
         "status": state.get("status"),
         "labels": ["TEST_TUNED_MODEL_SPECIFIC", "NOT_UNBIASED_TEST"],
         "objective": "maximize Overall TETA with Novel TETA, Overall AssocA, Novel AssocA tie-breaks within 0.05",
+        "runtime_smoke": {
+            "path": str(_path(args.root) / "runtime_smoke.json"),
+            "status": _read_json(_path(args.root) / "runtime_smoke.json").get("status")
+            if (_path(args.root) / "runtime_smoke.json").is_file()
+            else "MISSING",
+        },
         "search": {
             "first_full_trial_start_unix": start,
             "first_full_trial_start_iso": None if start is None else _now_iso(float(start)),
@@ -1766,6 +2958,7 @@ def _full_results(args: argparse.Namespace, state: Mapping[str, Any], preflight:
             "qdic_checkpoint": preflight["qdic"],
             "cov": preflight["cov"],
             "teta": preflight["teta"],
+            "runtime_environment": preflight["runtime_environment"],
         },
         "candidates": [dict(item) for item in state["trials"]],
         "champion": None if champion is None else {"trial_id": champion.get("trial_id"), "spec": {"score_threshold": champion.get("score_threshold"), "margin_threshold": champion.get("margin_threshold")}, "metrics": champion.get("metrics"), "receipt": champion.get("receipt")},
@@ -1815,6 +3008,11 @@ def _write_report(root: Path, results: Mapping[str, Any]) -> None:
         f"- Wall hours: `{search.get('wall_hours')}`",
         f"- GPU hours: `{search.get('gpu_hours')}`",
         f"- Deadline: `{search.get('deadline_hours')}` hours",
+        "",
+        "## Runtime gates",
+        "",
+        f"- ACTUAL_RUNTIME_SMOKE: `{results.get('runtime_smoke', {}).get('status')}`",
+        f"- Runtime smoke artifact: `{results.get('runtime_smoke', {}).get('path')}`",
         "",
         "## Full-Test candidates",
         "",
@@ -1937,16 +3135,22 @@ def _run_wave(
     preflight: Mapping[str, Any],
     trial_ids: list[str],
     jobs: dict[str, subprocess.Popen[Any]],
-) -> bool:
+) -> str:
     for trial_id in trial_ids:
         trial = _trial(state, trial_id)
         if trial is None:
             continue
         _poll_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
+        if any(
+            item.get("status") == "EVALUATION_FAILED"
+            for item in state["trials"]
+            if str(item.get("trial_id")) in trial_ids
+        ):
+            return "FAILED"
         if trial.get("status") == "COMPLETED":
             continue
         if len([item for item in state["trials"] if item.get("status") not in {"SKIPPED_CAPACITY", "FAILED", "EVALUATION_FAILED"} and item.get("full_started_at_unix")]) >= int(args.max_candidates):
-            trial["status"] = "SKIPPED_CAPACITY"
+            trial["status"] = "SKIPPED_MAX_CANDIDATES"
             trial["skip_reason"] = "max_full_candidates"
             continue
         if not _capacity_allows(state):
@@ -1954,13 +3158,13 @@ def _run_wave(
             trial["skip_reason"] = "remaining <= 1.3*median_full_duration + 2h"
             _append_event(state, "search_stopped_capacity", next_trial=trial_id)
             _write_progress(args, state, preflight)
-            return False
+            return "CAPACITY"
         _maybe_wait_for_next_trial_resources(args, state)
         ok = _execute_trial(args=args, state=state, preflight=preflight, trial=trial, jobs=jobs)
         if not ok:
             _append_event(state, "candidate_failed", trial_id=trial_id)
             _write_progress(args, state, preflight)
-            return False
+            return "FAILED"
         _write_progress(args, state, preflight)
         # Do not let CPU evaluation jobs accumulate if available RAM drops.
         while jobs and _mem_available_gib() < float(args.min_eval_mem_gib):
@@ -1971,84 +3175,261 @@ def _run_wave(
                     flush=True,
                 )
                 time.sleep(15)
-    return True
+    return "OK"
+
+
+def _failed_trials(state: Mapping[str, Any]) -> list[str]:
+    return [
+        str(item.get("trial_id"))
+        for item in state.get("trials", [])
+        if item.get("status") in {"FAILED", "EVALUATION_FAILED"}
+    ]
+
+
+def _raise_if_failed(state: Mapping[str, Any], *, phase: str) -> None:
+    failed = _failed_trials(state)
+    if failed:
+        raise RuntimeError(f"{phase} required candidate failure: {','.join(failed)}")
 
 
 def _controller(args: argparse.Namespace) -> int:
     root = _path(args.root)
     repo = _path(args.repo)
     root.mkdir(parents=True, exist_ok=True)
-    preflight = _preflight(args, root, repo)
     state_path = root / "search_state.json"
-    if state_path.is_file() and args.resume:
+    if state_path.is_file():
+        if not args.resume:
+            raise FileExistsError(f"search state exists; pass --resume to continue: {state_path}")
+        preflight = _validate_existing_preflight(args=args, root=root, repo=repo)
         state = _read_json(state_path)
-        if state.get("repo_head") != preflight["repository"]["head"]:
-            raise RuntimeError("resume repository HEAD differs from preflight; refusing mixed-code run")
-    elif state_path.is_file() and not args.resume:
-        raise FileExistsError(f"search state exists; pass --resume to continue: {state_path}")
+        if not isinstance(state, dict):
+            raise RuntimeError("search state must be a mapping")
+        _validate_resume_state(args=args, root=root, state=state, preflight=preflight)
     else:
+        if args.resume:
+            raise FileNotFoundError(f"resume state is missing: {state_path}")
+        preflight = _preflight(args, root, repo)
         state = _new_state(args, root, preflight)
         _write_state(root, state)
+
+    _require_runtime_smoke(root, preflight)
+    state["runtime_smoke_status"] = "PASS"
+    if state.get("status") in {"COMPLETED", "COMPLETED_BOUNDED_CAPACITY"}:
+        _write_progress(args, state, preflight)
+        return 0
+    if state.get("status") == "FAILED":
+        raise RuntimeError("cannot resume a FAILED search without a new preparation")
     _recover_evaluations(args=args, state=state, preflight=preflight)
+    _raise_if_failed(state, phase="resume")
     _write_progress(args, state, preflight)
+    # The 20-hour clock is deliberately after both static preflight and the
+    # actual smoke gate, and after the all-GPU resource gate.
     _ensure_search_start(args, state, preflight)
     jobs: dict[str, subprocess.Popen[Any]] = {}
     _recover_evaluations(args=args, state=state, preflight=preflight)
-    margin_ids = [str(item["trial_id"]) for item in _read_json(root / "search_plan.json")["trials"] if item.get("wave") == "M"]
+    _raise_if_failed(state, phase="startup")
+    margin_ids = [
+        str(item["trial_id"])
+        for item in _read_json(root / "search_plan.json")["trials"]
+        if item.get("wave") == "M"
+    ]
     state["phase"] = "WAVE_M"
     _write_state(root, state)
-    _run_wave(args=args, state=state, preflight=preflight, trial_ids=margin_ids, jobs=jobs)
+    margin_result = _run_wave(
+        args=args, state=state, preflight=preflight, trial_ids=margin_ids, jobs=jobs
+    )
     _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
+    _raise_if_failed(state, phase="Wave M")
     _write_progress(args, state, preflight)
-    completed_m = [item for item in state["trials"] if item.get("wave") == "M" and item.get("status") == "COMPLETED"]
-    if len(completed_m) == len(margin_ids):
+    capacity_stopped = margin_result == "CAPACITY"
+    if margin_result == "FAILED":
+        raise RuntimeError("Wave M failed")
+    completed_m = [
+        item
+        for item in state["trials"]
+        if item.get("wave") == "M" and item.get("status") == "COMPLETED"
+    ]
+    if not capacity_stopped:
+        if len(completed_m) != len(margin_ids):
+            raise RuntimeError(
+                f"Wave M incomplete: {len(completed_m)}/{len(margin_ids)} candidates completed"
+            )
         margin_champion = _select_champion(completed_m)
-        if margin_champion is not None:
-            distribution = _score_distribution(margin_champion)
-            state["wave_m_champion"] = {
-                "trial_id": margin_champion["trial_id"],
-                "metrics": margin_champion.get("metrics"),
-                "score_distribution": distribution,
-            }
-            margin = float(margin_champion["margin_threshold"])
-            score_off = float(distribution["winner_score_min"] - max(1e-6, abs(distribution["winner_score_min"]) * 1e-6))
-            q = distribution["winner_score_quantiles"]
-            score_specs = [
-                {"trial_id": "FT_SCORE_OFF", "wave": "S", "score_threshold": score_off, "margin_threshold": margin},
-                {"trial_id": "FT_SCORE_P03", "wave": "S", "score_threshold": float(q["p03"]), "margin_threshold": margin},
-            ]
-            if int(args.max_candidates) >= 8:
-                score_specs.append({"trial_id": "FT_SCORE_P05", "wave": "S", "score_threshold": float(q["p05"]), "margin_threshold": margin})
-            for spec in score_specs:
-                _add_plan_trial(root, state, spec, reason="derived from full-Test QDIC winner score distribution after Wave M")
-            plan = _read_json(root / "search_plan.json")
-            state["search_plan_sha256"] = _sha256(root / "search_plan.json")
-            state["phase"] = "WAVE_S"
-            _write_progress(args, state, preflight)
-            score_ids = [str(item["trial_id"]) for item in score_specs]
-            _run_wave(args=args, state=state, preflight=preflight, trial_ids=score_ids, jobs=jobs)
-            _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
-            _write_progress(args, state, preflight)
-            all_tuned = [item for item in state["trials"] if item.get("status") == "COMPLETED"]
-            if len(all_tuned) < int(args.max_candidates) and _capacity_allows(state):
-                local = _local_trial(state, all_tuned)
-                if local is not None:
-                    _add_plan_trial(root, state, local, reason="one adaptive midpoint local refinement")
-                    state["phase"] = "LOCAL"
-                    _write_progress(args, state, preflight)
-                    _run_wave(args=args, state=state, preflight=preflight, trial_ids=["FT_LOCAL"], jobs=jobs)
-                    _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
-            all_tuned = [item for item in state["trials"] if item.get("status") == "COMPLETED"]
-            if len(all_tuned) < int(args.max_candidates) and _capacity_allows(state) and args.include_op00:
-                _add_plan_trial(root, state, {"trial_id": "FT_OP00", "wave": "OP00", "score_threshold": 0.0, "margin_threshold": 0.0}, reason="full-Test QDIC OP00 baseline missing; run only if capacity remains")
-                state["phase"] = "OP00"
+        if margin_champion is None:
+            raise RuntimeError("Wave M produced no valid champion")
+        distribution = _score_distribution(margin_champion)
+        state["wave_m_champion"] = {
+            "trial_id": margin_champion["trial_id"],
+            "metrics": margin_champion.get("metrics"),
+            "score_distribution": distribution,
+        }
+        margin = float(margin_champion["margin_threshold"])
+        score_off = float(
+            distribution["winner_score_min"]
+            - max(1e-6, abs(distribution["winner_score_min"]) * 1e-6)
+        )
+        q = distribution["winner_score_quantiles"]
+        score_specs = [
+            {
+                "trial_id": "FT_SCORE_OFF",
+                "wave": "S",
+                "score_threshold": score_off,
+                "margin_threshold": margin,
+            },
+            {
+                "trial_id": "FT_SCORE_P03",
+                "wave": "S",
+                "score_threshold": float(q["p03"]),
+                "margin_threshold": margin,
+            },
+        ]
+        if int(args.max_candidates) >= 8:
+            score_specs.append(
+                {
+                    "trial_id": "FT_SCORE_P05",
+                    "wave": "S",
+                    "score_threshold": float(q["p05"]),
+                    "margin_threshold": margin,
+                }
+            )
+        for spec in score_specs:
+            _add_plan_trial(
+                root,
+                state,
+                spec,
+                reason="derived from full-Test QDIC winner score distribution after Wave M",
+            )
+        state["phase"] = "WAVE_S"
+        _write_progress(args, state, preflight)
+        score_ids = [str(item["trial_id"]) for item in score_specs]
+        # Preserve a dynamically-added OFF2 trial across a controller restart.
+        score_ids.extend(
+            str(item["trial_id"])
+            for item in state["trials"]
+            if item.get("wave") == "S" and str(item.get("trial_id")) not in score_ids
+        )
+        score_result = _run_wave(
+            args=args, state=state, preflight=preflight, trial_ids=score_ids, jobs=jobs
+        )
+        _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
+        _raise_if_failed(state, phase="Wave S")
+        if score_result == "FAILED":
+            raise RuntimeError("Wave S failed")
+        if score_result == "CAPACITY":
+            capacity_stopped = True
+        _write_progress(args, state, preflight)
+
+        score_off_trial = _trial(state, "FT_SCORE_OFF")
+        if score_off_trial is not None and score_off_trial.get("status") == "COMPLETED":
+            if "score_off_validation" not in score_off_trial:
+                _validate_score_off_trial(root=root, state=state, trial=score_off_trial)
                 _write_progress(args, state, preflight)
-                _run_wave(args=args, state=state, preflight=preflight, trial_ids=["FT_OP00"], jobs=jobs)
+            if (
+                score_off_trial.get("score_off_validation", {}).get("status")
+                == "SCORE_OFF_NOT_ACTUALLY_OFF"
+                and not capacity_stopped
+                and len(
+                    [item for item in state["trials"] if item.get("full_started_at_unix")]
+                )
+                < int(args.max_candidates)
+                and _capacity_allows(state)
+            ):
+                off2 = {
+                    "trial_id": "FT_SCORE_OFF2",
+                    "wave": "S",
+                    "score_threshold": _lower_score_off_sentinel(score_off_trial),
+                    "margin_threshold": margin,
+                }
+                _add_plan_trial(
+                    root,
+                    state,
+                    off2,
+                    reason="FT_SCORE_OFF was not strictly below the observed causal full-Test winner-score minimum",
+                )
+                state["phase"] = "WAVE_S_OFF2"
+                _write_progress(args, state, preflight)
+                off2_result = _run_wave(
+                    args=args,
+                    state=state,
+                    preflight=preflight,
+                    trial_ids=["FT_SCORE_OFF2"],
+                    jobs=jobs,
+                )
                 _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
-    else:
-        _append_event(state, "wave_m_incomplete", completed=len(completed_m), expected=len(margin_ids))
+                _raise_if_failed(state, phase="Wave S OFF2")
+                if off2_result == "FAILED":
+                    raise RuntimeError("Wave S OFF2 failed")
+                if off2_result == "CAPACITY":
+                    capacity_stopped = True
+                off2_trial = _trial(state, "FT_SCORE_OFF2")
+                if off2_trial is not None and off2_trial.get("status") == "COMPLETED":
+                    _validate_score_off_trial(root=root, state=state, trial=off2_trial)
+                _write_progress(args, state, preflight)
+
+        all_tuned = [item for item in state["trials"] if item.get("status") == "COMPLETED"]
+        if (
+            not capacity_stopped
+            and len([item for item in state["trials"] if item.get("full_started_at_unix")])
+            < int(args.max_candidates)
+            and _capacity_allows(state)
+        ):
+            local = _local_trial(state, all_tuned)
+            if local is not None:
+                _add_plan_trial(root, state, local, reason="one adaptive midpoint local refinement")
+                state["phase"] = "LOCAL"
+                _write_progress(args, state, preflight)
+                local_result = _run_wave(
+                    args=args,
+                    state=state,
+                    preflight=preflight,
+                    trial_ids=["FT_LOCAL"],
+                    jobs=jobs,
+                )
+                _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
+                _raise_if_failed(state, phase="local refinement")
+                if local_result == "FAILED":
+                    raise RuntimeError("local refinement failed")
+                if local_result == "CAPACITY":
+                    capacity_stopped = True
+        all_tuned = [item for item in state["trials"] if item.get("status") == "COMPLETED"]
+        if (
+            not capacity_stopped
+            and len([item for item in state["trials"] if item.get("full_started_at_unix")])
+            < int(args.max_candidates)
+            and _capacity_allows(state)
+            and args.include_op00
+        ):
+            _add_plan_trial(
+                root,
+                state,
+                {
+                    "trial_id": "FT_OP00",
+                    "wave": "OP00",
+                    "score_threshold": 0.0,
+                    "margin_threshold": 0.0,
+                },
+                reason="full-Test QDIC OP00 baseline missing; run only if capacity remains",
+            )
+            state["phase"] = "OP00"
+            _write_progress(args, state, preflight)
+            op00_result = _run_wave(
+                args=args,
+                state=state,
+                preflight=preflight,
+                trial_ids=["FT_OP00"],
+                jobs=jobs,
+            )
+            _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
+            _raise_if_failed(state, phase="OP00")
+            if op00_result == "FAILED":
+                raise RuntimeError("OP00 failed")
+            if op00_result == "CAPACITY":
+                capacity_stopped = True
     _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
-    state["status"] = "COMPLETED"
+    _raise_if_failed(state, phase="final aggregation")
+    state["status"] = (
+        "COMPLETED_BOUNDED_CAPACITY" if capacity_stopped else "COMPLETED"
+    )
     state["phase"] = "AGGREGATE"
     state["search_end_unix"] = time.time()
     full_duration = sum(
@@ -2057,9 +3438,17 @@ def _controller(args: argparse.Namespace) -> int:
         if item.get("status") == "COMPLETED"
     )
     state["gpu_hours"] = full_duration * len(state["selected_gpus"]) / 3600.0
-    _append_event(state, "search_completed", completed=sum(item.get("status") == "COMPLETED" for item in state["trials"]))
+    _append_event(
+        state,
+        "search_completed",
+        status=state["status"],
+        completed=sum(item.get("status") == "COMPLETED" for item in state["trials"]),
+    )
     _write_progress(args, state, preflight)
-    print(f"V11_FULL_TEST_SEARCH_COMPLETED root={root}", flush=True)
+    if capacity_stopped:
+        print(f"V11_FULL_TEST_SEARCH_COMPLETED_BOUNDED_CAPACITY root={root}", flush=True)
+    else:
+        print(f"V11_FULL_TEST_SEARCH_COMPLETED root={root}", flush=True)
     return 0
 
 
@@ -2070,6 +3459,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gpus", default="0,1,2,3,4,5,6,7,8,9")
     parser.add_argument("--hours", type=float, default=20.0)
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--runtime-smoke-only", action="store_true")
+    parser.add_argument(
+        "--reinitialize",
+        action="store_true",
+        help="archive a previous never-started preparation before creating fresh artifacts",
+    )
     parser.add_argument("--wait-for-gpus", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--annotation", default=str(DEFAULT_ANNOTATION))
@@ -2082,6 +3477,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--qdic-fast-root", default=str(DEFAULT_QDIC_FAST_ROOT))
     parser.add_argument("--qdic-checkpoint")
     parser.add_argument("--teta-source-root", default=str(DEFAULT_TETA_SOURCE_ROOT))
+    parser.add_argument("--v10-runtime-receipt", default=str(DEFAULT_V10_RUNTIME_RECEIPT))
+    parser.add_argument("--v10-runtime-env-capture")
+    parser.add_argument("--smoke-gpu", default="0")
+    parser.add_argument("--smoke-videos", type=int, default=3)
     parser.add_argument("--stream-python", default=DEFAULT_STREAM_PYTHON)
     parser.add_argument("--evaluator-python", default=DEFAULT_EVALUATOR_PYTHON)
     parser.add_argument("--worker-python", default=sys.executable)
@@ -2111,16 +3510,53 @@ def main() -> int:
     args.root = str(_path(args.root))
     args.repo = str(_path(args.repo))
     _parse_gpu_ids(args.gpus)
-    if args.hours <= 0 or args.max_candidates < 1:
-        raise ValueError("--hours and --max-candidates must be positive")
+    if args.hours <= 0 or args.max_candidates < 5:
+        raise ValueError("--hours must be positive and --max-candidates must include the five initial trials")
+    if not str(args.smoke_gpu).isdigit():
+        raise ValueError("--smoke-gpu must be a physical GPU ID")
+    if args.smoke_videos not in {2, 3}:
+        raise ValueError("--smoke-videos must be 2 or 3")
+    if args.preflight_only and args.runtime_smoke_only:
+        raise ValueError("--preflight-only and --runtime-smoke-only are mutually exclusive")
     if args.preflight_only:
         root = _path(args.root)
         root.mkdir(parents=True, exist_ok=True)
+        if args.reinitialize:
+            archive = _archive_pre_run_artifacts(root)
+            if archive is not None:
+                print(f"PREPARATION_ARCHIVED: {archive}", flush=True)
+        elif any((root / name).exists() for name in ("preflight.json", "search_plan.json", "search_state.json")):
+            if args.resume:
+                preflight = _validate_existing_preflight(args=args, root=root, repo=_path(args.repo))
+                state_path = root / "search_state.json"
+                if state_path.is_file():
+                    state = _read_json(state_path)
+                    _validate_resume_state(args=args, root=root, state=state, preflight=preflight)
+                print("RESUME_PROVENANCE_PASS", flush=True)
+                return 0
+            raise FileExistsError(
+                f"preparation artifacts already exist; use --resume to validate or --reinitialize before start: {root}"
+            )
         preflight = _preflight(args, root, _path(args.repo))
         state_path = root / "search_state.json"
-        if not state_path.is_file():
-            _write_json(root / "search_state.json", _new_state(args, root, preflight))
+        _write_json(root / "search_state.json", _new_state(args, root, preflight))
         return 0
+    if args.runtime_smoke_only:
+        root = _path(args.root)
+        try:
+            preflight = _validate_existing_preflight(args=args, root=root, repo=_path(args.repo))
+            state_path = root / "search_state.json"
+            if not state_path.is_file():
+                raise FileNotFoundError(f"runtime smoke requires search state: {state_path}")
+            state = _read_json(state_path)
+            _validate_resume_state(args=args, root=root, state=state, preflight=preflight)
+            passed = _run_runtime_smoke(args=args, root=root, preflight=preflight)
+            state["runtime_smoke_status"] = "PASS" if passed else "FAILED"
+            _write_state(root, state)
+            return 0 if passed else 1
+        except Exception as exc:
+            print(f"ACTUAL_RUNTIME_SMOKE: FAILED {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            return 1
     try:
         return _controller(args)
     except Exception as exc:

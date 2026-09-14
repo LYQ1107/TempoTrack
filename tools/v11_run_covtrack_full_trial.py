@@ -77,20 +77,6 @@ def _resource_snapshot(gpu: str) -> dict[str, Any]:
     return result
 
 
-def _pythonpath(repo: Path, source: Path, teta_source_root: Path | None) -> str:
-    values = [
-        str(repo),
-        str(source),
-        "/data1/usr_for_deadline/LLM/scalabel-scalabel-evalAPI",
-    ]
-    if teta_source_root is not None:
-        values.insert(0, str(teta_source_root))
-    old = os.environ.get("PYTHONPATH")
-    if old:
-        values.append(old)
-    return os.pathsep.join(values)
-
-
 def _stream_command(
     *,
     args: argparse.Namespace,
@@ -131,6 +117,21 @@ def _runtime_env(
     source: Path,
     shard_dir: Path,
 ) -> dict[str, str]:
+    if not args.ld_preload:
+        raise RuntimeError("V10/V11 runtime parity is missing --ld-preload")
+    if not args.runtime_pythonpath:
+        raise RuntimeError("V10/V11 runtime parity is missing --runtime-pythonpath")
+    if not args.scalabel_root:
+        raise RuntimeError("V10/V11 runtime parity is missing --scalabel-root")
+    scalabel_root = Path(args.scalabel_root).resolve()
+    if not scalabel_root.is_dir():
+        raise FileNotFoundError(f"audited Scalabel root does not exist: {scalabel_root}")
+    pythonpath_entries = [item for item in str(args.runtime_pythonpath).split(os.pathsep) if item]
+    if str(scalabel_root) not in {str(Path(item).resolve()) for item in pythonpath_entries}:
+        raise RuntimeError(
+            "audited Scalabel root is not present in --runtime-pythonpath: "
+            f"{scalabel_root}"
+        )
     env = os.environ.copy()
     # A worker must never inherit a cache root from the shell that launched
     # the controller.  Full-Test candidates are direct frontend executions.
@@ -143,6 +144,7 @@ def _runtime_env(
     env.update(
         {
             "CUDA_VISIBLE_DEVICES": str(args.gpu),
+            "LD_PRELOAD": str(args.ld_preload),
             "OMP_NUM_THREADS": "1",
             "MKL_NUM_THREADS": "1",
             "OPENBLAS_NUM_THREADS": "1",
@@ -155,13 +157,7 @@ def _runtime_env(
             "V10_COV_TEMPO_CONFIG": str(Path(args.tempo_config).resolve()),
             "V10_COV_TEMPO_DIAGNOSTICS": str(shard_dir / "diagnostics.json"),
             "V10_TAO_FRAMES_ROOT": str(Path(args.img_prefix).resolve()),
-            "PYTHONPATH": _pythonpath(
-                repo,
-                source,
-                None
-                if not args.teta_source_root
-                else Path(args.teta_source_root).resolve(),
-            ),
+            "PYTHONPATH": str(args.runtime_pythonpath),
         }
     )
     return env
@@ -277,6 +273,7 @@ def run(args: argparse.Namespace) -> int:
         "inputs": {
             "annotation": str(annotation),
             "annotation_sha256": _sha256(annotation),
+            "img_prefix": str(Path(args.img_prefix).resolve()),
             "tempo_config": str(tempo_config),
             "tempo_config_sha256": _sha256(tempo_config),
             "external_config": str(Path(args.external_config).resolve()),
@@ -293,6 +290,20 @@ def run(args: argparse.Namespace) -> int:
             "runtime_sha256": _sha256(
                 repo / "tempotrack_v10" / "covtrack_runtime.py"
             ),
+        },
+        "runtime_environment": {
+            "ld_preload": str(args.ld_preload),
+            "ld_preload_exists": Path(str(args.ld_preload)).is_file(),
+            "stream_python": str(Path(args.stream_python).resolve()),
+            "stream_python_exists": Path(args.stream_python).is_file(),
+            "pythonpath": str(args.runtime_pythonpath),
+            "pythonpath_entries": [
+                item for item in str(args.runtime_pythonpath).split(os.pathsep) if item
+            ],
+            "scalabel_root": str(Path(args.scalabel_root).resolve()),
+            "scalabel_root_exists": Path(args.scalabel_root).is_dir(),
+            "reference_receipt": args.runtime_reference_receipt,
+            "reference_stream_script": args.runtime_reference_stream_script,
         },
         "started_at_unix": started,
         "resources_start": _resource_snapshot(str(args.gpu)),
@@ -343,6 +354,11 @@ def run(args: argparse.Namespace) -> int:
             raise RuntimeError(
                 "stream frame count mismatch: "
                 f"{stream_manifest.get('frames')} != {args.expected_frames}"
+            )
+        if int(stream_manifest.get("videos", -1)) != int(args.expected_videos):
+            raise RuntimeError(
+                "stream video count mismatch: "
+                f"{stream_manifest.get('videos')} != {args.expected_videos}"
             )
         diagnostics = _validate_runtime_contract(
             shard_dir / "diagnostics.json",
@@ -431,6 +447,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--teta-source-root", default="/data2/usr_for_deadline/tet_a62a9c0_clean/teta"
     )
+    parser.add_argument("--ld-preload")
+    parser.add_argument("--runtime-pythonpath")
+    parser.add_argument("--scalabel-root")
+    parser.add_argument("--runtime-reference-receipt")
+    parser.add_argument("--runtime-reference-stream-script")
     return parser
 
 

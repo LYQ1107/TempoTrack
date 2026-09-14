@@ -236,6 +236,7 @@ def streaming_single_gpu_test(model: Any, data_loader: Any, show: bool = False,
     manifest = {
         "status": "PASS",
         "frames": len(dataset),
+        "videos": len({int(info["video_id"]) for info in dataset.data_infos}),
         "part": str(part_path),
         "prediction": str(root / "tao_track.json"),
         "transport": "official_single_gpu_test_stream",
