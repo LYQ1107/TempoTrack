@@ -124,6 +124,19 @@ def _git_status(path: Path, *, include_untracked: bool = True) -> str:
     return _git_value(path, *arguments) or ""
 
 
+def _git_source_status(path: Path) -> str:
+    """Ignore tracked interpreter bytecode churn, but not source changes."""
+
+    dirty = _git_status(path, include_untracked=False)
+    kept: list[str] = []
+    for line in dirty.splitlines():
+        changed_path = line[3:].strip().split(" -> ", 1)[-1]
+        if "__pycache__/" in changed_path or changed_path.endswith(".pyc"):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def _now_iso(unix: float | None = None) -> str:
     from datetime import datetime, timezone
 
@@ -624,8 +637,9 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
     shards = _validate_shards(full_annotation=annotation, shard_manifest=shard_manifest, full=full)
     if not cov_source.is_dir() or _git_value(cov_source, "rev-parse", "HEAD") != EXPECTED_COV_COMMIT:
         raise RuntimeError("COV_PROVENANCE commit mismatch")
-    if _git_status(cov_source, include_untracked=False) != "":
-        raise RuntimeError("COV_PROVENANCE tracked source is dirty")
+    cov_source_status = _git_source_status(cov_source)
+    if cov_source_status != "":
+        raise RuntimeError("COV_PROVENANCE tracked source is dirty: " + cov_source_status)
     if not cov_config.is_file() or _sha256(cov_config) != EXPECTED_COV_CONFIG_SHA256:
         raise RuntimeError("COV_PROVENANCE external config hash mismatch")
     if not cov_checkpoint.is_file() or _sha256(cov_checkpoint) != EXPECTED_COV_CHECKPOINT_SHA256:
@@ -688,6 +702,7 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
             "config_sha256": _sha256(cov_config),
             "checkpoint": str(cov_checkpoint),
             "checkpoint_sha256": _sha256(cov_checkpoint),
+            "tracked_source_status": cov_source_status or "BYTECODE_ONLY_OR_CLEAN",
         },
         "teta": {
             "status": "PASS",
