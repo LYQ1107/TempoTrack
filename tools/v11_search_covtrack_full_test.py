@@ -117,6 +117,11 @@ def _git_value(path: Path, *arguments: str) -> str | None:
         return None
 
 
+def _git_branch(path: Path) -> str | None:
+    # The server's older Git does not implement ``branch --show-current``.
+    return _git_value(path, "symbolic-ref", "--short", "HEAD")
+
+
 def _git_status(path: Path, *, include_untracked: bool = True) -> str:
     arguments = ["status", "--porcelain"]
     if not include_untracked:
@@ -655,7 +660,7 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
     )
     qdic_provenance = _qdic_preflight(args.stream_python, repo, qdic_checkpoint)
     teta_provenance = _teta_preflight(args.evaluator_python, repo, teta_root)
-    current_branch = _git_value(repo, "branch", "--show-current")
+    current_branch = _git_branch(repo)
     current_head = _git_value(repo, "rev-parse", "HEAD")
     if _git_status(repo, include_untracked=True) != "":
         raise RuntimeError("V11 repository must be clean before Full-Test run")

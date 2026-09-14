@@ -51,6 +51,11 @@ def _git_value(path: Path, *arguments: str) -> str | None:
         return None
 
 
+def _git_branch(path: Path) -> str | None:
+    # The server's older Git does not implement ``branch --show-current``.
+    return _git_value(path, "symbolic-ref", "--short", "HEAD")
+
+
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -262,7 +267,7 @@ def run(args: argparse.Namespace) -> int:
         },
         "repo": {
             "path": str(repo),
-            "branch": _git_value(repo, "branch", "--show-current"),
+            "branch": _git_branch(repo),
             "head": _git_value(repo, "rev-parse", "HEAD"),
         },
         "external_source": {
