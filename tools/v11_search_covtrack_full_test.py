@@ -206,8 +206,8 @@ def _command_value(command: list[Any], prefix: str) -> str | None:
     return None
 
 
-def _resolved_pythonpath_entries(value: str) -> list[str]:
-    return [str(_path(item)) for item in str(value).split(os.pathsep) if item]
+def _resolved_pythonpath_entries(value: str) -> list[Path]:
+    return [_path(item) for item in str(value).split(os.pathsep) if item]
 
 
 def _runtime_identity(runtime: Mapping[str, Any]) -> dict[str, Any]:
