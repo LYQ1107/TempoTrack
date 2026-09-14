@@ -186,9 +186,28 @@ def parse_metrics(repo: Path, annotation: Path, summary: Path) -> dict[str, Any]
 def recover_candidate(args: argparse.Namespace, candidate_id: str) -> dict[str, Any]:
     original_root = args.root / "full" / candidate_id
     candidate_file = original_root / "candidate.json"
-    if not candidate_file.is_file():
-        raise RuntimeError(f"CANDIDATE_METADATA_MISSING:{candidate_file}")
-    candidate_data = read_json(candidate_file)
+    if candidate_file.is_file():
+        candidate_data = read_json(candidate_file)
+    else:
+        # The live controller can be safely stopped between candidates.  In
+        # that case the next candidate has a durable spec in the controller
+        # state but no output directory yet.  Construct only recovery-local
+        # metadata from that immutable spec; never create or alter the
+        # controller's original candidate directory.
+        state_path = args.root / "20h_search_state.json"
+        state = read_json(state_path) if state_path.is_file() else {}
+        candidates = state.get("new_full_candidates", []) if isinstance(state, Mapping) else []
+        spec = next(
+            (dict(item) for item in candidates if isinstance(item, Mapping) and str(item.get("trial_id")) == candidate_id),
+            None,
+        )
+        if spec is None:
+            raise RuntimeError(f"CANDIDATE_METADATA_MISSING:{candidate_file}")
+        candidate_data = {
+            "spec": spec,
+            "manifest": str(args.root / "manifests/test/manifest.json"),
+            "parent_annotation": str(args.full_annotation),
+        }
     spec = candidate_data.get("spec") or candidate_data.get("candidate", {}).get("spec")
     if not isinstance(spec, Mapping):
         raise RuntimeError(f"CANDIDATE_SPEC_MISSING:{candidate_file}")
