@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping
+import copy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import math
@@ -1397,6 +1399,7 @@ def _new_state(args: argparse.Namespace, root: Path, preflight: Mapping[str, Any
         "final_reserve_seconds": FINAL_RESERVE_SECONDS,
         "selected_gpus": _parse_gpu_ids(args.gpus),
         "resource_policy": _resource_policy(args),
+        "candidate_parallelism": int(args.candidate_parallelism),
         "runtime_smoke_path": str(root / "runtime_smoke.json"),
         "runtime_smoke_status": "PENDING",
         "first_full_trial_start_unix": None,
@@ -1682,6 +1685,7 @@ def _run_candidate(
     preflight: Mapping[str, Any],
     trial: dict[str, Any],
     root: Path,
+    persist_state: bool = True,
 ) -> bool:
     candidate_root = _candidate_root(root, str(trial["trial_id"]))
     candidate_root.mkdir(parents=True, exist_ok=True)
@@ -1721,7 +1725,8 @@ def _run_candidate(
     trial["status"] = "RUNNING_FULL_TEST"
     trial["candidate_root"] = str(candidate_root)
     trial["config"] = str(config_path)
-    _write_state(root, state)
+    if persist_state:
+        _write_state(root, state)
     full_started = float(trial.get("full_started_at_unix", time.time()))
     trial["full_started_at_unix"] = full_started
     shards = preflight["shards"]["items"]
@@ -1789,7 +1794,8 @@ def _run_candidate(
             flush=True,
         )
     _update_candidate_receipt(candidate_root, candidate_receipt)
-    _write_state(root, state)
+    if persist_state:
+        _write_state(root, state)
     # At most one process is attached to each selected GPU.  Failed workers
     # are retried in new directories; successful shards are never overwritten.
     while active:
@@ -1895,7 +1901,8 @@ def _run_candidate(
             _update_candidate_receipt(candidate_root, candidate_receipt)
             trial.update(candidate_receipt)
             trial["status"] = "FAILED"
-            _write_state(root, state)
+            if persist_state:
+                _write_state(root, state)
             return False
         directory, receipt = complete
         _validate_completed_shard_receipt(
@@ -1961,7 +1968,8 @@ def _run_candidate(
             _update_candidate_receipt(candidate_root, candidate_receipt)
             trial.update(candidate_receipt)
             trial["status"] = "FAILED"
-            _write_state(root, state)
+            if persist_state:
+                _write_state(root, state)
             return False
         trial["merge_seconds"] = time.time() - started
     merge_manifest = _read_json(merge_manifest_path)
@@ -1995,7 +2003,8 @@ def _run_candidate(
     _update_candidate_receipt(candidate_root, candidate_receipt)
     trial.update(candidate_receipt)
     trial["status"] = "FULL_TEST_READY"
-    _write_state(root, state)
+    if persist_state:
+        _write_state(root, state)
     print(
         f"{trial['trial_id']}: full Test ready images={trial['merged']['images']} "
         f"rows={trial['merged']['rows']} duration={trial['full_duration_seconds'] / 3600:.2f}h",
@@ -3302,6 +3311,87 @@ def _execute_trial(
     return True
 
 
+def _execute_trials_parallel(
+    *,
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    preflight: Mapping[str, Any],
+    trials: list[dict[str, Any]],
+    jobs: dict[str, subprocess.Popen[Any]],
+) -> bool:
+    """Run a small batch of complete candidates concurrently.
+
+    Each candidate owns its output directory and launches one worker per
+    shard.  The candidate batches are therefore deliberately overlapping on
+    the selected GPUs; this mode is only reachable with the explicit
+    ``--allow-gpu-overlap`` gate.  Candidate-local state copies prevent worker
+    threads from racing on the shared search state file; the controller merges
+    each completed candidate back into the authoritative state before starting
+    its official evaluator.
+    """
+
+    if not trials:
+        return True
+    if not args.allow_gpu_overlap:
+        raise RuntimeError("candidate parallelism requires --allow-gpu-overlap")
+
+    for trial in trials:
+        trial["status"] = "RUNNING_FULL_TEST"
+        trial.setdefault("full_started_at_unix", time.time())
+    _write_progress(args, state, preflight)
+
+    def run_one(template: dict[str, Any]) -> tuple[str, bool, dict[str, Any], str | None]:
+        local_state = copy.deepcopy(state)
+        local_trial = _trial(local_state, str(template["trial_id"]))
+        if local_trial is None:
+            return str(template["trial_id"]), False, dict(template), "trial disappeared from local state"
+        try:
+            ok = _run_candidate(
+                args=args,
+                state=local_state,
+                preflight=preflight,
+                trial=local_trial,
+                root=_path(args.root),
+                persist_state=False,
+            )
+            return str(template["trial_id"]), bool(ok), local_trial, None
+        except Exception as exc:
+            return (
+                str(template["trial_id"]),
+                False,
+                local_trial,
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    with ThreadPoolExecutor(max_workers=len(trials), thread_name_prefix="v11-candidate") as pool:
+        futures = [pool.submit(run_one, trial) for trial in trials]
+        for future in as_completed(futures):
+            trial_id, ok, local_trial, error = future.result()
+            shared_trial = _trial(state, trial_id)
+            if shared_trial is None:
+                continue
+            shared_trial.clear()
+            shared_trial.update(local_trial)
+            if not ok:
+                shared_trial["status"] = "FAILED"
+                if error:
+                    shared_trial["error"] = error
+                _append_event(state, "candidate_failed", trial_id=trial_id, error=shared_trial.get("error"))
+                _write_progress(args, state, preflight)
+                return False
+            if shared_trial.get("status") == "FULL_TEST_READY":
+                process = _start_evaluation(
+                    args=args,
+                    state=state,
+                    preflight=preflight,
+                    trial=shared_trial,
+                )
+                if process is not None:
+                    jobs[trial_id] = process
+            _write_progress(args, state, preflight)
+    return True
+
+
 def _ensure_search_start(args: argparse.Namespace, state: dict[str, Any], preflight: Mapping[str, Any]) -> None:
     if state.get("first_full_trial_start_unix") is not None:
         return
@@ -3322,6 +3412,79 @@ def _maybe_wait_for_next_trial_resources(args: argparse.Namespace, state: Mappin
     _resource_gate(args, list(state["selected_gpus"]), purpose="next_full_candidate")
 
 
+def _run_wave_parallel(
+    *,
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    preflight: Mapping[str, Any],
+    trial_ids: list[str],
+    jobs: dict[str, subprocess.Popen[Any]],
+) -> str:
+    """Run a wave in bounded candidate-sized batches with GPU overlap."""
+
+    batch: list[dict[str, Any]] = []
+    parallelism = int(args.candidate_parallelism)
+
+    def flush() -> str:
+        nonlocal batch
+        if not batch:
+            return "OK"
+        _maybe_wait_for_next_trial_resources(args, state)
+        ok = _execute_trials_parallel(
+            args=args,
+            state=state,
+            preflight=preflight,
+            trials=batch,
+            jobs=jobs,
+        )
+        batch = []
+        if not ok:
+            return "FAILED"
+        _wait_for_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
+        return "FAILED" if any(
+            item.get("status") == "EVALUATION_FAILED" for item in state["trials"]
+        ) else "OK"
+
+    for trial_id in trial_ids:
+        trial = _trial(state, trial_id)
+        if trial is None:
+            continue
+        _poll_evaluations(args=args, state=state, preflight=preflight, jobs=jobs)
+        if trial.get("status") == "COMPLETED":
+            continue
+        if any(
+            item.get("status") == "EVALUATION_FAILED"
+            for item in state["trials"]
+            if str(item.get("trial_id")) in trial_ids
+        ):
+            return "FAILED"
+        if len(
+            [
+                item
+                for item in state["trials"]
+                if item.get("status")
+                not in {"SKIPPED_CAPACITY", "FAILED", "EVALUATION_FAILED"}
+                and item.get("full_started_at_unix")
+            ]
+        ) >= int(args.max_candidates):
+            trial["status"] = "SKIPPED_MAX_CANDIDATES"
+            trial["skip_reason"] = "max_full_candidates"
+            continue
+        if not _capacity_allows(state):
+            trial["status"] = "SKIPPED_CAPACITY"
+            trial["skip_reason"] = "remaining <= 1.3*median_full_duration + 2h"
+            _append_event(state, "search_stopped_capacity", next_trial=trial_id)
+            _write_progress(args, state, preflight)
+            return "CAPACITY"
+        batch.append(trial)
+        if len(batch) >= parallelism:
+            result = flush()
+            if result != "OK":
+                return result
+
+    return flush()
+
+
 def _run_wave(
     *,
     args: argparse.Namespace,
@@ -3330,6 +3493,14 @@ def _run_wave(
     trial_ids: list[str],
     jobs: dict[str, subprocess.Popen[Any]],
 ) -> str:
+    if int(args.candidate_parallelism) > 1:
+        return _run_wave_parallel(
+            args=args,
+            state=state,
+            preflight=preflight,
+            trial_ids=trial_ids,
+            jobs=jobs,
+        )
     for trial_id in trial_ids:
         trial = _trial(state, trial_id)
         if trial is None:
@@ -3408,6 +3579,7 @@ def _controller(args: argparse.Namespace) -> int:
 
     _require_runtime_smoke(root, preflight)
     state["runtime_smoke_status"] = "PASS"
+    state["candidate_parallelism"] = int(args.candidate_parallelism)
     if state.get("status") in {"COMPLETED", "COMPLETED_BOUNDED_CAPACITY"}:
         _write_progress(args, state, preflight)
         return 0
@@ -3686,6 +3858,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluator-cores", type=int, default=32)
     parser.add_argument("--min-eval-mem-gib", type=float, default=24.0)
     parser.add_argument("--max-candidates", type=int, default=9)
+    parser.add_argument(
+        "--candidate-parallelism",
+        type=int,
+        default=1,
+        help="number of complete candidates to run concurrently; requires --allow-gpu-overlap",
+    )
     parser.add_argument("--include-op00", action="store_true")
     parser.add_argument("--qdic-op00-summary")
     parser.add_argument("--qdic-fast-metrics", default=str(DEFAULT_QDIC_FAST_ROOT / "round3_metrics.json"))
@@ -3711,6 +3889,8 @@ def main() -> int:
     _parse_gpu_ids(args.gpus)
     if args.hours <= 0 or args.max_candidates < 5:
         raise ValueError("--hours must be positive and --max-candidates must include the five initial trials")
+    if args.candidate_parallelism < 1:
+        raise ValueError("--candidate-parallelism must be positive")
     if not str(args.smoke_gpu).isdigit():
         raise ValueError("--smoke-gpu must be a physical GPU ID")
     if args.smoke_videos not in {2, 3}:
@@ -3719,6 +3899,8 @@ def main() -> int:
         raise ValueError("--preflight-only and --runtime-smoke-only are mutually exclusive")
     if args.wait_for_gpus and args.allow_gpu_overlap:
         raise ValueError("--wait-for-gpus and --allow-gpu-overlap are mutually exclusive")
+    if args.candidate_parallelism > 1 and not args.allow_gpu_overlap:
+        raise ValueError("--candidate-parallelism > 1 requires --allow-gpu-overlap")
     if args.preflight_only:
         root = _path(args.root)
         root.mkdir(parents=True, exist_ok=True)
