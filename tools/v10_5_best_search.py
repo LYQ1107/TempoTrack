@@ -398,6 +398,33 @@ def metrics(row):
     return {"base": value.get("base", {}), "novel": value.get("novel", {}), "overall": value.get("overall", {})}
 
 
+def unresolved_job_statuses(state):
+    """Return unresolved requested jobs, collapsing superseded retry attempts.
+
+    A resumed run intentionally keeps the original attempt receipts.  An old
+    STOPPED_DEADLINE/FAILED/NOT_LAUNCHED record must not make the whole DAG
+    partial when a retry for the same requested trial completed successfully.
+    The requested trial is complete iff at least one of its attempts has a
+    COMPLETED receipt; otherwise retain the non-terminal statuses as evidence.
+    """
+    unresolved = []
+    for group, records in state.get("jobs", {}).items():
+        by_requested = {}
+        for key, record in records.items():
+            if not isinstance(record, Mapping):
+                continue
+            requested = str(record.get("requested") or record.get("spec", {}).get("trial_id") or key)
+            by_requested.setdefault(requested, []).append(record)
+        for requested, attempts in by_requested.items():
+            statuses = {record.get("status") for record in attempts}
+            if "COMPLETED" in statuses:
+                continue
+            outstanding = sorted(str(status) for status in statuses if status not in (None, "COMPLETED"))
+            if outstanding:
+                unresolved.append(f"{group}:{requested}:{'|'.join(outstanding)}")
+    return unresolved
+
+
 def ranked(rows):
     return sorted(rows, key=lambda row: (-float(metrics(row)["overall"].get("TETA", -math.inf)), -float(metrics(row)["novel"].get("TETA", -math.inf)), -float(metrics(row)["novel"].get("AssocA", -math.inf)), spec_key(row["spec"])))
 
@@ -751,8 +778,7 @@ def main():
                     break
                 full_rows.append(full_candidate(args, state, {"source": "stage_c_candidate", "spec": x, "metrics": {}}, manifest, cplan, full_deadline, global_deadline))
 
-    job_statuses = [record.get("status") for group in state.get("jobs", {}).values() for record in group.values()]
-    incomplete_jobs = [status for status in job_statuses if status not in (None, "COMPLETED")]
+    incomplete_jobs = unresolved_job_statuses(state)
     incomplete_full = [row.get("status") for row in full_rows if row.get("status") != "PASS"]
     final_status = "COMPLETED" if not incomplete_jobs and not incomplete_full else "PARTIAL_FAILURE_OR_DEADLINE"
     state.update({"status": final_status, "finished_at": iso(), "heartbeat": iso(), "incomplete_jobs": incomplete_jobs, "incomplete_full": incomplete_full})
