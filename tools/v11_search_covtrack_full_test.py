@@ -625,6 +625,57 @@ def _wait_for_gpus(gpus: list[str], *, poll_seconds: int = 30) -> dict[str, Any]
         time.sleep(poll_seconds)
 
 
+def _resource_policy(args: argparse.Namespace) -> str:
+    if bool(getattr(args, "allow_gpu_overlap", False)):
+        return "ALLOW_GPU_OVERLAP"
+    if bool(getattr(args, "wait_for_gpus", False)):
+        return "WAIT_FOR_IDLE"
+    return "REQUIRE_IDLE"
+
+
+def _resource_gate(
+    args: argparse.Namespace, gpus: list[str], *, purpose: str
+) -> dict[str, Any]:
+    """Take the audited resource snapshot for a search phase.
+
+    ALLOW_GPU_OVERLAP is explicit because it intentionally permits V11 workers
+    to share physical GPUs with pre-existing jobs.  The snapshot remains in
+    the receipts/state so the choice is auditable; it is not a claim that the
+    GPUs were idle.
+    """
+
+    policy = _resource_policy(args)
+    if policy == "ALLOW_GPU_OVERLAP":
+        snapshot = _gpu_snapshot(gpus)
+        snapshot["policy"] = policy
+        snapshot["overlap_allowed"] = True
+        print(
+            f"RESOURCE_GATE: OVERLAP_ALLOWED purpose={purpose} "
+            f"selected GPUs={','.join(gpus)} "
+            f"existing_compute_apps={len(snapshot.get('selected_compute_apps', []))}",
+            flush=True,
+        )
+        return snapshot
+    if policy == "WAIT_FOR_IDLE":
+        snapshot = _wait_for_gpus(gpus)
+        snapshot["policy"] = policy
+        snapshot["overlap_allowed"] = False
+        return snapshot
+    ready, snapshot = _gpus_ready(gpus)
+    snapshot["policy"] = policy
+    snapshot["overlap_allowed"] = False
+    if not ready:
+        raise RuntimeError(
+            f"RESOURCE_GATE_FAILED: selected GPUs are busy for {purpose}; "
+            "use --wait-for-gpus or --allow-gpu-overlap"
+        )
+    print(
+        f"RESOURCE_GATE: PASS purpose={purpose} selected GPUs={','.join(gpus)}",
+        flush=True,
+    )
+    return snapshot
+
+
 def _mem_available_gib() -> float:
     try:
         values: dict[str, int] = {}
@@ -1117,7 +1168,12 @@ def _preflight(args: argparse.Namespace, root: Path, repo: Path) -> dict[str, An
         },
         "resource_gate": {
             "selected_gpus": _parse_gpu_ids(args.gpus),
-            "status": "WAITING" if args.wait_for_gpus else "CHECK_ON_START",
+            "policy": _resource_policy(args),
+            "status": (
+                "OVERLAP_ALLOWED"
+                if _resource_policy(args) == "ALLOW_GPU_OVERLAP"
+                else ("WAITING" if args.wait_for_gpus else "CHECK_ON_START")
+            ),
         },
         "created_at_unix": time.time(),
     }
@@ -1214,6 +1270,13 @@ def _validate_existing_preflight(
         raise RuntimeError("RESUME_PROVENANCE_FAIL: V11 base config changed")
     if _path(str(preflight.get("base_config", {}).get("path", ""))) != base_config:
         raise RuntimeError("RESUME_PROVENANCE_FAIL: V11 base config path changed")
+    expected_resource_policy = _resource_policy(args)
+    recorded_resource_policy = preflight.get("resource_gate", {}).get("policy")
+    if recorded_resource_policy != expected_resource_policy:
+        raise RuntimeError(
+            "RESUME_PROVENANCE_FAIL: resource policy changed "
+            f"({recorded_resource_policy!r} != {expected_resource_policy!r})"
+        )
     _validate_base_config(base_config)
     runtime_environment = _validate_runtime_environment(args=args, repo=repo, preflight=preflight)
     qdic_checkpoint, _binding = _resolve_qdic_checkpoint(
@@ -1273,6 +1336,9 @@ def _validate_resume_state(
         raise RuntimeError("RESUME_PROVENANCE_FAIL: state repository branch mismatch")
     if list(state.get("selected_gpus", [])) != _parse_gpu_ids(args.gpus):
         raise RuntimeError("RESUME_PROVENANCE_FAIL: selected GPU set changed")
+    expected_resource_policy = _resource_policy(args)
+    if state.get("resource_policy") != expected_resource_policy:
+        raise RuntimeError("RESUME_PROVENANCE_FAIL: resource policy changed")
     plan = _read_json(root / "search_plan.json")
     state_ids = {str(item.get("trial_id")) for item in state.get("trials", [])}
     derived_ids = {
@@ -1330,6 +1396,7 @@ def _new_state(args: argparse.Namespace, root: Path, preflight: Mapping[str, Any
         "deadline_hours": float(args.hours),
         "final_reserve_seconds": FINAL_RESERVE_SECONDS,
         "selected_gpus": _parse_gpu_ids(args.gpus),
+        "resource_policy": _resource_policy(args),
         "runtime_smoke_path": str(root / "runtime_smoke.json"),
         "runtime_smoke_status": "PENDING",
         "first_full_trial_start_unix": None,
@@ -1577,6 +1644,7 @@ def _candidate_receipt_base(
             "fixed_runtime": _read_json(_path(args.root) / "search_plan.json")["fixed_runtime"],
         },
         "runtime_environment": dict(preflight["runtime_environment"]),
+        "resource_policy": _resource_policy(args),
         "repository": {
             "path": str(_path(args.repo)),
             "branch": str(preflight["repository"]["branch"]),
@@ -2124,12 +2192,9 @@ def _run_runtime_smoke(
     _write_json(root / "runtime_smoke.json", record)
     try:
         smoke_gpu = str(args.smoke_gpu)
-        if args.wait_for_gpus:
-            resource_snapshot = _wait_for_gpus([smoke_gpu])
-        else:
-            ready, resource_snapshot = _gpus_ready([smoke_gpu])
-            if not ready:
-                raise RuntimeError("ACTUAL_RUNTIME_SMOKE_RESOURCE_GATE_FAILED: smoke GPU is busy")
+        resource_snapshot = _resource_gate(
+            args, [smoke_gpu], purpose="runtime_smoke"
+        )
         record["resource_gate"] = resource_snapshot
         shard = {
             "index": 0,
@@ -2952,6 +3017,7 @@ def _full_results(args: argparse.Namespace, state: Mapping[str, Any], preflight:
             "wall_hours": None if start is None else (float(end) - float(start)) / 3600.0,
             "gpu_hours": float(state.get("gpu_hours", 0.0)),
             "deadline_hours": float(state.get("deadline_hours", args.hours)),
+            "resource_policy": state.get("resource_policy"),
         },
         "inputs": {
             "preflight": str(_path(args.root) / "preflight.json"),
@@ -3015,6 +3081,7 @@ def _write_report(root: Path, results: Mapping[str, Any]) -> None:
         "",
         f"- ACTUAL_RUNTIME_SMOKE: `{results.get('runtime_smoke', {}).get('status')}`",
         f"- Runtime smoke artifact: `{results.get('runtime_smoke', {}).get('path')}`",
+        f"- GPU resource policy: `{results.get('search', {}).get('resource_policy')}`",
         "",
         "## Full-Test candidates",
         "",
@@ -3104,12 +3171,7 @@ def _ensure_search_start(args: argparse.Namespace, state: dict[str, Any], prefli
     if state.get("first_full_trial_start_unix") is not None:
         return
     gpus = list(state["selected_gpus"])
-    if args.wait_for_gpus:
-        snapshot = _wait_for_gpus(gpus)
-    else:
-        ready, snapshot = _gpus_ready(gpus)
-        if not ready:
-            raise RuntimeError("RESOURCE_GATE_FAILED: selected GPUs are busy; use --wait-for-gpus")
+    snapshot = _resource_gate(args, gpus, purpose="search_start")
     start = time.time()
     state["first_full_trial_start_unix"] = start
     state["hard_deadline_unix"] = start + float(args.hours) * 3600.0
@@ -3122,12 +3184,7 @@ def _ensure_search_start(args: argparse.Namespace, state: dict[str, Any], prefli
 
 
 def _maybe_wait_for_next_trial_resources(args: argparse.Namespace, state: Mapping[str, Any]) -> None:
-    if args.wait_for_gpus:
-        _wait_for_gpus(list(state["selected_gpus"]))
-    else:
-        ready, _snapshot = _gpus_ready(list(state["selected_gpus"]))
-        if not ready:
-            raise RuntimeError("RESOURCE_GATE_FAILED before next full candidate")
+    _resource_gate(args, list(state["selected_gpus"]), purpose="next_full_candidate")
 
 
 def _run_wave(
@@ -3225,7 +3282,7 @@ def _controller(args: argparse.Namespace) -> int:
     _raise_if_failed(state, phase="resume")
     _write_progress(args, state, preflight)
     # The 20-hour clock is deliberately after both static preflight and the
-    # actual smoke gate, and after the all-GPU resource gate.
+    # actual smoke gate, and after the selected resource policy is recorded.
     _ensure_search_start(args, state, preflight)
     jobs: dict[str, subprocess.Popen[Any]] = {}
     _recover_evaluations(args=args, state=state, preflight=preflight)
@@ -3468,6 +3525,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="archive a previous never-started preparation before creating fresh artifacts",
     )
     parser.add_argument("--wait-for-gpus", action="store_true")
+    parser.add_argument(
+        "--allow-gpu-overlap",
+        action="store_true",
+        help="start immediately and allow V11 workers to share selected GPUs with existing processes",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--annotation", default=str(DEFAULT_ANNOTATION))
     parser.add_argument("--shard-manifest", default=str(DEFAULT_SHARD_MANIFEST))
@@ -3520,6 +3582,8 @@ def main() -> int:
         raise ValueError("--smoke-videos must be 2 or 3")
     if args.preflight_only and args.runtime_smoke_only:
         raise ValueError("--preflight-only and --runtime-smoke-only are mutually exclusive")
+    if args.wait_for_gpus and args.allow_gpu_overlap:
+        raise ValueError("--wait-for-gpus and --allow-gpu-overlap are mutually exclusive")
     if args.preflight_only:
         root = _path(args.root)
         root.mkdir(parents=True, exist_ok=True)
