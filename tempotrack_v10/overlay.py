@@ -11,6 +11,7 @@ reranker.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -294,6 +295,11 @@ class TempoTrackOverlay:
         self._reranker_native_memo_bootstrap_count = 0
         self._qdic_native_memo_bootstrap_count = 0
         self._last_qdic_diagnostics: dict[str, Any] = {}
+        self._last_reranker_event: dict[str, Any] = {}
+        self._last_qdic_event: dict[str, Any] = {}
+        self._replay_event_diagnostics = bool(
+            os.environ.get("V11_COV_REPLAY_EVENT_DIAGNOSTICS")
+        )
 
     @staticmethod
     def _video_key(video_id: int | str) -> str:
@@ -682,6 +688,7 @@ class TempoTrackOverlay:
         context_candidates: Sequence[tuple[float, _Candidate]],
         decision_candidates: Sequence[tuple[float, _Candidate]],
     ) -> tuple[np.ndarray | None, int]:
+        self._last_reranker_event = {}
         if self.config.reranker_weight <= 0.0:
             return None, 0
         if self._reranker is None:
@@ -708,6 +715,10 @@ class TempoTrackOverlay:
         if not payload:
             return None, missing
         logits, _ = self._reranker.score_event(payload)
+        self._last_reranker_event = {
+            "candidate_ids": tuple(candidate_ids),
+            "logits": np.asarray(logits, dtype=np.float32).reshape(-1),
+        }
         by_memory_id = {memory_id: float(logit) for memory_id, logit in zip(candidate_ids, logits)}
         aligned = np.full(len(decision_candidates), np.nan, dtype=np.float32)
         for index, (_, candidate) in enumerate(decision_candidates):
@@ -723,6 +734,7 @@ class TempoTrackOverlay:
         decision_candidates: Sequence[tuple[float, _Candidate]],
     ) -> tuple[np.ndarray | None, int, Mapping[str, Any]]:
         """Score the complete QDIC context and align it to decision Top-K."""
+        self._last_qdic_event = {}
         if self.config.qdic_weight <= 0.0:
             return None, 0, {}
         if self._qdic is None:
@@ -777,6 +789,11 @@ class TempoTrackOverlay:
         if len(logits) != len(payload) or not np.isfinite(logits).all():
             raise FloatingPointError("QDIC returned non-finite or misaligned logits")
         details = scored[1] if len(scored) > 1 and isinstance(scored[1], Mapping) else {}
+        self._last_qdic_event = {
+            "candidate_ids": tuple(candidate_ids),
+            "logits": logits.copy(),
+            "details": dict(details),
+        }
         self._last_qdic_diagnostics = dict(details)
         by_memory_id = {memory_id: float(logit) for memory_id, logit in zip(candidate_ids, logits)}
         if len(payload) != len(context_candidates):
@@ -826,6 +843,7 @@ class TempoTrackOverlay:
         reranker_missing_total = 0
         qdic_missing_total = 0
         qdic_diagnostics: list[Mapping[str, Any]] = []
+        replay_events: list[dict[str, Any]] = []
         for observation_index in range(count):
             # Validate the checkpoint's query protocol before candidate
             # filtering. A Q>1 checkpoint must fail closed even when this
@@ -881,6 +899,116 @@ class TempoTrackOverlay:
                 snapshot, observation_index, context, selected
             )
             reranker_missing_total += missing
+            if self._replay_event_diagnostics and context:
+                reranker_by_id = {
+                    int(memory_id): float(logit)
+                    for memory_id, logit in zip(
+                        self._last_reranker_event.get("candidate_ids", ()),
+                        self._last_reranker_event.get("logits", ()),
+                    )
+                }
+                qdic_by_id = {
+                    int(memory_id): float(logit)
+                    for memory_id, logit in zip(
+                        self._last_qdic_event.get("candidate_ids", ()),
+                        self._last_qdic_event.get("logits", ()),
+                    )
+                }
+                qdic_details = self._last_qdic_event.get("details", {})
+                context_ids = [int(candidate.memory_id) for _, candidate in context]
+                active_by_id = qdic_by_id if self.config.qdic_weight > 0.0 else reranker_by_id
+                logit_order = sorted(
+                    (
+                        (float(active_by_id[memory_id]), memory_id)
+                        for memory_id in context_ids
+                        if memory_id in active_by_id and np.isfinite(active_by_id[memory_id])
+                    ),
+                    key=lambda item: (-item[0], item[1]),
+                )
+                logit_rank = {memory_id: rank for rank, (_, memory_id) in enumerate(logit_order, 1)}
+                decision_rank = {
+                    int(candidate.memory_id): rank
+                    for rank, (_, candidate) in enumerate(selected, 1)
+                }
+                context_index = {
+                    int(memory_id): index
+                    for index, memory_id in enumerate(self._last_qdic_event.get("candidate_ids", ()))
+                }
+
+                def detail_value(name: str, memory_id: int) -> float | None:
+                    index = context_index.get(memory_id)
+                    if index is None:
+                        return None
+                    value = qdic_details.get(name)
+                    if value is None:
+                        return None
+                    array = np.asarray(value, dtype=np.float32).reshape(-1)
+                    if index >= len(array) or not np.isfinite(array[index]):
+                        return None
+                    return float(array[index])
+
+                event = {
+                    "video_id": snapshot.video_id,
+                    "frame_id": int(snapshot.frame_id),
+                    "image_id": snapshot.metadata.get("image_id"),
+                    "observation_index": int(observation_index),
+                    "observation_uid": str(snapshot.observation_uids[observation_index]),
+                    "observation_box_xyxy": [
+                        float(value) for value in snapshot.boxes_xyxy[observation_index]
+                    ],
+                    "observation_score": float(snapshot.det_scores[observation_index]),
+                    "observation_label": int(snapshot.labels[observation_index]),
+                    "candidate_memory_ids": context_ids,
+                    "candidate_root_ids": [
+                        int(candidate.root_id) for _, candidate in context
+                    ],
+                    "candidate_is_native": [
+                        bool(candidate.is_native) for _, candidate in context
+                    ],
+                    "candidate_memory_indices": [
+                        None if candidate.memory_index is None else int(candidate.memory_index)
+                        for _, candidate in context
+                    ],
+                    "candidate_prefilter_scores": [float(value) for value, _ in context],
+                    "candidate_prefilter_ranks": list(range(1, len(context) + 1)),
+                    "candidate_logit_ranks": [
+                        logit_rank.get(memory_id) for memory_id in context_ids
+                    ],
+                    "candidate_decision_ranks": [
+                        decision_rank.get(memory_id) for memory_id in context_ids
+                    ],
+                    "candidate_gaps": [
+                        int(snapshot.frame_id - candidate.record.last_frame)
+                        for _, candidate in context
+                    ],
+                    "candidate_memory_lengths": [
+                        int(len(candidate.record.reranker_history))
+                        for _, candidate in context
+                    ],
+                    "q1_logits": [
+                        reranker_by_id.get(memory_id) for memory_id in context_ids
+                    ],
+                    "qdic_logits": [qdic_by_id.get(memory_id) for memory_id in context_ids],
+                    "qdic_alpha": [
+                        detail_value("alpha", memory_id) for memory_id in context_ids
+                    ],
+                    "qdic_structured_score": [
+                        detail_value("structured_score", memory_id) for memory_id in context_ids
+                    ],
+                    "qdic_fast_branch": [
+                        detail_value("fast_branch", memory_id) for memory_id in context_ids
+                    ],
+                    "qdic_slow_branch": [
+                        detail_value("slow_branch", memory_id) for memory_id in context_ids
+                    ],
+                    "qdic_variance_penalty": [
+                        detail_value("variance_penalty", memory_id) for memory_id in context_ids
+                    ],
+                    "qdic_residual": [
+                        detail_value("residual", memory_id) for memory_id in context_ids
+                    ],
+                }
+                replay_events.append(event)
             for rank, (_, candidate) in enumerate(selected, start=1):
                 if self.config.reranker_weight > 0.0:
                     if logits is None or rank - 1 >= len(logits) or not np.isfinite(logits[rank - 1]):
@@ -945,6 +1073,21 @@ class TempoTrackOverlay:
                 accepted[index] = False
                 reasons[index] = "competition_loser"
                 competition_losers += 1
+
+        if replay_events:
+            event_by_index = {
+                int(event["observation_index"]): event for event in replay_events
+            }
+            for index, event in event_by_index.items():
+                score = float(scores[index])
+                margin = float(margins[index])
+                event["proposal_score"] = score if np.isfinite(score) else None
+                event["proposal_margin"] = margin if np.isfinite(margin) else None
+                event["proposal_accepted"] = bool(accepted[index])
+                event["proposal_reason"] = str(reasons[index])
+                event["proposal_assignment"] = (
+                    None if assignments[index] is None else int(assignments[index])
+                )
 
         native_count = sum(1 for candidate in candidates if candidate.is_native)
         proposal = OverlayProposal(
@@ -1016,6 +1159,8 @@ class TempoTrackOverlay:
                 ),
             },
         )
+        if replay_events:
+            proposal.diagnostics["replay_events"] = replay_events
         self._pending[(video, int(snapshot.frame_id))] = (observation_hash, proposal)
         return proposal
 

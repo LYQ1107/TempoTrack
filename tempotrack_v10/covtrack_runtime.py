@@ -27,11 +27,15 @@ from .adapters.covtrack import COVTrackTempoAdapter
 from .contract import SnapshotContractError
 from .cov_detection_export import export_masa_public_detection
 from .overlay import TempoTrackConfig
+from .replay_cache import FrontendReplayCacheWriter, sha256_file
 
 
 _DIAGNOSTIC_STATES: dict[str, dict[str, Any]] = {}
 _DIAGNOSTIC_REGISTERED = False
 _DIAGNOSTIC_RESERVOIR_SIZE = 200_000
+_REPLAY_CACHE_WRITERS: dict[str, FrontendReplayCacheWriter] = {}
+_REPLAY_CACHE_REGISTERED = False
+_EVENT_DIAGNOSTIC_HANDLES: dict[str, Any] = {}
 
 
 def _diagnostic_path() -> Path | None:
@@ -44,6 +48,90 @@ def _diagnostic_path() -> Path | None:
             "V10_COV_TEMPO_DIAGNOSTICS must be an absolute experiment path"
         )
     return path
+
+
+def _replay_cache_root() -> Path | None:
+    """Return the opt-in frontend-cache root, or ``None`` for normal runs."""
+
+    value = os.environ.get("V11_COV_REPLAY_CACHE_ROOT")
+    if not value:
+        return None
+    path = Path(value).expanduser().resolve()
+    if not path.is_absolute():
+        raise SnapshotContractError(
+            "V11_COV_REPLAY_CACHE_ROOT must be an absolute experiment path"
+        )
+    return path
+
+
+def _event_diagnostic_path() -> Path | None:
+    value = os.environ.get("V11_COV_REPLAY_EVENT_DIAGNOSTICS")
+    if not value:
+        return None
+    path = Path(value).expanduser().resolve()
+    if not path.is_absolute():
+        raise SnapshotContractError(
+            "V11_COV_REPLAY_EVENT_DIAGNOSTICS must be an absolute experiment path"
+        )
+    return path
+
+
+def _replay_cache_provenance() -> dict[str, Any]:
+    """Build cache provenance from audited environment values and source hashes."""
+
+    values: dict[str, Any] = {}
+    source_json = os.environ.get("V11_COV_REPLAY_PROVENANCE_JSON")
+    if source_json:
+        provenance_path = Path(source_json).expanduser().resolve()
+        if not provenance_path.is_file():
+            raise SnapshotContractError(
+                f"V11_COV_REPLAY_PROVENANCE_JSON does not exist: {provenance_path}"
+            )
+        try:
+            loaded = json.loads(provenance_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SnapshotContractError(
+                f"invalid replay cache provenance JSON: {provenance_path}"
+            ) from exc
+        if not isinstance(loaded, Mapping):
+            raise SnapshotContractError("replay cache provenance must be a mapping")
+        values.update(dict(loaded))
+    values.setdefault("repo_branch", os.environ.get("V11_COV_REPLAY_REPO_BRANCH"))
+    values.setdefault("repo_head", os.environ.get("V11_COV_REPLAY_REPO_HEAD"))
+    values.setdefault("external_cov_commit", os.environ.get("V11_COV_REPLAY_COV_COMMIT"))
+    values.setdefault("external_config_sha256", os.environ.get("V11_COV_REPLAY_COV_CONFIG_SHA256"))
+    values.setdefault("external_checkpoint_sha256", os.environ.get("V11_COV_REPLAY_COV_CHECKPOINT_SHA256"))
+    source_paths = (
+        Path(__file__).resolve(),
+        Path(__file__).with_name("replay_cache.py").resolve(),
+        Path(__file__).resolve().parents[1] / "tools" / "v10_ovtrack_test_tempo_stream.py",
+        Path(__file__).resolve().parents[1] / "tools" / "v10_covtrack_test_tempo_stream.py",
+    )
+    values.setdefault(
+        "instrumentation_source_hashes",
+        {
+            str(path): sha256_file(path)
+            for path in source_paths
+            if path.is_file()
+        },
+    )
+    return values
+
+
+def _replay_cache_writer() -> FrontendReplayCacheWriter | None:
+    global _REPLAY_CACHE_REGISTERED
+    root = _replay_cache_root()
+    if root is None:
+        return None
+    key = str(root)
+    writer = _REPLAY_CACHE_WRITERS.get(key)
+    if writer is None:
+        writer = FrontendReplayCacheWriter(root, provenance=_replay_cache_provenance())
+        _REPLAY_CACHE_WRITERS[key] = writer
+    if not _REPLAY_CACHE_REGISTERED:
+        atexit.register(_write_all_covtrack_replay_caches)
+        _REPLAY_CACHE_REGISTERED = True
+    return writer
 
 
 def _diagnostic_state(path: Path) -> dict[str, Any]:
@@ -127,6 +215,7 @@ def _reservoir_add(state: dict[str, Any], name: str, value: float) -> None:
 
 
 def _record_overlay_diagnostics(decision: Any) -> None:
+    _write_overlay_event_diagnostics(decision)
     path = _diagnostic_path()
     if path is None:
         return
@@ -211,6 +300,27 @@ def _record_overlay_diagnostics(decision: Any) -> None:
     for value, accepted in zip(proposal.scores, proposal.accepted):
         if accepted:
             _reservoir_add(state, "accepted_score", float(value))
+
+
+def _write_overlay_event_diagnostics(decision: Any) -> None:
+    """Write optional full candidate events without adding GT to inference."""
+
+    path = _event_diagnostic_path()
+    if path is None:
+        return
+    events = decision.proposal.diagnostics.get("replay_events", ())
+    if not isinstance(events, (list, tuple)):
+        raise SnapshotContractError("replay event diagnostics must be a sequence")
+    handle = _EVENT_DIAGNOSTIC_HANDLES.get(str(path))
+    if handle is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = path.open("a", encoding="utf-8")
+        _EVENT_DIAGNOSTIC_HANDLES[str(path)] = handle
+    for event in events:
+        if not isinstance(event, Mapping):
+            raise SnapshotContractError("replay event diagnostic must be a mapping")
+        handle.write(json.dumps(dict(event), ensure_ascii=False, separators=(",", ":")) + "\n")
+    handle.flush()
 
 
 def _quantiles(values: list[float]) -> dict[str, float] | None:
@@ -299,12 +409,36 @@ def _write_all_covtrack_diagnostics() -> None:
             pass
 
 
+def _write_all_covtrack_replay_caches() -> None:
+    for writer in list(_REPLAY_CACHE_WRITERS.values()):
+        try:
+            writer.finalize("PROCESS_EXIT")
+        except Exception:
+            # Cache finalization at interpreter exit must not mask an original
+            # detector exception.  A normal successful wrapper call flushes a
+            # COMPLETED manifest explicitly below.
+            pass
+    for handle in list(_EVENT_DIAGNOSTIC_HANDLES.values()):
+        try:
+            handle.flush()
+            handle.close()
+        except Exception:
+            pass
+
+
 def write_covtrack_diagnostics(status: str = "COMPLETED") -> None:
     """Flush the bounded real-overlay diagnostics for the current process."""
 
     path = _diagnostic_path()
     if path is not None:
         _write_covtrack_diagnostics(path, status=status)
+
+
+def write_covtrack_replay_cache(status: str = "COMPLETED") -> None:
+    """Flush opt-in frontend replay caches for the current process."""
+
+    for writer in list(_REPLAY_CACHE_WRITERS.values()):
+        writer.finalize(status)
 
 
 def _metadata_mapping(value: Any) -> Mapping[str, Any] | None:
@@ -406,6 +540,49 @@ def _maybe_export_cov_detections(
             f"for video={video_id!r}, frame={frame_id!r}"
         )
     export_masa_public_detection(root, str(filename), bboxes, labels)
+
+
+def _capture_frontend(
+    model: Any,
+    bboxes: Any,
+    labels: Any,
+    track_feats: Any,
+    cls_feats: Any,
+    frame_id: Any,
+    filename: Any,
+) -> None:
+    """Capture the exact non-state inputs immediately before ``tracker.match``.
+
+    This function is a strict no-op unless ``V11_COV_REPLAY_CACHE_ROOT`` is
+    set.  In particular, it does not call ``remove_distractor`` or any native
+    association method; the cache therefore cannot contain OP00-dependent
+    affinity or memo state.
+    """
+
+    writer = _replay_cache_writer()
+    if writer is None:
+        return
+    tracker = getattr(model, "tracker", None)
+    current_video = getattr(model, "_v10_dataset_video_id", None)
+    if current_video is None and tracker is not None:
+        current_video = getattr(tracker, "_v10_current_video_id", None)
+    if current_video is None:
+        raise SnapshotContractError("V11 frontend cache capture has no video_id")
+    image_id = getattr(model, "_v11_replay_cache_image_id", None)
+    category_ids = getattr(model, "_v11_replay_cache_category_ids", None)
+    if category_ids is not None:
+        writer.provenance.setdefault("category_ids", [int(value) for value in category_ids])
+    writer.capture(
+        video_id=int(current_video),
+        frame_id=int(frame_id),
+        image_id=None if image_id is None else int(image_id),
+        filename=str(filename),
+        method=str(getattr(model, "method", "ovtrack-teta")),
+        det_bboxes=bboxes,
+        det_labels=labels,
+        track_feats=track_feats,
+        cls_feats=cls_feats,
+    )
 
 
 def _capture_no_embed(
@@ -571,6 +748,7 @@ def _prepare(
         native_cls_embeds=cls_embeds,
         metadata={
             "filename": str(kwargs.get("filename", "")),
+            "image_id": getattr(tracker, "_v11_replay_cache_image_id", None),
             "frontend": "covtrack",
             "association_stage": "pre_association",
             "native_affinity_stage": "post_mcf_pre_id_commit",
@@ -635,6 +813,8 @@ __v10_cov_capture_no_embed(self, bboxes, labels, frame_id, kwargs)
 
 def _capture_no_track_features_statement() -> ast.stmt:
     source = """
+__v11_cov_capture_frontend(
+    self, det_bboxes, det_labels, track_feats, cem_feats, frame_id, img_name)
 __v10_cov_capture_no_track_features(
     self, det_bboxes, det_labels, frame_id, img_name)
 """
@@ -818,6 +998,7 @@ def _patch_model_simple_test(cls: Any) -> None:
             f"rewrites={injector.legacy_filename_rewrites}"
         )
     namespace = dict(original.__globals__)
+    namespace["__v11_cov_capture_frontend"] = _capture_frontend
     namespace["__v10_cov_capture_no_track_features"] = _capture_no_track_features
     local_namespace: dict[str, Any] = {}
     exec(
@@ -884,6 +1065,9 @@ def install_covtrack_runtime(config: TempoTrackConfig) -> Any:
             if tracker is not None and dataset_video is not None:
                 tracker._v10_dataset_video_id = int(dataset_video)
                 tracker._v10_current_video_id = int(dataset_video)
+                image_id = getattr(self, "_v11_replay_cache_image_id", None)
+                if image_id is not None:
+                    tracker._v11_replay_cache_image_id = int(image_id)
                 if not hasattr(tracker, "fusion_head"):
                     tracker.set_fusion_head(self.roi_head.fusion_head, self.roi_head.track_head.loss_cyc)
                 test_cfg = getattr(self, "test_cfg", None)
@@ -907,4 +1091,8 @@ def install_covtrack_runtime(config: TempoTrackConfig) -> Any:
     return OVTrackerUncertainty
 
 
-__all__ = ["install_covtrack_runtime", "write_covtrack_diagnostics"]
+__all__ = [
+    "install_covtrack_runtime",
+    "write_covtrack_diagnostics",
+    "write_covtrack_replay_cache",
+]
