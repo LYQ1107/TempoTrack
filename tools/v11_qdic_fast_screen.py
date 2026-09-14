@@ -6,6 +6,7 @@ import argparse
 from dataclasses import replace
 import json
 from pathlib import Path
+import subprocess
 from typing import Any, Iterable
 
 from tempotrack_v10.replay_cache import FrontendReplayCacheReader, sha256_file
@@ -48,6 +49,122 @@ def _video_key(value: int | str) -> str:
 
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _git_head(root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(f"cannot resolve git HEAD: {root}") from exc
+    value = result.stdout.strip()
+    if not value:
+        raise RuntimeError(f"git HEAD is empty: {root}")
+    return value
+
+
+def _runtime_fingerprint(
+    *,
+    repo_root: Path,
+    tempo_path: Path,
+    tempo: Any,
+    cov_source: Path,
+    cov_config: Path,
+    cov_checkpoint: Path,
+) -> dict[str, Any]:
+    qdic_checkpoint_value = getattr(tempo, "qdic_checkpoint", None)
+    if not qdic_checkpoint_value:
+        raise RuntimeError("QDIC runtime config lacks qdic_checkpoint")
+    qdic_checkpoint = Path(str(qdic_checkpoint_value)).expanduser().resolve()
+    if not qdic_checkpoint.is_file():
+        raise FileNotFoundError(f"QDIC checkpoint is missing: {qdic_checkpoint}")
+    source_paths = (
+        repo_root / "tools" / "v11_qdic_fast_screen.py",
+        repo_root / "tools" / "v11_covtrack_replay_cache.py",
+        repo_root / "tempotrack_v10" / "overlay.py",
+        repo_root / "tempotrack_v10" / "replay_cache.py",
+        repo_root / "tempotrack_v10" / "covtrack_runtime.py",
+    )
+    if any(not path.is_file() for path in source_paths):
+        missing = [str(path) for path in source_paths if not path.is_file()]
+        raise FileNotFoundError(f"replay implementation source is missing: {missing}")
+    return {
+        "tempo_config_path": str(tempo_path),
+        "tempo_config_sha256": sha256_file(tempo_path),
+        "qdic_checkpoint_path": str(qdic_checkpoint),
+        "qdic_checkpoint_sha256": sha256_file(qdic_checkpoint),
+        "external_cov_source": str(cov_source),
+        "external_cov_commit": _git_head(cov_source),
+        "external_cov_config_path": str(cov_config),
+        "external_config_sha256": sha256_file(cov_config),
+        "external_cov_checkpoint_path": str(cov_checkpoint),
+        "external_checkpoint_sha256": sha256_file(cov_checkpoint),
+        "replay_repo_root": str(repo_root),
+        "replay_repo_head": _git_head(repo_root),
+        "replay_source_hashes": {str(path): sha256_file(path) for path in source_paths},
+    }
+
+
+def _validate_cache_external_provenance(
+    *,
+    provenance: dict[str, Any],
+    fingerprint: dict[str, Any],
+) -> None:
+    checks = (
+        ("external_cov_commit", "external_cov_commit"),
+        ("external_config_sha256", "external_config_sha256"),
+        ("external_checkpoint_sha256", "external_checkpoint_sha256"),
+    )
+    for cache_key, fingerprint_key in checks:
+        expected = provenance.get(cache_key)
+        actual = fingerprint.get(fingerprint_key)
+        if expected != actual:
+            raise RuntimeError(
+                "frontend cache external provenance mismatch; refusing replay: "
+                f"{cache_key}: cache={expected!r}, runtime={actual!r}"
+            )
+
+
+def _load_reusable_video_artifact(
+    *,
+    prediction_path: Path,
+    manifest_path: Path,
+    video_key: str,
+    trial_id: str,
+    cache_hash: str,
+    score_threshold: float,
+    margin_threshold: float,
+    fingerprint: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
+    try:
+        video_manifest = _read_json(manifest_path)
+        local_rows = _read_json(prediction_path)
+        if not isinstance(video_manifest, dict) or not isinstance(local_rows, list):
+            return None
+        if (
+            video_manifest.get("status") != "PASS"
+            or str(video_manifest.get("trial_id")) != str(trial_id)
+            or _video_key(video_manifest.get("video_id")) != video_key
+            or video_manifest.get("cache_manifest_sha256") != cache_hash
+            or video_manifest.get("fingerprint") != fingerprint
+            or float(video_manifest["thresholds"]["score_threshold"]) != float(score_threshold)
+            or float(video_manifest["thresholds"]["margin_threshold"]) != float(margin_threshold)
+            or int(video_manifest["rows"]) != len(local_rows)
+            or video_manifest.get("prediction_sha256") != sha256_file(prediction_path)
+        ):
+            return None
+        for row in local_rows:
+            if _video_key(row.get("video_id")) != video_key:
+                return None
+            if int(row.get("track_id", -1)) < 0:
+                return None
+        return local_rows, video_manifest
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def _validate_selected_video_prefix(
@@ -118,9 +235,26 @@ def main() -> None:
         raise FileNotFoundError(args.cov_source)
     if not Path(args.cov_config).resolve().is_file():
         raise FileNotFoundError(args.cov_config)
+    cov_source = Path(args.cov_source).resolve()
+    cov_config = Path(args.cov_config).resolve()
+    cov_checkpoint = Path(args.cov_checkpoint).resolve()
+    if not cov_checkpoint.is_file():
+        raise FileNotFoundError(cov_checkpoint)
 
     reader = FrontendReplayCacheReader(cache, verify_hashes=not args.no_verify_cache)
     provenance = reader.manifest.get("provenance", {})
+    if not isinstance(provenance, dict):
+        raise RuntimeError("frontend cache provenance must be a mapping")
+    repo_root = Path(__file__).resolve().parents[1]
+    fingerprint = _runtime_fingerprint(
+        repo_root=repo_root,
+        tempo_path=tempo_path,
+        tempo=tempo,
+        cov_source=cov_source,
+        cov_config=cov_config,
+        cov_checkpoint=cov_checkpoint,
+    )
+    _validate_cache_external_provenance(provenance=provenance, fingerprint=fingerprint)
     category_ids = [int(value) for value in provenance.get("category_ids", ())]
     if not category_ids:
         raise RuntimeError("frontend cache does not contain category ontology")
@@ -172,6 +306,7 @@ def main() -> None:
     cache_hash = sha256_file(cache / "manifest.json")
     local_results: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
     reused_video_count = 0
+    stale_video_artifact_count = 0
     pending_videos = []
     for video_id, video_path, _summary in videos:
         key = _video_key(video_id)
@@ -180,27 +315,26 @@ def main() -> None:
             continue
         prediction_path = video_output_root / f"{key}.json"
         manifest_path = video_output_root / f"{key}.manifest.json"
-        if prediction_path.exists() != manifest_path.exists():
-            raise RuntimeError(f"incomplete reusable video artifact for {video_id}")
-        if not prediction_path.exists():
+        if not prediction_path.exists() or not manifest_path.exists():
+            if prediction_path.exists() or manifest_path.exists():
+                stale_video_artifact_count += 1
             pending_videos.append((video_id, video_path, _summary))
             continue
-        video_manifest = _read_json(manifest_path)
-        if (
-            video_manifest.get("status") != "PASS"
-            or str(video_manifest.get("trial_id")) != str(args.trial_id)
-            or _video_key(video_manifest.get("video_id")) != key
-            or video_manifest.get("cache_manifest_sha256") != cache_hash
-            or float(video_manifest["thresholds"]["score_threshold"]) != float(args.score_threshold)
-            or float(video_manifest["thresholds"]["margin_threshold"]) != float(args.margin_threshold)
-        ):
-            raise RuntimeError(f"reusable video artifact contract mismatch for {video_id}")
-        if video_manifest.get("prediction_sha256") != sha256_file(prediction_path):
-            raise RuntimeError(f"reusable video prediction hash mismatch for {video_id}")
-        local_rows = _read_json(prediction_path)
-        if not isinstance(local_rows, list):
-            raise RuntimeError(f"video prediction must be a JSON list: {prediction_path}")
-        local_results[key] = (local_rows, video_manifest)
+        reusable = _load_reusable_video_artifact(
+            prediction_path=prediction_path,
+            manifest_path=manifest_path,
+            video_key=key,
+            trial_id=str(args.trial_id),
+            cache_hash=cache_hash,
+            score_threshold=float(args.score_threshold),
+            margin_threshold=float(args.margin_threshold),
+            fingerprint=fingerprint,
+        )
+        if reusable is None:
+            stale_video_artifact_count += 1
+            pending_videos.append((video_id, video_path, _summary))
+            continue
+        local_results[key] = reusable
         reused_video_count += 1
 
     model = None
@@ -208,8 +342,8 @@ def main() -> None:
     device = None
     if pending_videos:
         model_args = argparse.Namespace(
-            cov_config=args.cov_config.resolve(),
-            cov_checkpoint=args.cov_checkpoint.resolve(),
+            cov_config=cov_config,
+            cov_checkpoint=cov_checkpoint,
             device=args.device,
         )
         model, _, cfg = _build_tracker_model(model_args, tempo)
@@ -234,6 +368,7 @@ def main() -> None:
             "trial_id": str(args.trial_id),
             "video_id": video_id,
             "cache_manifest_sha256": cache_hash,
+            "fingerprint": fingerprint,
             "thresholds": {
                 "score_threshold": float(args.score_threshold),
                 "margin_threshold": float(args.margin_threshold),
@@ -287,6 +422,7 @@ def main() -> None:
         "trial_id": str(args.trial_id),
         "cache": str(cache),
         "cache_manifest_sha256": sha256_file(cache / "manifest.json"),
+        "fingerprint": fingerprint,
         "tempo_config": str(tempo_path),
         "tempo_config_sha256": sha256_file(tempo_path),
         "thresholds": {
@@ -297,6 +433,7 @@ def main() -> None:
         "video_output_root": None if video_output_root is None else str(video_output_root),
         "reused_video_count": reused_video_count,
         "new_video_count": len(pending_videos),
+        "stale_video_artifact_count": stale_video_artifact_count,
         "local_video_artifact_count": len(local_results),
         "frames": total_frames,
         "videos": len(videos),
