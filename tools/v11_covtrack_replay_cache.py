@@ -83,8 +83,16 @@ def _build_tracker_model(args: argparse.Namespace, tempo: TempoTrackConfig) -> t
 
 
 def _reset_tracker(model: Any, cfg: Any, video_id: int | str) -> Any:
-    model.init_tracker()
-    tracker = model.tracker
+    # ``init_tracker`` constructs a new TempoTrackOverlay and would reload
+    # the verified QDIC checkpoint for every video.  A native reset is the
+    # exact fresh-video boundary needed here and preserves the already loaded
+    # scorer; the adapter reset clears its causal overlay memory as well.
+    tracker = getattr(model, "tracker", None)
+    if tracker is None:
+        model.init_tracker()
+        tracker = model.tracker
+    else:
+        tracker.reset()
     tracker.set_fusion_head(model.roi_head.fusion_head, model.roi_head.track_head.loss_cyc)
     tracker._v10_rcnn_test_cfg = cfg.model.test_cfg.rcnn
     tracker._v10_dataset_video_id = int(video_id)
