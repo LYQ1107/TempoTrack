@@ -139,89 +139,89 @@ def main() -> None:
     videos = list(reader.videos())
     trial_rows: list[dict[str, Any]] = []
     for score_index, margin_index, score_threshold, margin_threshold in selected_trials:
-            trial_id = _trial_name(score_index, margin_index)
-            trial_dir = output_root / trial_id
-            if trial_dir.exists():
-                raise RuntimeError(f"refusing to overwrite threshold trial: {trial_dir}")
-            trial_dir.mkdir(parents=True)
-            trial_tempo = replace(
-                tempo,
-                score_threshold=float(score_threshold),
-                margin_threshold=float(margin_threshold),
+        trial_id = _trial_name(score_index, margin_index)
+        trial_dir = output_root / trial_id
+        if trial_dir.exists():
+            raise RuntimeError(f"refusing to overwrite threshold trial: {trial_dir}")
+        trial_dir.mkdir(parents=True)
+        trial_tempo = replace(
+            tempo,
+            score_threshold=float(score_threshold),
+            margin_threshold=float(margin_threshold),
+        )
+        rows: list[dict[str, Any]] = []
+        total_frames = 0
+        total_matches = 0
+        track_offsets: dict[str, int] = {}
+        track_offsets_by_scope: dict[str, int] = {"global": 0}
+        for video_id, video_path, _summary in videos:
+            scope_key = "global" if offset_scope == "global" else video_scopes.get(str(video_id))
+            if scope_key is None:
+                raise RuntimeError(f"cache-shards provenance lacks video: {video_id}")
+            track_offset = int(track_offsets_by_scope.get(scope_key, 0))
+            track_offsets[str(video_id)] = int(track_offset)
+            video_rows, offset_delta, frame_count, match_count = _materialize_video(
+                reader=reader,
+                video_id=video_id,
+                video_path=video_path,
+                model=model,
+                cfg=cfg,
+                device=device,
+                category_ids=category_ids,
+                tempo_override=trial_tempo,
             )
-            rows: list[dict[str, Any]] = []
-            total_frames = 0
-            total_matches = 0
-            track_offsets: dict[str, int] = {}
-            track_offsets_by_scope: dict[str, int] = {"global": 0}
-            for video_id, video_path, _summary in videos:
-                scope_key = "global" if offset_scope == "global" else video_scopes.get(str(video_id))
-                if scope_key is None:
-                    raise RuntimeError(f"cache-shards provenance lacks video: {video_id}")
-                track_offset = int(track_offsets_by_scope.get(scope_key, 0))
-                track_offsets[str(video_id)] = int(track_offset)
-                video_rows, offset_delta, frame_count, match_count = _materialize_video(
-                    reader=reader,
-                    video_id=video_id,
-                    video_path=video_path,
-                    model=model,
-                    cfg=cfg,
-                    device=device,
-                    category_ids=category_ids,
-                    tempo_override=trial_tempo,
-                )
-                for row in video_rows:
-                    row["track_id"] = int(row["track_id"]) + track_offset
-                rows.extend(video_rows)
-                total_frames += frame_count
-                total_matches += match_count
-                track_offsets_by_scope[scope_key] = track_offset + offset_delta
-            rows.sort(key=lambda row: _prediction_sort_key(row, image_order))
+            for row in video_rows:
+                row["track_id"] = int(row["track_id"]) + track_offset
+            rows.extend(video_rows)
+            total_frames += frame_count
+            total_matches += match_count
+            track_offsets_by_scope[scope_key] = track_offset + offset_delta
+        rows.sort(key=lambda row: _prediction_sort_key(row, image_order))
 
-            prediction = trial_dir / "tao_track.json"
-            prediction.write_text(
-                json.dumps(rows, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            manifest = {
-                "status": "PASS",
-                "artifact": "v11_qdic_causal_threshold_trial",
-                "trial_id": trial_id,
-                "cache": str(cache),
-                "cache_manifest_sha256": sha256_file(cache / "manifest.json"),
-                "events": [str(path) for path in events],
-                "tempo_config": str(args.tempo_config.resolve()),
-                "tempo_config_sha256": sha256_file(args.tempo_config.resolve()),
-                "thresholds": {
-                    "score_threshold": float(score_threshold),
-                    "margin_threshold": float(margin_threshold),
-                    "score_index": score_index,
-                    "margin_index": margin_index,
-                },
-                "frames": total_frames,
-                "videos": len(videos),
-                "video_track_offsets": track_offsets,
-                "track_offset_scope": offset_scope,
-                "rows": len(rows),
-                "prediction": str(prediction),
-                "prediction_sha256": sha256_file(prediction),
-                "detector_forward_calls": 0,
-                "native_tracker_match_calls": total_matches,
-                "gt_loaded_during_replay": False,
-            }
-            (trial_dir / "manifest.json").write_text(
-                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            trial_rows.append(manifest)
-            print(json.dumps({
-                "status": "PASS",
-                "trial_id": trial_id,
+        prediction = trial_dir / "tao_track.json"
+        prediction.write_text(
+            json.dumps(rows, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        manifest = {
+            "status": "PASS",
+            "artifact": "v11_qdic_causal_threshold_trial",
+            "trial_id": trial_id,
+            "cache": str(cache),
+            "cache_manifest_sha256": sha256_file(cache / "manifest.json"),
+            "events": [str(path) for path in events],
+            "tempo_config": str(args.tempo_config.resolve()),
+            "tempo_config_sha256": sha256_file(args.tempo_config.resolve()),
+            "thresholds": {
                 "score_threshold": float(score_threshold),
                 "margin_threshold": float(margin_threshold),
-                "frames": total_frames,
-                "rows": len(rows),
-            }), flush=True)
+                "score_index": score_index,
+                "margin_index": margin_index,
+            },
+            "frames": total_frames,
+            "videos": len(videos),
+            "video_track_offsets": track_offsets,
+            "track_offset_scope": offset_scope,
+            "rows": len(rows),
+            "prediction": str(prediction),
+            "prediction_sha256": sha256_file(prediction),
+            "detector_forward_calls": 0,
+            "native_tracker_match_calls": total_matches,
+            "gt_loaded_during_replay": False,
+        }
+        (trial_dir / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        trial_rows.append(manifest)
+        print(json.dumps({
+            "status": "PASS",
+            "trial_id": trial_id,
+            "score_threshold": float(score_threshold),
+            "margin_threshold": float(margin_threshold),
+            "frames": total_frames,
+            "rows": len(rows),
+        }), flush=True)
 
     summary = {
         "status": "PASS",
