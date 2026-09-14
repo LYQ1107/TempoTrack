@@ -25,6 +25,8 @@ DOWNSTREAM = (
     "cov_test_result.json",
     "ov_val_result.json",
     "ov_test_result.json",
+    "masa_val_native_result.json",
+    "masa_test_native_result.json",
     "masa_val_tempo_result.json",
     "masa_test_tempo_result.json",
 )
