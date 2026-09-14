@@ -71,6 +71,8 @@ def main() -> None:
     parser.add_argument("--cov-config", type=Path, default=DEFAULT_COV_CONFIG)
     parser.add_argument("--cov-checkpoint", type=Path, default=DEFAULT_COV_CHECKPOINT)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--trial-index", type=int, action="append")
+    parser.add_argument("--allow-existing-output-root", action="store_true")
     parser.add_argument(
         "--track-offset-scope",
         choices=("auto", "global", "cache-shards"),
@@ -81,7 +83,7 @@ def main() -> None:
 
     cache = args.cache.resolve()
     output_root = args.output_root.resolve()
-    if output_root.exists() and any(output_root.iterdir()):
+    if output_root.exists() and any(output_root.iterdir()) and not args.allow_existing_output_root:
         raise RuntimeError(f"refusing to overwrite nonempty threshold output: {output_root}")
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -92,8 +94,25 @@ def main() -> None:
     for path in events:
         if not path.is_file():
             raise FileNotFoundError(path)
-    scores, score_quantiles = _grid(_finite_event_values(events, "proposal_score"))
-    margins, margin_quantiles = _grid(_finite_event_values(events, "proposal_margin"))
+    score_values = _finite_event_values(events, "proposal_score")
+    margin_values = _finite_event_values(events, "proposal_margin")
+    scores, score_quantiles = _grid(score_values)
+    margins, margin_quantiles = _grid(margin_values)
+    all_trials = [
+        (score_index, margin_index, score_threshold, margin_threshold)
+        for score_index, score_threshold in enumerate(scores)
+        for margin_index, margin_threshold in enumerate(margins)
+    ]
+    if args.trial_index is None:
+        selected_trials = all_trials
+    else:
+        selected_indices = sorted(set(int(value) for value in args.trial_index))
+        invalid = [value for value in selected_indices if value < 0 or value >= len(all_trials)]
+        if invalid:
+            raise ValueError(f"trial indices must be in [0,24]: {invalid}")
+        selected_trials = [all_trials[index] for index in selected_indices]
+        if not selected_trials:
+            raise ValueError("at least one trial index is required")
 
     reader = FrontendReplayCacheReader(cache, verify_hashes=not args.no_verify_cache)
     provenance = reader.manifest.get("provenance", {})
@@ -119,8 +138,7 @@ def main() -> None:
     device = torch.device(args.device)
     videos = list(reader.videos())
     trial_rows: list[dict[str, Any]] = []
-    for score_index, score_threshold in enumerate(scores):
-        for margin_index, margin_threshold in enumerate(margins):
+    for score_index, margin_index, score_threshold, margin_threshold in selected_trials:
             trial_id = _trial_name(score_index, margin_index)
             trial_dir = output_root / trial_id
             if trial_dir.exists():
@@ -212,21 +230,29 @@ def main() -> None:
         "cache_manifest_sha256": sha256_file(cache / "manifest.json"),
         "event_diagnostics": [str(path) for path in events],
         "score_distribution": {
-            "finite_count": len(_finite_event_values(events, "proposal_score")),
+            "finite_count": len(score_values),
             "quantiles": score_quantiles,
         },
         "margin_distribution": {
-            "finite_count": len(_finite_event_values(events, "proposal_margin")),
+            "finite_count": len(margin_values),
             "quantiles": margin_quantiles,
         },
         "score_grid": scores,
         "margin_grid": margins,
+        "grid_trial_count": len(all_trials),
+        "selected_trial_indices": [
+            int(score_index * len(margins) + margin_index)
+            for score_index, margin_index, _score, _margin in selected_trials
+        ],
         "trial_count": len(trial_rows),
         "trials": trial_rows,
         "detector_forward_calls": 0,
         "gt_loaded_during_replay": False,
     }
-    summary_path = output_root / "search_manifest.json"
+    if len(selected_trials) == 1 and args.trial_index is not None:
+        summary_path = output_root / f"search_manifest_{trial_rows[0]['trial_id']}.json"
+    else:
+        summary_path = output_root / "search_manifest.json"
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False), flush=True)
 
