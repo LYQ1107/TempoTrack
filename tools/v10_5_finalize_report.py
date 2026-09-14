@@ -20,6 +20,13 @@ from typing import Any, Mapping
 
 DEFAULT_ROOT = Path("/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914")
 DEFAULT_REPO = Path("/data2/usr_for_deadline/tempotrack_v104_search_hardening")
+# This is the original, complete COV native Test evaluation.  The bounded
+# search also has a small subset baseline, but that artifact is diagnostic
+# only and must never be used for paper deltas.
+FULL_COV_BASELINE_RECEIPT = Path("/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_20h_20260914/full_results.json")
+FULL_COV_BASELINE_SUMMARY = Path("/data2/usr_for_deadline/tempotrack_v10_unified/tempo_full/covtrack/test_v10_runtime_gate_sharded/merged/evaluation/COVTrack_V10_Tempo_Test/teta_summary_results.pth")
+FULL_COV_BASELINE_MANIFEST = Path("/data2/usr_for_deadline/tempotrack_v10_unified/tempo_full/covtrack/test_v10_runtime_gate_sharded/merged/merge_manifest.json")
+FULL_METRICS = ("TETA", "LocA", "AssocA", "ClsA", "LocRe", "LocPr", "AssocRe", "AssocPr", "ClsRe", "ClsPr")
 DOWNSTREAM = (
     "cov_val_result.json",
     "cov_test_result.json",
@@ -69,6 +76,66 @@ def validate_file_hash(path_value: Any, expected: Any) -> bool:
     return path.is_file() and expected == sha256(path)
 
 
+def load_original_full_cov_baseline() -> dict[str, Any]:
+    """Load and validate the complete original COV native Test baseline.
+
+    The baseline is read from a structured PASS receipt and its original
+    evaluator summary, rather than copied from a previous markdown report.
+    This makes it impossible for the finalizer to silently fall back to the
+    11,500-frame diagnostic subset.
+    """
+    receipt = read_json(FULL_COV_BASELINE_RECEIPT)
+    matches = [row for row in receipt.get("baselines", []) if row.get("name") == "COV native baseline"]
+    if len(matches) != 1:
+        raise RuntimeError("ORIGINAL_FULL_COV_BASELINE_RECEIPT_MISSING_OR_AMBIGUOUS")
+    row = matches[0]
+    if row.get("status") != "PASS" or row.get("scope") != "FULL_TEST":
+        raise RuntimeError("ORIGINAL_FULL_COV_BASELINE_NOT_FULL_PASS")
+    if Path(str(row.get("path"))).resolve() != FULL_COV_BASELINE_SUMMARY.resolve():
+        raise RuntimeError("ORIGINAL_FULL_COV_BASELINE_PATH_MISMATCH")
+    if not FULL_COV_BASELINE_SUMMARY.is_file() or not FULL_COV_BASELINE_MANIFEST.is_file():
+        raise RuntimeError("ORIGINAL_FULL_COV_BASELINE_ARTIFACT_MISSING")
+    manifest = read_json(FULL_COV_BASELINE_MANIFEST)
+    if manifest.get("status") != "PASS" or int(manifest.get("images", 0)) != 52155:
+        raise RuntimeError("ORIGINAL_FULL_COV_BASELINE_MANIFEST_NOT_COMPLETE")
+    value = metrics(row)
+    for split in ("base", "novel", "overall"):
+        if any(name not in value[split] for name in FULL_METRICS):
+            raise RuntimeError(f"ORIGINAL_FULL_COV_BASELINE_METRICS_INCOMPLETE:{split}")
+    return {
+        "row": row,
+        "metrics": value,
+        "receipt_path": str(FULL_COV_BASELINE_RECEIPT),
+        "receipt_sha256": sha256(FULL_COV_BASELINE_RECEIPT),
+        "summary_path": str(FULL_COV_BASELINE_SUMMARY),
+        "summary_sha256": sha256(FULL_COV_BASELINE_SUMMARY),
+        "manifest_path": str(FULL_COV_BASELINE_MANIFEST),
+        "manifest_sha256": sha256(FULL_COV_BASELINE_MANIFEST),
+        "annotation": manifest.get("annotation"),
+        "annotation_sha256": manifest.get("annotation_sha256"),
+        "images": manifest.get("images"),
+        "rows": manifest.get("rows"),
+    }
+
+
+def metric_deltas(candidate: Mapping[str, Any], baseline: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, float]]:
+    result: dict[str, dict[str, float]] = {}
+    for split in ("overall", "base", "novel"):
+        result[split] = {}
+        for name in FULL_METRICS:
+            left, right = candidate.get(split, {}).get(name), baseline.get(split, {}).get(name)
+            if left is None or right is None:
+                continue
+            result[split][name] = float(left) - float(right)
+    return result
+
+
+def fmt_delta(value: Any) -> str:
+    if value is None:
+        return "—"
+    return f"{float(value):+.6f}"
+
+
 def wait_for_terminal(state_path: Path, poll_seconds: float) -> dict[str, Any]:
     while True:
         if not state_path.is_file():
@@ -85,7 +152,7 @@ def wait_for_terminal(state_path: Path, poll_seconds: float) -> dict[str, Any]:
         time.sleep(poll_seconds)
 
 
-def render(args: argparse.Namespace, state: Mapping[str, Any], downstream: list[dict[str, Any]], subset: Mapping[str, Any], full: Mapping[str, Any]) -> str:
+def render(args: argparse.Namespace, state: Mapping[str, Any], downstream: list[dict[str, Any]], subset: Mapping[str, Any], full: Mapping[str, Any], baseline: Mapping[str, Any]) -> str:
     lines = [
         "# TempoTrack V10.4 Final Report",
         "",
@@ -100,7 +167,34 @@ def render(args: argparse.Namespace, state: Mapping[str, Any], downstream: list[
         "",
         "All values below are read from the corresponding receipt/result artifact; no old report number is copied as a result.",
         "",
-        "## COV Wave2 subset search",
+        "## Original full COV native baseline",
+        "",
+        "This is the only baseline used for subsequent full-Test metric deltas. The 11,500-frame subset baseline is diagnostic-only.",
+        "",
+        f"scope: {baseline['row'].get('scope')}",
+        f"images: {baseline['images']}",
+        f"rows: {baseline['rows']}",
+        f"annotation: {baseline['annotation']}",
+        f"annotation_sha256: {baseline['annotation_sha256']}",
+        f"summary: {baseline['summary_path']}",
+        f"summary_sha256: {baseline['summary_sha256']}",
+        f"merge_manifest: {baseline['manifest_path']}",
+        f"merge_manifest_sha256: {baseline['manifest_sha256']}",
+        f"baseline_receipt: {baseline['receipt_path']}",
+        f"baseline_receipt_sha256: {baseline['receipt_sha256']}",
+        "",
+        "| split | TETA | LocA | AssocA | ClsA | LocRe | LocPr | AssocRe | AssocPr | ClsRe | ClsPr |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for split in ("overall", "base", "novel"):
+        m = baseline["metrics"][split]
+        lines.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            split, *(fmt(m.get(name)) for name in FULL_METRICS)))
+    lines += [
+        "",
+        "## COV Wave2 subset search (DIAGNOSTIC_ONLY)",
+        "",
+        "These rows are not used for the original-baseline delta and are not full-Test claims.",
         "",
         "| source | trial | max_gap | candidate_K | score | margin | Base TETA | Base AssocA | Novel TETA | Novel AssocA | Overall TETA |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -135,6 +229,23 @@ def render(args: argparse.Namespace, state: Mapping[str, Any], downstream: list[
             row.get("source", "new_full"), label, fmt(m["base"].get("TETA")), fmt(m["base"].get("LocA")),
             fmt(m["base"].get("AssocA")), fmt(m["novel"].get("TETA")), fmt(m["novel"].get("LocA")),
             fmt(m["novel"].get("AssocA")), fmt(m["overall"].get("TETA")), row.get("prediction_sha256", ""), row.get("summary_sha256", "")))
+    lines += [
+        "",
+        "## Full-Test deltas vs original full COV native baseline",
+        "",
+        "Positive/negative deltas below are candidate minus the complete original baseline above; no subset value is involved.",
+        "",
+        "| source/spec | split | TETA | LocA | AssocA | ClsA | LocRe | LocPr | AssocRe | AssocPr | ClsRe | ClsPr |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for row in full_rows:
+        m = metrics(row)
+        spec = row.get("spec", {})
+        label = json.dumps({k: spec.get(k) for k in ("max_gap", "candidate_top_k", "score_threshold", "margin_threshold")}, sort_keys=True, separators=(",", ":"))
+        delta = metric_deltas(m, baseline["metrics"])
+        for split in ("overall", "base", "novel"):
+            lines.append("| `%s` | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+                label, split, *(fmt_delta(delta[split].get(name)) for name in FULL_METRICS)))
     lines += ["", "## Preserved downstream Test/Val artifacts", "", "| method/split | status | Base TETA | Base LocA | Base AssocA | Base ClsA | Novel TETA | Novel LocA | Novel AssocA | Novel ClsA | result SHA256 |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
     for item in downstream:
         d = item["data"]
@@ -181,6 +292,7 @@ def main() -> int:
     if not subset_path.is_file() or not full_path.is_file():
         raise RuntimeError("SEARCH_RESULT_ARTIFACT_MISSING")
     subset, full = read_json(subset_path), read_json(full_path)
+    baseline = load_original_full_cov_baseline()
     for row in full.get("new_results", []):
         if row.get("status") != "PASS":
             raise RuntimeError("FULL_RESULT_NOT_PASS")
@@ -197,7 +309,7 @@ def main() -> int:
     report = args.repo / "reports/tempotrack_v10/V10_4_20H_BEST_SEARCH.md"
     report.parent.mkdir(parents=True, exist_ok=True)
     temporary = report.with_suffix(report.suffix + f".{os.getpid()}.tmp")
-    temporary.write_text(render(args, state, downstream, subset, full), encoding="utf-8")
+    temporary.write_text(render(args, state, downstream, subset, full, baseline), encoding="utf-8")
     os.replace(temporary, report)
     print(json.dumps({"status": "PASS", "report": str(report), "subset_count": len(subset.get("rows", [])), "full_count": len(full.get("new_results", []))}))
     return 0
