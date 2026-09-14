@@ -185,6 +185,8 @@ def _diagnostic_state(path: Path) -> dict[str, Any]:
             "score_seen": 0,
             "margin_seen": 0,
             "accepted_score_seen": 0,
+            "score_min": float("inf"),
+            "score_max": float("-inf"),
             "score_rng": 0x12345678,
             "margin_rng": 0x23456789,
             "accepted_score_rng": 0x3456789A,
@@ -294,7 +296,11 @@ def _record_overlay_diagnostics(decision: Any) -> None:
     if observation_hash and len(state["observation_hashes"]) < 16:
         state["observation_hashes"].append(str(observation_hash))
     for value in proposal.scores:
-        _reservoir_add(state, "score", float(value))
+        score = float(value)
+        if np.isfinite(score):
+            state["score_min"] = min(float(state["score_min"]), score)
+            state["score_max"] = max(float(state["score_max"]), score)
+        _reservoir_add(state, "score", score)
     for value in proposal.margins:
         _reservoir_add(state, "margin", float(value))
     for value, accepted in zip(proposal.scores, proposal.accepted):
@@ -329,7 +335,7 @@ def _quantiles(values: list[float]) -> dict[str, float] | None:
     array = np.asarray(values, dtype=np.float64)
     return {
         name: float(np.percentile(array, percentile))
-        for name, percentile in (("p01", 1), ("p05", 5), ("p25", 25), ("p50", 50), ("p75", 75), ("p95", 95), ("p99", 99))
+        for name, percentile in (("p01", 1), ("p03", 3), ("p05", 5), ("p10", 10), ("p25", 25), ("p50", 50), ("p75", 75), ("p95", 95), ("p99", 99))
     }
 
 
@@ -384,6 +390,13 @@ def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> Non
         "reranker_status": state["reranker_status"],
         "sample_hashes": list(state["observation_hashes"]),
         "score_quantiles": _quantiles(state["score_samples"]),
+        "winner_score_min": (
+            float(state["score_min"]) if np.isfinite(state["score_min"]) else None
+        ),
+        "winner_score_max": (
+            float(state["score_max"]) if np.isfinite(state["score_max"]) else None
+        ),
+        "winner_score_reservoir": list(state["score_samples"]),
         "margin_quantiles": _quantiles(state["margin_samples"]),
         "accepted_score_quantiles": _quantiles(state["accepted_score_samples"]),
         "reservoir_size": _DIAGNOSTIC_RESERVOIR_SIZE,
