@@ -2209,6 +2209,7 @@ def _run_runtime_smoke(
             "qdic_status": diagnostics.get("qdic_status"),
         }
         merged_dir = smoke_root / "merged"
+        merged_dir.mkdir(parents=True, exist_ok=True)
         merged_output = merged_dir / "tao_track.json"
         merged_manifest_path = merged_dir / "merge_manifest.json"
         merge_log = merged_dir / "merge.log"
