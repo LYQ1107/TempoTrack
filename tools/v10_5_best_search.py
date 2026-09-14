@@ -289,11 +289,21 @@ def retry_id(root, trial_id):
 def stop_worker(process):
     if process.poll() is not None:
         return
-    process.send_signal(signal.SIGTERM)
+    # Workers launch a model-stream subprocess of their own.  Put every new
+    # worker in a private process group so a deadline stop cannot orphan that
+    # child and leave stale GPU/RAM allocations behind.  The controller and
+    # other workers remain in their own groups.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
     try:
         process.wait(timeout=30)
     except subprocess.TimeoutExpired:
-        process.kill()
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         process.wait(timeout=30)
 
 
@@ -334,7 +344,7 @@ def run_workers(args, state, name, jobs, launch_until, finish_until):
             env = env_base()
             env["CUDA_VISIBLE_DEVICES"] = str(gpu)
             env["PYTHONPATH"] = os.pathsep.join([str(args.repo), str(args.source), str(args.teta_root), "/data1/LWR/vranlee/LLM/scalabel-scalabel-evalAPI", env.get("PYTHONPATH", "")])
-            process = subprocess.Popen(command, cwd=str(args.repo), env=env, stdout=log, stderr=subprocess.STDOUT, text=True)
+            process = subprocess.Popen(command, cwd=str(args.repo), env=env, stdout=log, stderr=subprocess.STDOUT, text=True, start_new_session=True)
             key = name + "::" + str(job["requested"]) + "::" + effective
             running[key] = {"process": process, "gpu": gpu, "log": log, "receipt_root": str(output_root / effective), "started_at": iso()}
             records[key] = {"pid": process.pid, "gpu": gpu, "trial_id": effective, "requested": job["requested"], "status": "RUNNING", "log": str(log_path), "annotation": str(job["annotation"]), "spec": clean_spec(job["spec"], effective)}
