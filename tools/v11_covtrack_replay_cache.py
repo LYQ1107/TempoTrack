@@ -122,10 +122,14 @@ def _frame_rows(
                     "image_id": int(image_id),
                     "local_track_id": int(track_ids[index]),
                     "bbox": [
+                        # Match the official formatter's conversion order:
+                        # each xyxy scalar becomes a Python float before the
+                        # width/height subtraction, avoiding float32-rounding
+                        # differences in replay parity.
                         float(box[0]),
                         float(box[1]),
-                        float(box[2] - box[0]),
-                        float(box[3] - box[1]),
+                        float(box[2]) - float(box[0]),
+                        float(box[3]) - float(box[1]),
                     ],
                     "score": float(box[4]),
                     "category_id": int(category_ids[label]),
