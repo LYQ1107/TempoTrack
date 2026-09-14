@@ -25,6 +25,7 @@ from v11_covtrack_replay_cache import (
     _build_tracker_model,
     _load_tempo_config,
     _materialize_video,
+    _offset_scope,
     _prediction_sort_key,
 )
 
@@ -70,6 +71,11 @@ def main() -> None:
     parser.add_argument("--cov-config", type=Path, default=DEFAULT_COV_CONFIG)
     parser.add_argument("--cov-checkpoint", type=Path, default=DEFAULT_COV_CHECKPOINT)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--track-offset-scope",
+        choices=("auto", "global", "cache-shards"),
+        default="auto",
+    )
     parser.add_argument("--no-verify-cache", action="store_true")
     args = parser.parse_args()
 
@@ -97,6 +103,7 @@ def main() -> None:
     image_order = {
         str(value): index for index, value in enumerate(reader.manifest["ordered_image_ids"])
     }
+    offset_scope, video_scopes = _offset_scope(reader, tempo, args.track_offset_scope)
 
     model_args = argparse.Namespace(
         cov_config=args.cov_config.resolve(),
@@ -128,8 +135,12 @@ def main() -> None:
             total_frames = 0
             total_matches = 0
             track_offsets: dict[str, int] = {}
-            track_offset = 0
+            track_offsets_by_scope: dict[str, int] = {"global": 0}
             for video_id, video_path, _summary in videos:
+                scope_key = "global" if offset_scope == "global" else video_scopes.get(str(video_id))
+                if scope_key is None:
+                    raise RuntimeError(f"cache-shards provenance lacks video: {video_id}")
+                track_offset = int(track_offsets_by_scope.get(scope_key, 0))
                 track_offsets[str(video_id)] = int(track_offset)
                 video_rows, offset_delta, frame_count, match_count = _materialize_video(
                     reader=reader,
@@ -146,7 +157,7 @@ def main() -> None:
                 rows.extend(video_rows)
                 total_frames += frame_count
                 total_matches += match_count
-                track_offset += offset_delta
+                track_offsets_by_scope[scope_key] = track_offset + offset_delta
             rows.sort(key=lambda row: _prediction_sort_key(row, image_order))
 
             prediction = trial_dir / "tao_track.json"
@@ -172,6 +183,7 @@ def main() -> None:
                 "frames": total_frames,
                 "videos": len(videos),
                 "video_track_offsets": track_offsets,
+                "track_offset_scope": offset_scope,
                 "rows": len(rows),
                 "prediction": str(prediction),
                 "prediction_sha256": sha256_file(prediction),

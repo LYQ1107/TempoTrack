@@ -47,8 +47,14 @@ def main() -> None:
     source_images = list(source["images"])
     source_image_ids = [int(item["id"]) for item in source_images]
     source_by_video: dict[int, list[int]] = defaultdict(list)
+    source_video_order: list[int] = []
+    source_video_seen: set[int] = set()
     for item in source_images:
-        source_by_video[int(item["video_id"])].append(int(item["id"]))
+        video_id = int(item["video_id"])
+        source_by_video[video_id].append(int(item["id"]))
+        if video_id not in source_video_seen:
+            source_video_seen.add(video_id)
+            source_video_order.append(video_id)
     annotation_hash = sha256_file(annotation)
 
     common_provenance: dict[str, Any] | None = None
@@ -113,7 +119,6 @@ def main() -> None:
             copied_summary["frame_count"] = len(records)
             copied_summary["image_ids"] = image_ids
             global_video_items.append(copied_summary)
-            ordered_videos.append(video_id)
             shard_videos.append(video_id)
         source_shards.append(
             {
@@ -129,6 +134,11 @@ def main() -> None:
         )
     if category_ids is None:
         raise RuntimeError("cache shards did not record the dataset category ontology")
+    summary_by_video = {str(item["video_id"]): item for item in global_video_items}
+    if set(summary_by_video) != {str(value) for value in source_video_order}:
+        raise RuntimeError("cache video summaries do not cover the source video order")
+    ordered_videos = [int(value) for value in source_video_order]
+    global_video_items = [summary_by_video[str(value)] for value in ordered_videos]
     provenance = dict(common_provenance or {})
     provenance.update(
         {

@@ -243,6 +243,32 @@ def _prediction_sort_key(row: dict[str, Any], image_order: dict[str, int]) -> tu
     )
 
 
+def _offset_scope(
+    reader: FrontendReplayCacheReader,
+    tempo: TempoTrackConfig,
+    requested: str,
+) -> tuple[str, dict[str, str]]:
+    """Return the track-id offset policy and video-to-scope mapping."""
+
+    if requested not in {"auto", "global", "cache-shards"}:
+        raise ValueError(f"unknown track offset scope: {requested}")
+    scope = requested
+    if scope == "auto":
+        scope = "cache-shards" if float(tempo.qdic_weight) > 0.0 else "global"
+    mapping: dict[str, str] = {}
+    if scope == "cache-shards":
+        shards = reader.manifest.get("provenance", {}).get("source_shards", ())
+        if not isinstance(shards, (list, tuple)) or not shards:
+            raise RuntimeError("cache-shards offset scope requires source_shards provenance")
+        for index, shard in enumerate(shards):
+            for video_id in shard.get("video_ids", ()):
+                key = str(video_id)
+                if key in mapping:
+                    raise RuntimeError(f"video appears in multiple cache shards: {video_id}")
+                mapping[key] = str(index)
+    return scope, mapping
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache", type=Path, required=True)
@@ -253,6 +279,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--events", type=Path)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--track-offset-scope",
+        choices=("auto", "global", "cache-shards"),
+        default="auto",
+    )
     parser.add_argument("--no-verify-cache", action="store_true")
     parser.add_argument("--limit-videos", type=int)
     args = parser.parse_args()
@@ -277,6 +308,7 @@ def main() -> None:
     image_order = {
         str(value): index for index, value in enumerate(reader.manifest["ordered_image_ids"])
     }
+    offset_scope, video_scopes = _offset_scope(reader, tempo, args.track_offset_scope)
 
     # ``cov_source`` is an explicit contract argument even though PYTHONPATH
     # normally supplies it.  Refuse a missing source rather than importing a
@@ -291,13 +323,17 @@ def main() -> None:
     rows: list[dict[str, Any]] = []
     total_frames = 0
     total_matches = 0
-    track_offset = 0
+    track_offsets_by_scope: dict[str, int] = {"global": 0}
     video_track_offsets: dict[str, int] = {}
     videos = list(reader.videos())
     if args.limit_videos is not None:
         videos = videos[: int(args.limit_videos)]
     for video_id, video_path, _summary in videos:
-        video_track_offsets[str(video_id)] = int(track_offset)
+        scope_key = "global" if offset_scope == "global" else video_scopes.get(str(video_id))
+        if scope_key is None:
+            raise RuntimeError(f"cache-shards provenance lacks video: {video_id}")
+        track_offset = int(track_offsets_by_scope.get(scope_key, 0))
+        video_track_offsets[str(video_id)] = track_offset
         video_rows, track_offset_delta, frame_count, match_count = _materialize_video(
             reader=reader,
             video_id=video_id,
@@ -312,7 +348,7 @@ def main() -> None:
         rows.extend(video_rows)
         total_frames += frame_count
         total_matches += match_count
-        track_offset += track_offset_delta
+        track_offsets_by_scope[scope_key] = track_offset + track_offset_delta
     rows.sort(key=lambda row: _prediction_sort_key(row, image_order))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -330,6 +366,7 @@ def main() -> None:
         "frames": total_frames,
         "videos": len(videos),
         "video_track_offsets": video_track_offsets,
+        "track_offset_scope": offset_scope,
         "rows": len(rows),
         "prediction": str(output),
         "prediction_sha256": sha256_file(output),
