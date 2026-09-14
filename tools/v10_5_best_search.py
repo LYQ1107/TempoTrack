@@ -622,6 +622,8 @@ def parser():
     p.add_argument("--poll-seconds", type=float, default=30.0)
     p.add_argument("--min-ram-gib", type=float, default=24.0)
     p.add_argument("--full-shards", type=int, default=10)
+    p.add_argument("--extend-stage-hours", type=float, default=0.0,
+                   help="On --resume, extend the A1/A2/A3 stage deadline from now by this many hours.")
     p.add_argument("--resume", action="store_true")
     return p
 
@@ -643,6 +645,15 @@ def main():
         state = {"schema_version": 1, "artifact": "tempotrack_v10_5_best_search_state", "status": "RUNNING", "pid": os.getpid(), "started_at": iso(start), "started_at_unix": start, "deadline": iso(start + args.hours * 3600), "deadline_unix": start + args.hours * 3600, "stage_a_deadline_unix": start + args.stage_a_hours * 3600, "repo_head": git_value(args.repo, "rev-parse", "HEAD"), "binding": binding, "jobs": {}}
     else:
         state.update({"pid": os.getpid(), "status": "RUNNING", "resumed_at": iso()})
+        # A bounded run may finish A1 close to its original stage deadline.
+        # A resumed run must be able to extend that window explicitly;
+        # otherwise A2/A3 can be launched with only a few minutes left and
+        # every worker is then stopped at the deadline. The active controller
+        # does not pass this option, so this is inert for the current run.
+        if float(args.extend_stage_hours) > 0.0:
+            extension_deadline = time.time() + float(args.extend_stage_hours) * 3600.0
+            state["stage_a_deadline_unix"] = max(float(state.get("stage_a_deadline_unix", 0.0)), extension_deadline)
+            state["stage_a_deadline"] = iso(state["stage_a_deadline_unix"])
     atomic_json(state_path, state)
     references = [
         Path("/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_expanded_20260914"),
