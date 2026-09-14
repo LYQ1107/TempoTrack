@@ -229,7 +229,17 @@ def row_from_receipt(path, source):
 def collect_reused(root, references, binding, subset_sha):
     found = {}
     candidates = []
-    for reference in references:
+    # A resumed controller must also reuse completed receipts produced in its
+    # own root.  Without this scan, an extended resume treats the current
+    # run's completed A1 jobs as missing and launches retry directories again,
+    # wasting the remaining stage budget while preserving no new evidence.
+    scan_roots = [Path(root), *[Path(reference) for reference in references]]
+    seen_roots = set()
+    for reference in scan_roots:
+        reference = reference.resolve()
+        if reference in seen_roots:
+            continue
+        seen_roots.add(reference)
         if not reference.is_dir():
             continue
         for path in reference.rglob("receipt.json"):
@@ -237,7 +247,8 @@ def collect_reused(root, references, binding, subset_sha):
             if value is not None:
                 candidates.append((float(value.get("ended_at_unix", 0)), path, value))
     for _ended, path, value in sorted(candidates, key=lambda item: item[0]):
-        found[spec_key(value["spec"])] = {"source": "reused_subset", "receipt": str(path), "receipt_sha256": digest(path), "spec": clean_spec(value["spec"], str(value["spec"].get("trial_id", value.get("trial_id", "")))), "metrics": value["metrics"], "duration_seconds": value.get("duration_seconds")}
+        source = "resumed_current_root" if Path(root).resolve() in path.resolve().parents else "reused_subset"
+        found[spec_key(value["spec"])] = {"source": source, "receipt": str(path), "receipt_sha256": digest(path), "spec": clean_spec(value["spec"], str(value["spec"].get("trial_id", value.get("trial_id", "")))), "metrics": value["metrics"], "duration_seconds": value.get("duration_seconds")}
     atomic_json(Path(root) / "existing_subset_results.json", {"status": "PASS", "count": len(found), "rows": list(found.values()), "created_at": iso()})
     return found
 
