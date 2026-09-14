@@ -1302,6 +1302,7 @@ def _archive_pre_run_artifacts(root: Path) -> Path | None:
         root / "full_results.json",
         root / "final_report.md",
         root / "runtime_smoke.json",
+        root / "runtime_smoke",
     ]
     existing = [path for path in candidates if path.exists()]
     if not existing:
