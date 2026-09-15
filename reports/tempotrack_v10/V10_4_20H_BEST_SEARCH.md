@@ -1,6 +1,9 @@
 # TempoTrack V10.4 Final Report
 
 controller_status: PARTIAL_FAILURE_OR_DEADLINE
+effective_recovery_status: RECOVERY_INCOMPLETE
+verified_recovered_subset_count: 5
+verified_recovered_full_count: 0
 controller_pid: 16946
 controller_started_at: 2026-09-14T08:14:20Z
 controller_finished_at: 2026-09-15T04:14:42Z
@@ -39,14 +42,19 @@ These rows are not used for the original-baseline delta and are not full-Test cl
 
 | source | trial | max_gap | candidate_K | score | margin | Base TETA | Base AssocA | Novel TETA | Novel AssocA | Overall TETA |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| recovered_subset | a2_g120_k32__late01 | 120 | 32 | 1.869273 | 0.065577 | 37.367059 | 40.681978 | 29.319148 | 33.284748 | 36.623000 |
 | reused_subset | s03_m01 | 360 | 8 | 1.869273 | 0.065577 | 37.338759 | 40.661179 | 29.450752 | 33.071161 | 36.610000 |
 | new_subset | a2_g120_k8__retry03 | 120 | 8 | 1.869273 | 0.065577 | 37.338759 | 40.661179 | 29.450752 | 33.071161 | 36.610000 |
 | new_subset | a2_g240_k8__retry01 | 240 | 8 | 1.869273 | 0.065577 | 37.338759 | 40.661179 | 29.450752 | 33.071161 | 36.610000 |
+| recovered_subset | a3_gap60__late01 | 60 | 8 | 1.869273 | 0.065577 | 37.338759 | 40.661179 | 29.450752 | 33.071161 | 36.610000 |
 | new_subset | a2_g360_k16__retry01 | 360 | 16 | 1.869273 | 0.065577 | 37.356144 | 40.667881 | 29.177815 | 32.931264 | 36.600000 |
 | new_subset | a2_g120_k16__retry03 | 120 | 16 | 1.869273 | 0.065577 | 37.356144 | 40.667881 | 29.177815 | 32.931264 | 36.600000 |
 | new_subset | a2_g240_k16__retry01 | 240 | 16 | 1.869273 | 0.065577 | 37.356144 | 40.667881 | 29.177815 | 32.931264 | 36.600000 |
 | reused_subset | s03_m00 | 360 | 8 | 1.869273 | 0.000000 | 37.288868 | 40.597730 | 29.706691 | 33.784879 | 36.588000 |
 | reused_subset | s02_m00 | 360 | 8 | 1.367089 | 0.000000 | 37.321238 | 40.344604 | 29.281885 | 32.289185 | 36.578000 |
+| recovered_subset | a3_score_upper__late01 | 120 | 8 | 2.120365 | 0.065577 | 37.348027 | 40.858196 | 28.969097 | 32.323718 | 36.574000 |
+| recovered_subset | a3_margin_upper__late02 | 120 | 8 | 1.869273 | 0.098366 | 37.290457 | 40.525888 | 29.510942 | 33.163427 | 36.571000 |
+| recovered_subset | a3_score_lower__late01 | 120 | 8 | 1.618181 | 0.065577 | 37.284011 | 40.330835 | 29.518203 | 32.905945 | 36.566000 |
 | new_subset | a2_g240_k4__retry01 | 240 | 4 | 1.869273 | 0.065577 | 37.260884 | 40.464210 | 29.363509 | 32.740900 | 36.531000 |
 | new_subset | a2_g120_k4__retry03 | 120 | 4 | 1.869273 | 0.065577 | 37.260884 | 40.464210 | 29.363509 | 32.740900 | 36.531000 |
 | new_subset | a2_g360_k4__retry01 | 360 | 4 | 1.869273 | 0.065577 | 37.260884 | 40.464210 | 29.363509 | 32.740900 | 36.531000 |
@@ -94,6 +102,7 @@ These rows are not used for the original-baseline delta and are not full-Test cl
 | recovered_full | `{"candidate_top_k":8,"margin_threshold":0.0655771791934967,"max_gap":360,"score_threshold":1.367088943719864}` | 38.227673 | 55.239390 | 42.309218 | 28.987370 | 51.549091 | 31.167964 | 37.374000 | `728e8eb4e6903c98ca5c867df1b1b6eaa558cddffd1c1cc80324942de5b58fd1` | `03a8ca999e9a5d49f1d6e61cd2b1346d7bab5b4506d4145ae44dfa9c9123b62e` |
 | new_full | `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.618181087076664}` | 38.223052 | 55.091078 | 42.487295 | 29.737142 | 51.181818 | 33.810785 | 37.439000 | `b660474ecae57b7cd6003ad9ccf33269adbcdf1b0d5d9b3e3038d6ae821d35cf` | `265f61aa8c1a806678d3b54551348f72dbf84da7a6011dc53030cfa9668dc258` |
 | new_full | `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.367088943719864}` | 38.397700 | 55.211359 | 42.533397 | 29.243703 | 51.197000 | 32.289185 | 37.552000 | `90b3618219f556be5adb1a0e6f4efe62eabb8af8605714c33c82fc099583c167` | `28b17f7cab571d5a3abedba56ed127a6f7074d44248df0fd50d0c11421d7251a` |
+| recovered_full | `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.869273230433464}` | 38.209204 | 54.972504 | 42.591575 | 29.667691 | 51.345030 | 33.784879 | 37.420000 | `f438551b80ad7eec00183de1cac1e540ea4e1e8686e23460039303fd393a4b93` | `01598596ee829602fc839ea884a1044043a8a16404d343e47c9f38da0e528a89` |
 | new_full | `{"candidate_top_k":8,"margin_threshold":0.0655771791934967,"max_gap":360,"score_threshold":1.869273230433464}` | 38.255602 | 54.999661 | 42.657384 | 29.417782 | 51.306667 | 33.071161 | 37.439000 | `cf4bc24f57f78e94c964ad9c374bf2b14beea55e7c32985668949e3ae25c8859` | `9b23f218fd8b22b5e78bf0dd375cb9b67efc77c51000367ec2c243be0bc4e512` |
 
 ## Full-Test deltas vs original full COV native baseline
@@ -114,6 +123,9 @@ Positive/negative deltas below are candidate minus the complete original baselin
 | `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.367088943719864}` | overall | +0.386000 | -0.001000 | +0.437000 | +0.721000 | -0.075000 | +0.255000 | -0.901000 | +3.436000 | +1.608000 | +0.747000 |
 | `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.367088943719864}` | base | +0.369185 | +0.029782 | +0.375538 | +0.702203 | -0.074786 | +0.318142 | -0.836793 | +3.341798 | +1.651153 | +0.974669 |
 | `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.367088943719864}` | novel | +0.547797 | -0.303333 | +1.041936 | +0.904782 | -0.073424 | -0.362394 | -1.532182 | +4.358806 | +1.183182 | -1.498091 |
+| `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.869273230433464}` | overall | +0.254000 | -0.204000 | +0.629000 | +0.337000 | -0.271000 | +0.241000 | -1.398000 | +5.614000 | +0.861000 | +0.469000 |
+| `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.869273230433464}` | base | +0.180690 | -0.209073 | +0.433717 | +0.317308 | -0.300428 | +0.278682 | -1.501577 | +5.468484 | +0.865493 | +0.710915 |
+| `{"candidate_top_k":8,"margin_threshold":0.0,"max_gap":360,"score_threshold":1.869273230433464}` | novel | +0.971785 | -0.155303 | +2.537630 | +0.532994 | +0.022848 | -0.124394 | -0.381848 | +7.042485 | +0.809485 | -1.910182 |
 | `{"candidate_top_k":8,"margin_threshold":0.0655771791934967,"max_gap":360,"score_threshold":1.869273230433464}` | overall | +0.273000 | -0.183000 | +0.622000 | +0.379000 | -0.269000 | +0.278000 | -1.447000 | +5.606000 | +0.790000 | +0.458000 |
 | `{"candidate_top_k":8,"margin_threshold":0.0655771791934967,"max_gap":360,"score_threshold":1.869273230433464}` | base | +0.227087 | -0.181916 | +0.499525 | +0.363484 | -0.296357 | +0.333565 | -1.486188 | +5.514663 | +0.789567 | +0.692917 |
 | `{"candidate_top_k":8,"margin_threshold":0.0655771791934967,"max_gap":360,"score_threshold":1.869273230433464}` | novel | +0.721876 | -0.193667 | +1.823912 | +0.535418 | -0.003727 | -0.267303 | -1.061091 | +6.502970 | +0.793515 | -1.854636 |
@@ -144,7 +156,11 @@ No detector/native feature export was rerun by this controller; existing artifac
 
 ## Incomplete work (transparent status)
 
-This report does not claim that every planned search shard completed. The controller ended in a terminal partial/deadline state; incomplete and failed attempts remain recorded in the state receipt and were not converted into metric rows.
+The original controller status is retained verbatim. Independently verified late recovery receipts are accounted for below; they do not rewrite the original controller's terminal state.
 controller_terminal_status: PARTIAL_FAILURE_OR_DEADLINE
 incomplete_jobs: ["A2:a2_g120_k32:STOPPED_DEADLINE", "A2:a2_g240_k32:STOPPED_DEADLINE", "A2:a2_g360_k32:STOPPED_DEADLINE", "A3:a3_gap60:STOPPED_DEADLINE", "A3:a3_score_lower:STOPPED_DEADLINE", "A3:a3_score_upper:STOPPED_DEADLINE", "A3:a3_margin_upper:STOPPED_DEADLINE"]
 incomplete_full: []
+recovered_subset_count: 5
+recovered_full_count: 0
+unresolved_after_recovery: ["A2:a2_g240_k32:STOPPED_DEADLINE", "A2:a2_g360_k32:STOPPED_DEADLINE"]
+unresolved_full_after_recovery: []
