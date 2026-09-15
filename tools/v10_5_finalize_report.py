@@ -108,6 +108,60 @@ def load_recovery_full_results(root: Path) -> list[dict[str, Any]]:
     return recovered
 
 
+def load_recovery_subset_results(root: Path) -> list[dict[str, Any]]:
+    """Collect completed late subset receipts without trusting directory names.
+
+    The bounded controller can reach its deadline while a separately supervised
+    retry continues in a disjoint ``subset_recovery*`` or
+    ``late_subset_repair*`` directory.  These receipts are still diagnostic
+    subset evidence, never full-Test claims, so they are merged only in memory
+    for report rendering and the original ``subset_results.json`` hash remains
+    visible as the controller artifact.
+    """
+    recovered: list[dict[str, Any]] = []
+    seen_predictions: set[str] = set()
+    roots = [
+        path
+        for pattern in ("subset_recovery*/trials/*/receipt.json", "late_subset_repair*/trials/*/receipt.json")
+        for path in sorted(root.glob(pattern))
+    ]
+    for receipt_path in roots:
+        try:
+            row = read_json(receipt_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(row, dict) or row.get("status") != "COMPLETED":
+            continue
+        if row.get("stage") != "subset":
+            continue
+        if row.get("runtime_contract", {}).get("status") != "PASS":
+            continue
+        outputs = row.get("outputs", {})
+        prediction = outputs.get("prediction")
+        prediction_sha = outputs.get("prediction_sha256")
+        summary = outputs.get("summary")
+        summary_sha = outputs.get("summary_sha256")
+        if not validate_file_hash(prediction, prediction_sha) or not validate_file_hash(summary, summary_sha):
+            raise RuntimeError(f"RECOVERY_SUBSET_RESULT_HASH_MISMATCH:{receipt_path}")
+        if prediction_sha and prediction_sha in seen_predictions:
+            continue
+        if prediction_sha:
+            seen_predictions.add(str(prediction_sha))
+        item = dict(row)
+        item["source"] = "recovered_subset"
+        item["trial_id"] = row.get("trial_id")
+        item["recovery_receipt"] = str(receipt_path)
+        item["recovery_receipt_sha256"] = sha256(receipt_path)
+        # Match the shape consumed by ``render`` while preserving the complete
+        # receipt and its explicit output hashes for auditability.
+        item["prediction"] = prediction
+        item["prediction_sha256"] = prediction_sha
+        item["summary"] = summary
+        item["summary_sha256"] = summary_sha
+        recovered.append(item)
+    return recovered
+
+
 def load_candidate_full_results(root: Path) -> list[dict[str, Any]]:
     """Recover PASS full-Test rows from immutable per-candidate receipts.
 
@@ -361,6 +415,22 @@ def main() -> int:
     if not subset_path.is_file() or not full_path.is_file():
         raise RuntimeError("SEARCH_RESULT_ARTIFACT_MISSING")
     subset, full = read_json(subset_path), read_json(full_path)
+    recovered_subset = load_recovery_subset_results(args.root)
+    if recovered_subset:
+        subset = dict(subset)
+        existing_prediction_hashes = {
+            str(row.get("outputs", {}).get("prediction_sha256") or row.get("prediction_sha256"))
+            for row in subset.get("rows", [])
+            if row.get("outputs", {}).get("prediction_sha256") or row.get("prediction_sha256")
+        }
+        subset["rows"] = list(subset.get("rows", []))
+        for row in recovered_subset:
+            prediction_sha = str(row.get("prediction_sha256"))
+            if prediction_sha in existing_prediction_hashes:
+                continue
+            existing_prediction_hashes.add(prediction_sha)
+            subset["rows"].append(row)
+        subset["recovered_subset_count"] = len(recovered_subset)
     baseline = load_original_full_cov_baseline()
     for row in full.get("new_results", []):
         if row.get("status") != "PASS":
