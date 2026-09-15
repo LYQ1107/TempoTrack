@@ -119,7 +119,10 @@ def load_recovery_subset_results(root: Path) -> list[dict[str, Any]]:
     visible as the controller artifact.
     """
     recovered: list[dict[str, Any]] = []
-    seen_predictions: set[str] = set()
+    # Different parameter trials may legitimately produce the same prediction
+    # hash. Keep each verified receipt so the report accounts for every
+    # completed configuration; only an identical receipt is a duplicate.
+    seen_receipts: set[str] = set()
     roots = [
         path
         for pattern in ("subset_recovery*/trials/*/receipt.json", "late_subset_repair*/trials/*/receipt.json")
@@ -134,6 +137,9 @@ def load_recovery_subset_results(root: Path) -> list[dict[str, Any]]:
             continue
         if row.get("stage") != "subset":
             continue
+        receipt_key = str(receipt_path.resolve())
+        if receipt_key in seen_receipts:
+            continue
         if row.get("runtime_contract", {}).get("status") != "PASS":
             continue
         outputs = row.get("outputs", {})
@@ -143,10 +149,7 @@ def load_recovery_subset_results(root: Path) -> list[dict[str, Any]]:
         summary_sha = outputs.get("summary_sha256")
         if not validate_file_hash(prediction, prediction_sha) or not validate_file_hash(summary, summary_sha):
             raise RuntimeError(f"RECOVERY_SUBSET_RESULT_HASH_MISMATCH:{receipt_path}")
-        if prediction_sha and prediction_sha in seen_predictions:
-            continue
-        if prediction_sha:
-            seen_predictions.add(str(prediction_sha))
+        seen_receipts.add(receipt_key)
         item = dict(row)
         item["source"] = "recovered_subset"
         item["trial_id"] = row.get("trial_id")
@@ -494,17 +497,17 @@ def main() -> int:
     recovered_subset = load_recovery_subset_results(args.root)
     if recovered_subset:
         subset = dict(subset)
-        existing_prediction_hashes = {
-            str(row.get("outputs", {}).get("prediction_sha256") or row.get("prediction_sha256"))
+        existing_recovery_receipts = {
+            str(row.get("recovery_receipt"))
             for row in subset.get("rows", [])
-            if row.get("outputs", {}).get("prediction_sha256") or row.get("prediction_sha256")
+            if row.get("recovery_receipt")
         }
         subset["rows"] = list(subset.get("rows", []))
         for row in recovered_subset:
-            prediction_sha = str(row.get("prediction_sha256"))
-            if prediction_sha in existing_prediction_hashes:
+            receipt_key = str(row.get("recovery_receipt"))
+            if receipt_key in existing_recovery_receipts:
                 continue
-            existing_prediction_hashes.add(prediction_sha)
+            existing_recovery_receipts.add(receipt_key)
             subset["rows"].append(row)
         subset["recovered_subset_count"] = len(recovered_subset)
     baseline = load_original_full_cov_baseline()

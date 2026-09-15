@@ -1,8 +1,8 @@
 # TempoTrack V10.4 Final Report
 
 controller_status: PARTIAL_FAILURE_OR_DEADLINE
-effective_recovery_status: RECOVERY_INCOMPLETE
-verified_recovered_subset_count: 5
+effective_recovery_status: ALL_RECORDED_INCOMPLETE_WORK_RECOVERED
+verified_recovered_subset_count: 7
 verified_recovered_full_count: 0
 controller_pid: 16946
 controller_started_at: 2026-09-14T08:14:20Z
@@ -43,6 +43,8 @@ These rows are not used for the original-baseline delta and are not full-Test cl
 | source | trial | max_gap | candidate_K | score | margin | Base TETA | Base AssocA | Novel TETA | Novel AssocA | Overall TETA |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | recovered_subset | a2_g120_k32__late01 | 120 | 32 | 1.869273 | 0.065577 | 37.367059 | 40.681978 | 29.319148 | 33.284748 | 36.623000 |
+| recovered_subset | a2_g240_k32__late01 | 240 | 32 | 1.869273 | 0.065577 | 37.367059 | 40.681978 | 29.319148 | 33.284748 | 36.623000 |
+| recovered_subset | a2_g360_k32__late01 | 360 | 32 | 1.869273 | 0.065577 | 37.367059 | 40.681978 | 29.319148 | 33.284748 | 36.623000 |
 | reused_subset | s03_m01 | 360 | 8 | 1.869273 | 0.065577 | 37.338759 | 40.661179 | 29.450752 | 33.071161 | 36.610000 |
 | new_subset | a2_g120_k8__retry03 | 120 | 8 | 1.869273 | 0.065577 | 37.338759 | 40.661179 | 29.450752 | 33.071161 | 36.610000 |
 | new_subset | a2_g240_k8__retry01 | 240 | 8 | 1.869273 | 0.065577 | 37.338759 | 40.661179 | 29.450752 | 33.071161 | 36.610000 |
@@ -160,7 +162,7 @@ The original controller status is retained verbatim. Independently verified late
 controller_terminal_status: PARTIAL_FAILURE_OR_DEADLINE
 incomplete_jobs: ["A2:a2_g120_k32:STOPPED_DEADLINE", "A2:a2_g240_k32:STOPPED_DEADLINE", "A2:a2_g360_k32:STOPPED_DEADLINE", "A3:a3_gap60:STOPPED_DEADLINE", "A3:a3_score_lower:STOPPED_DEADLINE", "A3:a3_score_upper:STOPPED_DEADLINE", "A3:a3_margin_upper:STOPPED_DEADLINE"]
 incomplete_full: []
-recovered_subset_count: 5
+recovered_subset_count: 7
 recovered_full_count: 0
-unresolved_after_recovery: ["A2:a2_g240_k32:STOPPED_DEADLINE", "A2:a2_g360_k32:STOPPED_DEADLINE"]
+unresolved_after_recovery: []
 unresolved_full_after_recovery: []
