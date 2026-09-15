@@ -327,6 +327,16 @@ def render(args: argparse.Namespace, state: Mapping[str, Any], downstream: list[
         "",
         json.dumps(state.get("resource_snapshot", {}), ensure_ascii=False, sort_keys=True),
     ]
+    if state.get("status") != "COMPLETED":
+        lines += [
+            "",
+            "## Incomplete work (transparent status)",
+            "",
+            "This report does not claim that every planned search shard completed. The controller ended in a terminal partial/deadline state; incomplete and failed attempts remain recorded in the state receipt and were not converted into metric rows.",
+            f"controller_terminal_status: {state.get('status')}",
+            f"incomplete_jobs: {json.dumps(state.get('incomplete_jobs', []), ensure_ascii=False, sort_keys=True)}",
+            f"incomplete_full: {json.dumps(state.get('incomplete_full', []), ensure_ascii=False, sort_keys=True)}",
+        ]
     return "\n".join(lines) + "\n"
 
 
@@ -341,7 +351,7 @@ def main() -> int:
     args.repo = args.repo.resolve()
     state_path = args.root / "20h_search_state.json"
     state = read_json(state_path) if args.no_wait else wait_for_terminal(state_path, args.poll_seconds)
-    if state.get("status") != "COMPLETED":
+    if state.get("status") not in {"COMPLETED", "PARTIAL_FAILURE_OR_DEADLINE"}:
         progress = args.repo / "reports/tempotrack_v10/V10_4_20H_BEST_SEARCH_PROGRESS.md"
         progress.parent.mkdir(parents=True, exist_ok=True)
         progress.write_text("# V10.4 search not terminal\n\n" + json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -388,7 +398,8 @@ def main() -> int:
     temporary = report.with_suffix(report.suffix + f".{os.getpid()}.tmp")
     temporary.write_text(render(args, state, downstream, subset, full, baseline), encoding="utf-8")
     os.replace(temporary, report)
-    print(json.dumps({"status": "PASS", "report": str(report), "subset_count": len(subset.get("rows", [])), "full_count": len(full.get("new_results", []))}))
+    report_status = "PASS" if state.get("status") == "COMPLETED" else "PARTIAL_REPORT"
+    print(json.dumps({"status": report_status, "controller_status": state.get("status"), "report": str(report), "subset_count": len(subset.get("rows", [])), "full_count": len(full.get("new_results", []))}))
     return 0
 
 
