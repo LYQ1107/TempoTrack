@@ -108,6 +108,33 @@ def load_recovery_full_results(root: Path) -> list[dict[str, Any]]:
     return recovered
 
 
+def load_candidate_full_results(root: Path) -> list[dict[str, Any]]:
+    """Recover PASS full-Test rows from immutable per-candidate receipts.
+
+    A resume controller may rewrite its aggregate ``full_results.json`` while
+    leaving completed candidate directories untouched.  The per-candidate
+    receipt is therefore also an authoritative source, provided its hashes are
+    verified again.  PARTIAL/FAILED candidate receipts are deliberately
+    excluded rather than represented as metric rows.
+    """
+    rows: list[dict[str, Any]] = []
+    for result_path in sorted((root / "full").glob("*/full_result.json")):
+        try:
+            row = read_json(result_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(row, dict) or row.get("status") != "PASS":
+            continue
+        if not validate_file_hash(row.get("prediction"), row.get("prediction_sha256")) or not validate_file_hash(row.get("summary"), row.get("summary_sha256")):
+            raise RuntimeError(f"CANDIDATE_FULL_RESULT_HASH_MISMATCH:{result_path}")
+        item = dict(row)
+        item.setdefault("source", "candidate_full")
+        item["candidate_receipt"] = str(result_path)
+        item["candidate_receipt_sha256"] = sha256(result_path)
+        rows.append(item)
+    return rows
+
+
 def load_original_full_cov_baseline() -> dict[str, Any]:
     """Load and validate the complete original COV native Test baseline.
 
@@ -330,10 +357,24 @@ def main() -> int:
             raise RuntimeError("FULL_RESULT_NOT_PASS")
         if not validate_file_hash(row.get("prediction"), row.get("prediction_sha256")) or not validate_file_hash(row.get("summary"), row.get("summary_sha256")):
             raise RuntimeError("FULL_RESULT_HASH_MISMATCH")
+    candidate_results = load_candidate_full_results(args.root)
     recovery_results = load_recovery_full_results(args.root)
-    if recovery_results:
+    existing_prediction_hashes = {
+        str(row.get("prediction_sha256"))
+        for row in full.get("new_results", [])
+        if row.get("prediction_sha256")
+    }
+    discovered_results = []
+    for row in candidate_results + recovery_results:
+        prediction_sha = row.get("prediction_sha256")
+        if prediction_sha and str(prediction_sha) in existing_prediction_hashes:
+            continue
+        if prediction_sha:
+            existing_prediction_hashes.add(str(prediction_sha))
+        discovered_results.append(row)
+    if discovered_results:
         full = dict(full)
-        full["new_results"] = list(full.get("new_results", [])) + recovery_results
+        full["new_results"] = list(full.get("new_results", [])) + discovered_results
     downstream = []
     downstream_root = Path("/data2/usr_for_deadline/tempotrack_v10_unified/v104_downstream")
     for name in DOWNSTREAM:
