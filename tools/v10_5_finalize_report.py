@@ -243,6 +243,74 @@ def metric_deltas(candidate: Mapping[str, Any], baseline: Mapping[str, Mapping[s
     return result
 
 
+def requested_trial_id(row: Mapping[str, Any]) -> str | None:
+    """Return the controller trial id represented by a late recovery row."""
+    value = row.get("requested_trial_id")
+    if value:
+        return str(value)
+    spec = row.get("spec")
+    if isinstance(spec, Mapping) and spec.get("requested_trial_id"):
+        return str(spec["requested_trial_id"])
+    return None
+
+
+def original_job_trial_id(entry: Any) -> str | None:
+    """Extract the trial id from the controller's ``A*:trial:status`` receipt."""
+    if not isinstance(entry, str):
+        return None
+    parts = entry.split(":")
+    return parts[1] if len(parts) >= 2 else None
+
+
+def recovery_status(state: Mapping[str, Any], subset: Mapping[str, Any], full: Mapping[str, Any]) -> dict[str, Any]:
+    """Summarize original incomplete work against independently verified retries.
+
+    The original controller status is intentionally preserved.  This separate
+    status prevents a late retry from being mistaken for a successful original
+    controller run while also preventing the final report from claiming that
+    recovered jobs are still missing.
+    """
+    original_jobs = list(state.get("incomplete_jobs", []) or [])
+    original_full = list(state.get("incomplete_full", []) or [])
+    recovered_ids = {
+        trial_id
+        for row in subset.get("rows", [])
+        if row.get("source") == "recovered_subset"
+        for trial_id in [requested_trial_id(row)]
+        if trial_id
+    }
+    recovered_full_ids = {
+        trial_id
+        for row in list(full.get("new_results", []) or [])
+        if row.get("source") == "recovered_full"
+        for trial_id in [requested_trial_id(row)]
+        if trial_id
+    }
+    unresolved_jobs = [
+        entry for entry in original_jobs
+        if (original_job_trial_id(entry) or "") not in recovered_ids
+    ]
+    unresolved_full = [
+        entry for entry in original_full
+        if (original_job_trial_id(entry) or "") not in recovered_full_ids
+    ]
+    if state.get("status") == "COMPLETED":
+        effective = "CONTROLLER_COMPLETED"
+    elif not unresolved_jobs and not unresolved_full and (original_jobs or original_full):
+        effective = "ALL_RECORDED_INCOMPLETE_WORK_RECOVERED"
+    elif original_jobs or original_full:
+        effective = "RECOVERY_INCOMPLETE"
+    else:
+        effective = "NO_RECORDED_INCOMPLETE_WORK"
+    return {
+        "effective_status": effective,
+        "recovered_subset_count": len(recovered_ids),
+        "recovered_full_count": len(recovered_full_ids),
+        "unresolved_jobs": unresolved_jobs,
+        "unresolved_full": unresolved_full,
+    }
+
+
 def fmt_delta(value: Any) -> str:
     if value is None:
         return "—"
@@ -266,10 +334,14 @@ def wait_for_terminal(state_path: Path, poll_seconds: float) -> dict[str, Any]:
 
 
 def render(args: argparse.Namespace, state: Mapping[str, Any], downstream: list[dict[str, Any]], subset: Mapping[str, Any], full: Mapping[str, Any], baseline: Mapping[str, Any]) -> str:
+    recovery = recovery_status(state, subset, full)
     lines = [
         "# TempoTrack V10.4 Final Report",
         "",
         f"controller_status: {state.get('status')}",
+        f"effective_recovery_status: {recovery['effective_status']}",
+        f"verified_recovered_subset_count: {recovery['recovered_subset_count']}",
+        f"verified_recovered_full_count: {recovery['recovered_full_count']}",
         f"controller_pid: {state.get('pid')}",
         f"controller_started_at: {state.get('started_at')}",
         f"controller_finished_at: {state.get('finished_at')}",
@@ -386,10 +458,14 @@ def render(args: argparse.Namespace, state: Mapping[str, Any], downstream: list[
             "",
             "## Incomplete work (transparent status)",
             "",
-            "This report does not claim that every planned search shard completed. The controller ended in a terminal partial/deadline state; incomplete and failed attempts remain recorded in the state receipt and were not converted into metric rows.",
+            "The original controller status is retained verbatim. Independently verified late recovery receipts are accounted for below; they do not rewrite the original controller's terminal state.",
             f"controller_terminal_status: {state.get('status')}",
             f"incomplete_jobs: {json.dumps(state.get('incomplete_jobs', []), ensure_ascii=False, sort_keys=True)}",
             f"incomplete_full: {json.dumps(state.get('incomplete_full', []), ensure_ascii=False, sort_keys=True)}",
+            f"recovered_subset_count: {recovery['recovered_subset_count']}",
+            f"recovered_full_count: {recovery['recovered_full_count']}",
+            f"unresolved_after_recovery: {json.dumps(recovery['unresolved_jobs'], ensure_ascii=False, sort_keys=True)}",
+            f"unresolved_full_after_recovery: {json.dumps(recovery['unresolved_full'], ensure_ascii=False, sort_keys=True)}",
         ]
     return "\n".join(lines) + "\n"
 
