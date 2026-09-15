@@ -42,7 +42,14 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
     shard_receipts: list[dict[str, Any]] = []
     frame_total = 0
     track_offset = 0
+    # ``repo_head`` records the repository snapshot that launched a shard,
+    # but it is not itself an execution-input contract.  The recovery run can
+    # legitimately advance controller/report-only commits while completed
+    # shards are being reused.  The hashes below are the actual runtime,
+    # overlay, stream, config, checkpoint, and external-source contract and
+    # remain strict.
     common_binding: dict[str, Any] | None = None
+    repo_heads: set[str] = set()
     invalid_markers: list[dict[str, Any]] = []
     for item in manifest.get("shards", []):
         index = int(item["index"])
@@ -72,6 +79,9 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
             "runtime_sha256": inputs.get("runtime_sha256"),
             "stream_sha256": inputs.get("stream_sha256"),
         }
+        repo_head = binding.pop("repo_head")
+        if repo_head:
+            repo_heads.add(str(repo_head))
         if common_binding is None:
             common_binding = binding
         elif binding != common_binding:
@@ -158,6 +168,12 @@ def merge(manifest_path: Path, trials_root: Path, output: Path) -> dict[str, Any
         "prediction_sha256": _sha256(output),
         "prediction_rows": len(rows),
         "common_binding": common_binding,
+        "repo_head_uniform": len(repo_heads) <= 1,
+        "repo_heads": sorted(repo_heads),
+        "provenance_note": (
+            "repo_head may vary across controller/report-only recovery commits; "
+            "all execution-input hashes in common_binding are required to match"
+        ),
         "scientific_validity": (
             "INVALID_PRE_PREFILTER_CONTRACT_FIX"
             if invalid_markers
