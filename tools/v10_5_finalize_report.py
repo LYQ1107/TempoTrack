@@ -76,6 +76,38 @@ def validate_file_hash(path_value: Any, expected: Any) -> bool:
     return path.is_file() and expected == sha256(path)
 
 
+def load_recovery_full_results(root: Path) -> list[dict[str, Any]]:
+    """Collect independently recovered full-Test candidates without trusting names.
+
+    Recovery attempts intentionally live outside the controller's ``full_results``
+    file so they cannot overwrite the original attempt.  Once a recovery has a
+    PASS receipt, it is a valid full-Test result and must appear in the final
+    report.  The receipt remains the source of truth; both output hashes are
+    rechecked here and duplicate predictions are suppressed.
+    """
+    recovered: list[dict[str, Any]] = []
+    seen_predictions: set[str] = set()
+    for receipt_path in sorted((root / "full").glob("*__recovery*/recovery_result.json")):
+        try:
+            row = read_json(receipt_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(row, dict) or row.get("status") != "PASS":
+            continue
+        prediction_sha = row.get("prediction_sha256")
+        if prediction_sha and prediction_sha in seen_predictions:
+            continue
+        if not validate_file_hash(row.get("prediction"), prediction_sha) or not validate_file_hash(row.get("summary"), row.get("summary_sha256")):
+            raise RuntimeError(f"RECOVERY_FULL_RESULT_HASH_MISMATCH:{receipt_path}")
+        seen_predictions.add(str(prediction_sha))
+        item = dict(row)
+        item["source"] = "recovered_full"
+        item["recovery_receipt"] = str(receipt_path)
+        item["recovery_receipt_sha256"] = sha256(receipt_path)
+        recovered.append(item)
+    return recovered
+
+
 def load_original_full_cov_baseline() -> dict[str, Any]:
     """Load and validate the complete original COV native Test baseline.
 
@@ -298,6 +330,10 @@ def main() -> int:
             raise RuntimeError("FULL_RESULT_NOT_PASS")
         if not validate_file_hash(row.get("prediction"), row.get("prediction_sha256")) or not validate_file_hash(row.get("summary"), row.get("summary_sha256")):
             raise RuntimeError("FULL_RESULT_HASH_MISMATCH")
+    recovery_results = load_recovery_full_results(args.root)
+    if recovery_results:
+        full = dict(full)
+        full["new_results"] = list(full.get("new_results", [])) + recovery_results
     downstream = []
     downstream_root = Path("/data2/usr_for_deadline/tempotrack_v10_unified/v104_downstream")
     for name in DOWNSTREAM:
