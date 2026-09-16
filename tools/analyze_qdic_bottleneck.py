@@ -76,6 +76,26 @@ def _number(value: Any) -> float | None:
     return result if result == result else None
 
 
+def _count(value: Any) -> int | None:
+    number = _number(value)
+    if number is None:
+        return None
+    return int(number)
+
+
+def _rank_count(group: Mapping[str, Any], field: str, rank: int) -> int | None:
+    values = group.get(field, {})
+    if not isinstance(values, Mapping):
+        return None
+    return _count(values.get(str(rank)))
+
+
+def _rate(count: int | None, denominator: int | None) -> float | None:
+    if count is None or denominator is None or denominator <= 0:
+        return None
+    return float(count) / float(denominator)
+
+
 def _structure_gate(root: Path) -> dict[str, Any]:
     state_path = root / "search_state.json"
     sanity_path = root / "structural_behavior_sanity.json"
@@ -171,6 +191,9 @@ def _group_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for group_name in ("overall", "base", "novel"):
         group = groups.get(group_name, {}) if isinstance(groups, Mapping) else {}
+        positive_events = _count(group.get("positive_events"))
+        prefilter_count_at_64 = _rank_count(group, "prefilter_recall_at", 64)
+        qdic_count_at_64 = _rank_count(group, "qdic_recall_at", 64)
         rows.append(
             {
                 "trial_id": item.get("trial_id"),
@@ -181,8 +204,13 @@ def _group_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "association_events": group.get("association_events"),
                 "positive_events": group.get("positive_events"),
                 "candidate_recall": group.get("candidate_recall"),
-                "prefilter_recall_at_64": (group.get("prefilter_recall_at") or {}).get("64"),
-                "qdic_recall_at_64": (group.get("qdic_recall_at") or {}).get("64"),
+                # The diagnostics JSON stores rank recall as positive-event
+                # counts. Keep the counts explicitly and expose normalized
+                # rates under the historical CSV field names.
+                "prefilter_positive_count_at_64": prefilter_count_at_64,
+                "qdic_positive_count_at_64": qdic_count_at_64,
+                "prefilter_recall_at_64": _rate(prefilter_count_at_64, positive_events),
+                "qdic_recall_at_64": _rate(qdic_count_at_64, positive_events),
                 "strict_association_recall": group.get("association_recall"),
                 "relaxed_association_recall": group.get("association_recall_relaxed"),
                 "strict_association_precision": group.get("association_precision"),
@@ -206,9 +234,12 @@ def _rank_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for group_name in ("overall", "base", "novel"):
         group = groups.get(group_name, {}) if isinstance(groups, Mapping) else {}
-        pre = group.get("prefilter_recall_at", {}) or {}
-        post = group.get("qdic_recall_at", {}) or {}
+        positive_events = _count(group.get("positive_events"))
         for rank in (1, 8, 16, 32, 64):
+            pre_count = _rank_count(group, "prefilter_recall_at", rank)
+            qdic_count = _rank_count(group, "qdic_recall_at", rank)
+            pre_rate = _rate(pre_count, positive_events)
+            qdic_rate = _rate(qdic_count, positive_events)
             rows.append(
                 {
                     "trial_id": item.get("trial_id"),
@@ -217,12 +248,15 @@ def _rank_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "horizon_label": item.get("horizon_label"),
                     "group": group_name,
                     "rank": rank,
-                    "prefilter_recall": pre.get(str(rank)),
-                    "qdic_recall": post.get(str(rank)),
+                    "positive_events": positive_events,
+                    "prefilter_positive_count": pre_count,
+                    "qdic_positive_count": qdic_count,
+                    "prefilter_recall": pre_rate,
+                    "qdic_recall": qdic_rate,
                     "qdic_minus_prefilter": (
                         None
-                        if _number(post.get(str(rank))) is None or _number(pre.get(str(rank))) is None
-                        else _number(post.get(str(rank))) - _number(pre.get(str(rank)))
+                        if qdic_rate is None or pre_rate is None
+                        else qdic_rate - pre_rate
                     ),
                     "prefilter_rank_p50": (group.get("prefilter_rank_quantiles") or {}).get("p50"),
                     "qdic_rank_p50": (group.get("qdic_rank_quantiles") or {}).get("p50"),
@@ -233,11 +267,159 @@ def _rank_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _decision_funnel_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return a post-hoc decision funnel with visible denominators.
+
+    Rank stages are conditional on positive association events. Decision
+    outcomes are also reported against association events and accepted
+    events, so rows with different denominators cannot be mistaken for one
+    homogeneous rate table.
+    """
+    diagnostic = item["diagnostics"]
+    groups = diagnostic.get("groups", {})
+    rows: list[dict[str, Any]] = []
+    for group_name in ("overall", "base", "novel"):
+        group = groups.get(group_name, {}) if isinstance(groups, Mapping) else {}
+        association_events = _count(group.get("association_events"))
+        positive_events = _count(group.get("positive_events"))
+        accepted_total = _count(group.get("accepted_total"))
+        stages: list[tuple[str, str, int | None, int | None]] = [
+            ("candidate_supply", "association_events", positive_events, association_events),
+            ("accepted_total", "association_events", accepted_total, association_events),
+            ("accepted_correct_strict", "association_events", _count(group.get("accepted_correct")), association_events),
+            ("accepted_correct_relaxed", "association_events", _count(group.get("accepted_correct_relaxed")), association_events),
+            ("accepted_ambiguous", "association_events", _count(group.get("accepted_ambiguous")), association_events),
+            ("false_merge", "association_events", _count(group.get("false_merge")), association_events),
+            ("accepted_unresolved", "association_events", _count(group.get("accepted_unresolved")), association_events),
+            ("rejected_true_association", "association_events", _count(group.get("rejected_true_association")), association_events),
+        ]
+        for rank in (1, 8, 16, 32, 64):
+            stages.extend(
+                [
+                    (f"prefilter_rank_le_{rank}", "positive_events", _rank_count(group, "prefilter_recall_at", rank), positive_events),
+                    (f"qdic_rank_le_{rank}", "positive_events", _rank_count(group, "qdic_recall_at", rank), positive_events),
+                ]
+            )
+        for stage, denominator_name, count, denominator in stages:
+            is_decision_outcome = stage in {
+                "accepted_total",
+                "accepted_correct_strict",
+                "accepted_correct_relaxed",
+                "accepted_ambiguous",
+                "false_merge",
+                "accepted_unresolved",
+                "rejected_true_association",
+            }
+            rows.append(
+                {
+                    "trial_id": item.get("trial_id"),
+                    "candidate_top_k": item.get("candidate_top_k"),
+                    "max_gap": item.get("max_gap"),
+                    "horizon_label": item.get("horizon_label"),
+                    "group": group_name,
+                    "stage": stage,
+                    "count": count,
+                    "denominator_name": denominator_name,
+                    "denominator_count": denominator,
+                    "rate": _rate(count, denominator),
+                    "association_event_rate": _rate(count, association_events),
+                    "accepted_event_rate": _rate(count, accepted_total) if is_decision_outcome else None,
+                }
+            )
+    return rows
+
+
+def _correction_regression_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Expose marginal rank gains and decision outcomes without overclaiming.
+
+    The completed structural diagnostics retain rank-recall counts, but not
+    the per-event overlap identity needed to count exact rank transitions.
+    Exact corrected/regressed event counts are therefore marked unavailable
+    instead of being inferred from marginal totals.
+    """
+    diagnostic = item["diagnostics"]
+    groups = diagnostic.get("groups", {})
+    rows: list[dict[str, Any]] = []
+    for group_name in ("overall", "base", "novel"):
+        group = groups.get(group_name, {}) if isinstance(groups, Mapping) else {}
+        positive_events = _count(group.get("positive_events"))
+        association_events = _count(group.get("association_events"))
+        accepted_total = _count(group.get("accepted_total"))
+        for rank in (1, 8, 16, 32, 64):
+            pre_count = _rank_count(group, "prefilter_recall_at", rank)
+            qdic_count = _rank_count(group, "qdic_recall_at", rank)
+            pre_rate = _rate(pre_count, positive_events)
+            qdic_rate = _rate(qdic_count, positive_events)
+            rows.append(
+                {
+                    "trial_id": item.get("trial_id"),
+                    "candidate_top_k": item.get("candidate_top_k"),
+                    "max_gap": item.get("max_gap"),
+                    "horizon_label": item.get("horizon_label"),
+                    "group": group_name,
+                    "analysis": "aggregate_rank_recall_delta",
+                    "rank": rank,
+                    "outcome": None,
+                    "association_events": association_events,
+                    "positive_events": positive_events,
+                    "accepted_total": accepted_total,
+                    "prefilter_count": pre_count,
+                    "qdic_count": qdic_count,
+                    "prefilter_recall": pre_rate,
+                    "qdic_recall": qdic_rate,
+                    "qdic_minus_prefilter": (
+                        None if pre_rate is None or qdic_rate is None else qdic_rate - pre_rate
+                    ),
+                    "count": None,
+                    "rate_of_association_events": None,
+                    "rate_of_accepted_events": None,
+                    "event_level_transition_status": "UNAVAILABLE_MARGINAL_RANK_COUNTS_ONLY",
+                }
+            )
+        outcomes = (
+            ("accepted_correct_strict", _count(group.get("accepted_correct"))),
+            ("accepted_correct_relaxed", _count(group.get("accepted_correct_relaxed"))),
+            ("accepted_ambiguous", _count(group.get("accepted_ambiguous"))),
+            ("false_merge", _count(group.get("false_merge"))),
+            ("accepted_unresolved", _count(group.get("accepted_unresolved"))),
+            ("rejected_true_association", _count(group.get("rejected_true_association"))),
+        )
+        for outcome, count in outcomes:
+            rows.append(
+                {
+                    "trial_id": item.get("trial_id"),
+                    "candidate_top_k": item.get("candidate_top_k"),
+                    "max_gap": item.get("max_gap"),
+                    "horizon_label": item.get("horizon_label"),
+                    "group": group_name,
+                    "analysis": "decision_outcome",
+                    "rank": None,
+                    "outcome": outcome,
+                    "association_events": association_events,
+                    "positive_events": positive_events,
+                    "accepted_total": accepted_total,
+                    "prefilter_count": None,
+                    "qdic_count": None,
+                    "prefilter_recall": None,
+                    "qdic_recall": None,
+                    "qdic_minus_prefilter": None,
+                    "count": count,
+                    "rate_of_association_events": _rate(count, association_events),
+                    "rate_of_accepted_events": _rate(count, accepted_total),
+                    "event_level_transition_status": "AVAILABLE_POSTHOC_OUTCOME_AGGREGATE",
+                }
+            )
+    return rows
+
+
 def _temporal_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
     temporal = item["diagnostics"].get("temporal_gap_bins", {})
     rows: list[dict[str, Any]] = []
     for gap_bin in GAP_BINS:
         group = temporal.get(gap_bin, {}) if isinstance(temporal, Mapping) else {}
+        positive_events = _count(group.get("positive_events"))
+        prefilter_count_at_64 = _rank_count(group, "prefilter_recall_at", 64)
+        qdic_count_at_64 = _rank_count(group, "qdic_recall_at", 64)
         rows.append(
             {
                 "trial_id": item.get("trial_id"),
@@ -248,8 +430,10 @@ def _temporal_rows(item: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "association_events": group.get("association_events"),
                 "positive_events": group.get("positive_events"),
                 "candidate_recall": group.get("candidate_recall"),
-                "prefilter_recall_at_64": (group.get("prefilter_recall_at") or {}).get("64"),
-                "qdic_recall_at_64": (group.get("qdic_recall_at") or {}).get("64"),
+                "prefilter_positive_count_at_64": prefilter_count_at_64,
+                "qdic_positive_count_at_64": qdic_count_at_64,
+                "prefilter_recall_at_64": _rate(prefilter_count_at_64, positive_events),
+                "qdic_recall_at_64": _rate(qdic_count_at_64, positive_events),
                 "strict_association_recall": group.get("association_recall"),
                 "relaxed_association_recall": group.get("association_recall_relaxed"),
                 "ambiguous_identity_mapping": group.get("ambiguous_identity_mapping"),
@@ -338,6 +522,12 @@ def run(args: argparse.Namespace) -> int:
             }
         )
 
+    correction_regression: list[dict[str, Any]] = []
+    decision_funnel: list[dict[str, Any]] = []
+    for item in candidates:
+        correction_regression.extend(_correction_regression_rows(item))
+        decision_funnel.extend(_decision_funnel_rows(item))
+
     overall_metric_candidates = [
         item for item in candidates if isinstance(item.get("metrics", {}).get("overall"), Mapping)
     ]
@@ -369,6 +559,13 @@ def run(args: argparse.Namespace) -> int:
             "checkpoint_feature_normalization_max_gap": 360,
             "note": "G720 gaps above 360 are inference extrapolation outside the learned feature horizon, not a pure memory-horizon effect.",
         },
+        "diagnostic_capability": {
+            "candidate_supply": "AVAILABLE_POSTHOC",
+            "qdic_rank_recall": "AVAILABLE_AS_NORMALIZED_MARGINAL_COUNTS",
+            "decision_funnel": "AVAILABLE_POSTHOC_OUTCOME_AGGREGATES",
+            "exact_event_level_rank_correction_regression": "UNAVAILABLE_MARGINAL_RANK_COUNTS_ONLY",
+            "unavailable_reason": "The archived aggregate diagnostics retain prefilter/QDIC rank recall counts but not per-event overlap keys; exact corrected/regressed event counts are not inferred from marginal totals.",
+        },
         "candidates": metrics,
         "overall_teta_champion": None if best is None else best.get("trial_id"),
         "bottleneck_diagnosis": diagnoses,
@@ -377,6 +574,8 @@ def run(args: argparse.Namespace) -> int:
             "groups": str(output_root / "candidate_supply_analysis.csv"),
             "ranks": str(output_root / "rank_bucket_analysis.csv"),
             "temporal": str(output_root / "temporal_gap_analysis.csv"),
+            "correction_regression": str(output_root / "correction_regression.csv"),
+            "decision_funnel": str(output_root / "decision_funnel.csv"),
             "diagnosis": str(output_root / "qdic_bottleneck_report.md"),
         },
         "generated_at_unix": time.time(),
@@ -387,8 +586,8 @@ def run(args: argparse.Namespace) -> int:
     _write_csv(output_root / "candidate_supply_analysis.csv", groups)
     _write_csv(output_root / "rank_bucket_analysis.csv", ranks)
     _write_csv(output_root / "temporal_gap_analysis.csv", temporal)
-    _write_csv(output_root / "correction_regression.csv", groups)
-    _write_csv(output_root / "decision_funnel.csv", groups)
+    _write_csv(output_root / "correction_regression.csv", correction_regression)
+    _write_csv(output_root / "decision_funnel.csv", decision_funnel)
 
     lines = [
         "# QDIC bottleneck report",
@@ -438,10 +637,11 @@ def run(args: argparse.Namespace) -> int:
             "",
             "- `structural_search_final.json`: gated aggregate and provenance hashes.",
             "- `structural_search_final_metrics.csv`: Overall/Base/Novel ten metrics per structural candidate.",
-            "- `candidate_supply_analysis.csv`: candidate supply and strict/relaxed decision funnel.",
+            "- `candidate_supply_analysis.csv`: candidate supply and strict/relaxed decision summary.",
             "- `rank_bucket_analysis.csv`: prefilter versus QDIC rank recall at 1/8/16/32/64.",
             "- `temporal_gap_analysis.csv`: causal gap-bin breakdown.",
-            "- `correction_regression.csv` and `decision_funnel.csv`: auditable event-count views.",
+            "- `decision_funnel.csv`: auditable post-hoc stage counts with explicit denominators.",
+            "- `correction_regression.csv`: normalized marginal rank deltas and decision outcomes; exact event-level rank transitions are explicitly marked unavailable.",
         ]
     )
     (output_root / "qdic_bottleneck_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
