@@ -25,6 +25,7 @@ def test_posthoc_diagnostics_joins_local_parts_and_event_rows(tmp_path):
         "images": [
             {"id": 100, "video_id": 7, "frame_id": 0},
             {"id": 101, "video_id": 7, "frame_id": 1},
+            {"id": 102, "video_id": 7, "frame_id": 2},
             {"id": 200, "video_id": 7, "frame_id": 100},
             {"id": 201, "video_id": 7, "frame_id": 201},
             {"id": 300, "video_id": 7, "frame_id": 300},
@@ -32,6 +33,7 @@ def test_posthoc_diagnostics_joins_local_parts_and_event_rows(tmp_path):
         "annotations": [
             {"id": 1, "image_id": 100, "track_id": 10, "category_id": 1, "bbox": [0, 0, 10, 10]},
             {"id": 2, "image_id": 101, "track_id": 10, "category_id": 1, "bbox": [0, 0, 10, 10]},
+            {"id": 6, "image_id": 102, "track_id": 11, "category_id": 1, "bbox": [0, 0, 10, 10]},
             {"id": 3, "image_id": 200, "track_id": 20, "category_id": 2, "bbox": [20, 0, 10, 10]},
             {"id": 4, "image_id": 201, "track_id": 20, "category_id": 2, "bbox": [20, 0, 10, 10]},
             {"id": 5, "image_id": 300, "track_id": 10, "category_id": 1, "bbox": [0, 0, 10, 10]},
@@ -45,6 +47,7 @@ def test_posthoc_diagnostics_joins_local_parts_and_event_rows(tmp_path):
     parts.parent.mkdir(parents=True, exist_ok=True)
     prediction_frames = [
         {"video_id": 7, "image_id": 100, "rows": [{"local_track_id": 5, "category_id": 1, "bbox": [0, 0, 10, 10]}]},
+        {"video_id": 7, "image_id": 102, "rows": [{"local_track_id": 5, "category_id": 1, "bbox": [0, 0, 10, 10]}]},
         {"video_id": 7, "image_id": 200, "rows": [{"local_track_id": 9, "category_id": 2, "bbox": [20, 0, 10, 10]}]},
     ]
     parts.write_text(
@@ -114,7 +117,15 @@ def test_posthoc_diagnostics_joins_local_parts_and_event_rows(tmp_path):
     assert overall["events"] == 3
     assert overall["association_events"] == 3
     assert overall["positive_events"] == 3
-    assert overall["accepted_correct"] == 2
+    assert overall["accepted_correct"] == 1
+    assert overall["accepted_correct_relaxed"] == 2
+    assert overall["ambiguous_identity_mapping"] == 1
+    assert overall["accepted_ambiguous"] == 1
+    assert overall["association_recall"] == 1 / 3
+    assert overall["association_recall_relaxed"] == 2 / 3
+    assert result["identity_mapping"]["status"] == "PASS_WITH_AMBIGUOUS_MAPPINGS"
+    assert result["identity_mapping"]["ambiguous_local_track_count"] == 1
+    assert result["identity_mapping"]["ambiguous_identity_mapping"][0]["local_track_id"] == 5
     assert overall["rejected_true_association"] == 1
     assert result["groups"]["base"]["association_events"] == 2
     assert result["groups"]["novel"]["association_events"] == 1

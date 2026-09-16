@@ -221,7 +221,14 @@ def _new_counts() -> dict[str, Any]:
         "association_events": 0,
         "positive_events": 0,
         "accepted_total": 0,
+        # ``accepted_correct`` is deliberately the strict statistic: the
+        # assigned local ID must map to exactly one GT identity, and it must
+        # be the current target.  The relaxed counterpart is retained for
+        # diagnosis, but mixed local-ID mappings are never strict-correct.
         "accepted_correct": 0,
+        "accepted_correct_relaxed": 0,
+        "ambiguous_identity_mapping": 0,
+        "accepted_ambiguous": 0,
         "false_merge": 0,
         "accepted_unresolved": 0,
         "rejected_true_association": 0,
@@ -261,6 +268,18 @@ def _finalize_counts(value: Mapping[str, Any]) -> dict[str, Any]:
     )
     result["association_precision"] = (
         float(result["accepted_correct"]) / accepted if accepted else None
+    )
+    result["association_recall_relaxed"] = (
+        float(result["accepted_correct_relaxed"]) / denominator if denominator else None
+    )
+    result["association_precision_relaxed"] = (
+        float(result["accepted_correct_relaxed"]) / accepted if accepted else None
+    )
+    result["ambiguous_identity_rate"] = (
+        float(result["ambiguous_identity_mapping"]) / denominator if denominator else None
+    )
+    result["accepted_ambiguous_rate"] = (
+        float(result["accepted_ambiguous"]) / accepted if accepted else None
     )
     result["false_merge_rate"] = (
         float(result["false_merge"]) / accepted if accepted else None
@@ -310,8 +329,19 @@ def _add_event_to_counts(
         return
     counts["accepted_total"] += 1
     assigned = None if assignment is None else track_to_gt.get((video_id, int(assignment)), set())
-    if target_gt in (assigned or set()):
+    assigned = set(assigned or ())
+    # A local track can have been causally matched to more than one GT
+    # identity over the replay.  That is an explicit ambiguity, not a strict
+    # success.  The relaxed statistic is useful for diagnosing whether the
+    # target is still among the mixed identities.
+    if len(assigned) > 1:
+        counts["ambiguous_identity_mapping"] += 1
+        counts["accepted_ambiguous"] += 1
+        if target_gt in assigned:
+            counts["accepted_correct_relaxed"] += 1
+    elif assigned == {target_gt}:
         counts["accepted_correct"] += 1
+        counts["accepted_correct_relaxed"] += 1
     elif assigned:
         counts["false_merge"] += 1
     else:
@@ -487,6 +517,18 @@ def diagnose(*, annotation_path: Path, candidate_root: Path, output: Path) -> di
         value["events_without_prior_identity"] = int(value["events_without_prior_identity"])
     finalized_groups = {name: _finalize_counts(value) for name, value in groups.items()}
     finalized_gaps = {name: _finalize_counts(value) for name, value in gaps.items()}
+    ambiguous_mappings = [
+        {
+            "video_id": int(video_id),
+            "local_track_id": int(local_track_id),
+            "gt_identities": [
+                {"video_id": int(gt_video_id), "track_id": int(gt_track_id)}
+                for gt_video_id, gt_track_id in sorted(identity_set)
+            ],
+        }
+        for (video_id, local_track_id), identity_set in sorted(track_to_gt.items())
+        if len(identity_set) > 1
+    ]
     output_value: dict[str, Any] = {
         "schema_version": 1,
         "artifact": "v11_qdic_structure_posthoc_diagnostics",
@@ -505,6 +547,11 @@ def diagnose(*, annotation_path: Path, candidate_root: Path, output: Path) -> di
         },
         "groups": finalized_groups,
         "temporal_gap_bins": finalized_gaps,
+        "identity_mapping": {
+            "status": "PASS_WITH_AMBIGUOUS_MAPPINGS" if ambiguous_mappings else "PASS_UNAMBIGUOUS",
+            "ambiguous_identity_mapping": ambiguous_mappings,
+            "ambiguous_local_track_count": len(ambiguous_mappings),
+        },
         "shards": shard_meta,
         "definitions": {
             "association_events": "valid IoU>=0.5 same-category observation with the GT identity matched by a strictly prior prediction",
@@ -512,6 +559,10 @@ def diagnose(*, annotation_path: Path, candidate_root: Path, output: Path) -> di
             "prefilter_rank": "candidate_prefilter_ranks emitted by the runtime event diagnostic",
             "qdic_rank": "candidate_logit_ranks emitted by the runtime event diagnostic",
             "false_merge": "accepted assignment mapped to a known different GT identity and not to the target",
+            "accepted_correct": "strict accepted correctness: the assigned local track maps to exactly {target_gt}; a mixed mapping is not strict-correct",
+            "accepted_correct_relaxed": "accepted assignment maps to a set containing target_gt, including mixed mappings",
+            "ambiguous_identity_mapping": "accepted association event whose assigned local track ID causally maps to more than one GT identity",
+            "accepted_ambiguous": "accepted association event with ambiguous_identity_mapping",
             "accepted_unresolved": "accepted assignment had no posthoc known GT mapping",
             "gap": "current annotation frame_id minus the last prior prediction frame mapped to the same GT identity",
         },

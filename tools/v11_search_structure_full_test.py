@@ -56,6 +56,24 @@ MARGIN_DEFAULT = 0.37210235595703123
 EVENT_DIAGNOSTICS_TOOL = REPO / "tools" / "v11_structure_diagnostics.py"
 
 
+def _horizon_annotation(max_gap: int) -> dict[str, str]:
+    if int(max_gap) > 360:
+        return {
+            "horizon_label": "LONG_HORIZON_EXTRAPOLATION",
+            "horizon_note": (
+                "runtime legal horizon={} frames; checkpoint feature normalization max_gap=360; "
+                "gap>360 uses inference extrapolation beyond the learned feature horizon and is "
+                "not a pure memory-horizon effect"
+            ).format(int(max_gap)),
+        }
+    return {
+        "horizon_label": "WITHIN_CHECKPOINT_FEATURE_HORIZON",
+        "horizon_note": (
+            "runtime legal horizon={} frames; checkpoint feature normalization max_gap=360"
+        ).format(int(max_gap)),
+    }
+
+
 def _write_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
@@ -82,6 +100,7 @@ def _six_trials() -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
             "margin_threshold": MARGIN_DEFAULT,
             "master_port": port,
             "collect_event_diagnostics": True,
+            **_horizon_annotation(gap),
         }
         for trial_id, wave, k, gap, port in raw
     ]
@@ -147,6 +166,7 @@ def _structure_plan(preflight: Mapping[str, Any]) -> dict[str, Any]:
             "margin_threshold": MARGIN_DEFAULT,
             "rerun": False,
             "source": str(ANCHOR_DEFAULT),
+            **_horizon_annotation(360),
         },
         "full_test_annotation_sha256": preflight["full_test_annotation"]["sha256"],
         "qdic_checkpoint_sha256": preflight["qdic"]["checkpoint_sha256"],
@@ -407,6 +427,8 @@ def _new_state(
         "target_hours": float(args.hours),
         "runtime_sanity_status": "PENDING",
         "runtime_sanity_path": str(root / "sanity.json"),
+        "structural_behavior_sanity_status": "PENDING",
+        "structural_behavior_sanity_path": str(root / "structural_behavior_sanity.json"),
         "formal_search_started_at_unix": None,
         "formal_search_ended_at_unix": None,
         "waves": {},
@@ -432,6 +454,8 @@ def _status_view(state: Mapping[str, Any]) -> dict[str, Any]:
         "resource_policy": state.get("resource_policy"),
         "candidate_parallelism": state.get("candidate_parallelism"),
         "runtime_sanity_status": state.get("runtime_sanity_status"),
+        "structural_behavior_sanity_status": state.get("structural_behavior_sanity_status"),
+        "structural_behavior_sanity_path": state.get("structural_behavior_sanity_path"),
         "formal_search_started_at_unix": state.get("formal_search_started_at_unix"),
         "formal_search_ended_at_unix": state.get("formal_search_ended_at_unix"),
         "waves": state.get("waves", {}),
@@ -443,6 +467,7 @@ def _status_view(state: Mapping[str, Any]) -> dict[str, Any]:
                 in {
                     "trial_id", "wave", "candidate_top_k", "max_gap", "score_threshold",
                     "margin_threshold", "master_port", "status", "candidate_root",
+                    "horizon_label", "horizon_note",
                     "report_root", "full_started_at_unix", "full_test_end_unix",
                     "full_duration_seconds", "completed_at_unix", "error", "diagnostics_path",
                     "evaluation", "score_distribution",
@@ -495,7 +520,315 @@ def _load_anchor(path: Path) -> dict[str, Any]:
     candidate["score_threshold"] = 0.0
     candidate["margin_threshold"] = MARGIN_DEFAULT
     candidate["anchor_source"] = str(path)
+    candidate.update(_horizon_annotation(360))
     return candidate
+
+
+def _structural_behavior_sanity_valid(root: Path, preflight: Mapping[str, Any]) -> bool:
+    path = root / "structural_behavior_sanity.json"
+    if not path.is_file():
+        return False
+    try:
+        value = base._read_json(path)
+    except (OSError, json.JSONDecodeError):
+        return False
+    checks = value.get("checks", {}) if isinstance(value, Mapping) else {}
+
+    def _checks_pass(node: Any) -> bool:
+        if isinstance(node, Mapping):
+            return all(_checks_pass(item) for item in node.values())
+        if isinstance(node, bool):
+            return node
+        return True
+
+    return bool(
+        isinstance(value, Mapping)
+        and value.get("status") == "PASS"
+        and value.get("preflight_sha256") == base._sha256(root / "preflight.json")
+        and value.get("repo_head") == preflight["repository"]["head"]
+        and isinstance(checks, Mapping)
+        and _checks_pass(checks)
+    )
+
+
+def _run_structural_behavior_sanity(
+    *, root: Path, report_root: Path, preflight: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Exercise structural behavior with a deterministic, GT-free overlay case.
+
+    Runtime/config echo checks prove that values were threaded through the
+    process.  This check additionally observes the actual overlay decision
+    candidate ranks and legal-horizon filtering, while keeping the learned
+    QDIC feature contract fixed at K=8/max_gap=360.
+    """
+    import numpy as np
+
+    from tempotrack_v10 import PreAssociationSnapshot, TempoTrackConfig, TempoTrackOverlay
+    from tempotrack_v10.qdic_features import QDIC_FEATURE_NAMES
+
+    class _BehaviorQDIC:
+        @property
+        def provenance(self) -> dict[str, Any]:
+            return {
+                "status": "QDIC_V11_MODEL_CODE_AND_WEIGHTS",
+                "feature_names": list(QDIC_FEATURE_NAMES),
+                "feature_dim": 33,
+                "feature_config": {
+                    "query_observations": 1,
+                    "recent_k": 8,
+                    "alpha_fast": 0.70,
+                    "alpha_slow": 0.15,
+                    "memory_capacity": 64,
+                    "memory_dedup_cos": 0.95,
+                    "context_candidate_top_k": 64,
+                    "decision_candidate_top_k": 8,
+                    "top_r": 3,
+                    "min_gap": 0,
+                    "max_gap": 360,
+                },
+                "training_protocol": "QDIC_V11_BASE_ONLY_TRAINING",
+                "base_only_supervision": True,
+                "novel_gt_used": False,
+                "test_weights_used": False,
+            }
+
+        def score_event(self, candidates: list[Mapping[str, Any]], **_kwargs: Any) -> tuple[np.ndarray, dict[str, Any]]:
+            # The deterministic ranking is only a test instrument.  It makes
+            # every legal context scoreable and leaves rank order explicit.
+            count = len(candidates)
+            return np.asarray([float(count - index) for index in range(count)], dtype=np.float32), {}
+
+    def _snapshot(*, frame_id: int, gaps: tuple[int, ...]) -> PreAssociationSnapshot:
+        count = len(gaps)
+        memory_ids = tuple(1000 + index for index in range(count))
+        histories = {
+            memory_id: np.asarray([[1.0, 0.0]], dtype=np.float32)
+            for memory_id in memory_ids
+        }
+        evidence = {
+            memory_id: np.ones((1, 7), dtype=np.float32)
+            for memory_id in memory_ids
+        }
+        return PreAssociationSnapshot(
+            video_id="structural-sanity",
+            frame_id=int(frame_id),
+            boxes_xyxy=np.asarray([[0.0, 0.0, 10.0, 10.0]], dtype=np.float32),
+            det_scores=np.asarray([0.9], dtype=np.float32),
+            labels=np.asarray([0], dtype=np.int64),
+            observation_uids=(f"structural-sanity:{frame_id}",),
+            embeddings=np.asarray([[1.0, 0.0]], dtype=np.float32),
+            native_affinity=np.zeros((1, count), dtype=np.float32),
+            memory_ids=memory_ids,
+            memory_embeddings=np.asarray([[1.0, 0.0]] * count, dtype=np.float32).reshape(count, 2),
+            memory_last_frame=np.asarray(
+                [int(frame_id) - int(gap) for gap in gaps], dtype=np.int64
+            ),
+            metadata={
+                "association_stage": "pre_association",
+                "memory_embedding_history": histories,
+                "memory_evidence": evidence,
+            },
+        )
+
+    def _proposal(*, candidate_top_k: int, max_gap: int, gaps: tuple[int, ...]):
+        overlay = TempoTrackOverlay(
+            TempoTrackConfig(
+                enabled=True,
+                alpha_fast=0.70,
+                alpha_slow=0.15,
+                min_gap=0,
+                max_gap=int(max_gap),
+                candidate_top_k=int(candidate_top_k),
+                top_r=3,
+                memory_capacity=64,
+                score_threshold=-1.0e9,
+                margin_threshold=-1.0e9,
+                qdic_weight=1.0,
+                qdic_recent_k=8,
+                qdic_context_top_k=64,
+            ),
+            qdic=_BehaviorQDIC(),
+        )
+        # Event diagnostics expose the actual context and decision ranks;
+        # this is deliberately enabled only inside the deterministic check.
+        overlay._replay_event_diagnostics = True
+        return overlay.propose(_snapshot(frame_id=1000, gaps=gaps))
+
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "artifact": "v11_qdic_structural_behavior_sanity",
+        "status": "RUNNING",
+        "protocol": "DETERMINISTIC_GT_FREE_BEHAVIOR_SANITY",
+        "inference_gt_used": False,
+        "preflight_sha256": base._sha256(root / "preflight.json"),
+        "repo_head": preflight["repository"]["head"],
+        "learned_feature_contract": {
+            "decision_candidate_top_k": 8,
+            "max_gap": 360,
+        },
+        "definition": {
+            "candidate_top_k": "runtime decision eligibility is observed from candidate_decision_ranks after the legal Top-64 context is formed",
+            "max_gap": "runtime legality is observed from the actual proposal legal candidate count for a causal memory at the specified gap",
+            "deterministic_scorer": "rank-descending finite logits; no annotation, GT, or evaluator input",
+        },
+        "started_at_unix": time.time(),
+    }
+    root_path = root / "structural_behavior_sanity.json"
+    report_path = report_root / "structural_behavior_sanity.json"
+
+    def _write() -> None:
+        base._write_json(root_path, result)
+        base._write_json(report_path, result)
+
+    try:
+        candidate_results: dict[str, Any] = {}
+        for candidate_top_k in (8, 16):
+            proposal = _proposal(
+                candidate_top_k=candidate_top_k,
+                max_gap=360,
+                gaps=(2,) * 16,
+            )
+            diagnostics = proposal.diagnostics
+            events = list(diagnostics.get("replay_events", ()))
+            if len(events) != 1:
+                raise RuntimeError(
+                    f"candidate_top_k={candidate_top_k} did not emit one behavior event"
+                )
+            event = events[0]
+            decision_ranks = list(event.get("candidate_decision_ranks", ()))
+            candidate_results[str(candidate_top_k)] = {
+                "candidate_top_k": int(candidate_top_k),
+                "candidate_memory_ids": [int(value) for value in event.get("candidate_memory_ids", ())],
+                "candidate_decision_ranks": decision_ranks,
+                "rank_9_eligible": bool(
+                    len(decision_ranks) > 8 and decision_ranks[8] is not None
+                ),
+                "structural_candidate_top_k": int(diagnostics.get("structural_candidate_top_k", -1)),
+                "qdic_decision_candidate_top_k": int(diagnostics.get("qdic_decision_candidate_top_k", -1)),
+                "qdic_feature_decision_candidate_top_k": int(
+                    diagnostics.get("qdic_feature_decision_candidate_top_k", -1)
+                ),
+                "qdic_feature_max_gap": int(diagnostics.get("qdic_feature_max_gap", -1)),
+                "legal_candidate_count": int(diagnostics.get("legal_candidate_count", -1)),
+            }
+        result["candidate_top_k_behavior"] = candidate_results
+
+        candidate_checks = {
+            "k8_rank_9_ineligible": candidate_results["8"]["rank_9_eligible"] is False,
+            "k16_rank_9_eligible": candidate_results["16"]["rank_9_eligible"] is True,
+            "rank_9_eligibility_changes": (
+                candidate_results["8"]["rank_9_eligible"]
+                != candidate_results["16"]["rank_9_eligible"]
+            ),
+            "k8_runtime_diagnostic": candidate_results["8"]["structural_candidate_top_k"] == 8,
+            "k16_runtime_diagnostic": candidate_results["16"]["structural_candidate_top_k"] == 16,
+            "k8_learned_feature_k_immutable": (
+                candidate_results["8"]["qdic_feature_decision_candidate_top_k"] == 8
+            ),
+            "k16_learned_feature_k_immutable": (
+                candidate_results["16"]["qdic_feature_decision_candidate_top_k"] == 8
+            ),
+            "candidate_behavior_feature_max_gap_immutable": all(
+                candidate_results[str(value)]["qdic_feature_max_gap"] == 360
+                for value in (8, 16)
+            ),
+        }
+
+        gap_results: dict[str, Any] = {}
+        for gap in (200, 500):
+            gap_results[str(gap)] = {}
+            for max_gap in (180, 360, 720):
+                proposal = _proposal(
+                    candidate_top_k=8,
+                    max_gap=max_gap,
+                    gaps=(gap,),
+                )
+                diagnostics = proposal.diagnostics
+                events = list(diagnostics.get("replay_events", ()))
+                if len(events) != 1:
+                    raise RuntimeError(
+                        f"gap={gap}, max_gap={max_gap} did not emit one behavior event"
+                    )
+                event = events[0]
+                decision_ranks = list(event.get("candidate_decision_ranks", ()))
+                gap_results[str(gap)][str(max_gap)] = {
+                    "gap": int(gap),
+                    "max_gap": int(max_gap),
+                    "legal": bool(decision_ranks),
+                    "legal_candidate_count": int(diagnostics.get("legal_candidate_count", -1)),
+                    "candidate_decision_ranks": decision_ranks,
+                    "structural_max_gap": int(diagnostics.get("structural_max_gap", -1)),
+                    "qdic_feature_max_gap": int(diagnostics.get("qdic_feature_max_gap", -1)),
+                    "qdic_feature_decision_candidate_top_k": int(
+                        diagnostics.get("qdic_feature_decision_candidate_top_k", -1)
+                    ),
+                }
+        result["max_gap_behavior"] = gap_results
+
+        gap_checks = {
+            "gap_200_legal_matrix": {
+                "180": gap_results["200"]["180"]["legal"] is False,
+                "360": gap_results["200"]["360"]["legal"] is True,
+                "720": gap_results["200"]["720"]["legal"] is True,
+            },
+            "gap_500_legal_matrix": {
+                "180": gap_results["500"]["180"]["legal"] is False,
+                "360": gap_results["500"]["360"]["legal"] is False,
+                "720": gap_results["500"]["720"]["legal"] is True,
+            },
+            "gap_200_legality_changes": (
+                gap_results["200"]["180"]["legal"]
+                != gap_results["200"]["360"]["legal"]
+                or gap_results["200"]["360"]["legal"]
+                != gap_results["200"]["720"]["legal"]
+            ),
+            "gap_500_legality_changes": (
+                gap_results["500"]["180"]["legal"]
+                != gap_results["500"]["360"]["legal"]
+                or gap_results["500"]["360"]["legal"]
+                != gap_results["500"]["720"]["legal"]
+            ),
+            "all_gap_learned_feature_max_gap_360": all(
+                gap_results[str(gap)][str(max_gap)]["qdic_feature_max_gap"] == 360
+                for gap in (200, 500)
+                for max_gap in (180, 360, 720)
+            ),
+            "all_gap_learned_feature_k_8": all(
+                gap_results[str(gap)][str(max_gap)][
+                    "qdic_feature_decision_candidate_top_k"
+                ] == 8
+                for gap in (200, 500)
+                for max_gap in (180, 360, 720)
+            ),
+        }
+        result["checks"] = {
+            **candidate_checks,
+            "gap_behavior": gap_checks,
+            "gap_behavior_matrix_all_pass": all(gap_checks["gap_200_legal_matrix"].values())
+            and all(gap_checks["gap_500_legal_matrix"].values()),
+        }
+        flat_checks = [
+            value
+            for key, value in result["checks"].items()
+            if key != "gap_behavior" and isinstance(value, bool)
+        ]
+        flat_checks.extend(value for value in gap_checks.values() if isinstance(value, bool))
+        flat_checks.extend(gap_checks["gap_200_legal_matrix"].values())
+        flat_checks.extend(gap_checks["gap_500_legal_matrix"].values())
+        if not all(flat_checks):
+            raise RuntimeError(f"structural behavior checks failed: {result['checks']}")
+        result["status"] = "PASS"
+        result["ended_at_unix"] = time.time()
+        result["duration_seconds"] = result["ended_at_unix"] - result["started_at_unix"]
+        _write()
+        return result
+    except Exception as exc:
+        result["status"] = "FAILED"
+        result["error"] = f"{type(exc).__name__}: {exc}"
+        result["traceback"] = traceback.format_exc()
+        result["ended_at_unix"] = time.time()
+        _write()
+        raise
 
 
 def _runtime_sanity_valid(root: Path, preflight: Mapping[str, Any]) -> bool:
@@ -514,6 +847,7 @@ def _runtime_sanity_valid(root: Path, preflight: Mapping[str, Any]) -> bool:
         and {str(item.get("trial_id")) for item in value.get("trials", [])}
         == {"SANITY_K16_G360", "SANITY_K64_G720"}
         and all(item.get("status") == "PASS" for item in value.get("trials", []))
+        and _structural_behavior_sanity_valid(root, preflight)
     )
 
 
@@ -523,6 +857,8 @@ def _run_runtime_sanity(
 ) -> None:
     if _runtime_sanity_valid(root, preflight):
         state["runtime_sanity_status"] = "PASS"
+        state["structural_behavior_sanity_status"] = "PASS"
+        state["structural_behavior_sanity_path"] = str(root / "structural_behavior_sanity.json")
         _persist_state(root, report_root, state)
         print("STRUCTURE_RUNTIME_SANITY: PASS (reused)", flush=True)
         return
@@ -539,6 +875,7 @@ def _run_runtime_sanity(
         "preflight_sha256": base._sha256(root / "preflight.json"),
         "repo_head": preflight["repository"]["head"],
         "source_annotation": str(source_annotation),
+        "structural_behavior_sanity_path": str(root / "structural_behavior_sanity.json"),
         "trials": [],
         "started_at_unix": time.time(),
     }
@@ -651,11 +988,20 @@ def _run_runtime_sanity(
             }
             record["trials"].append(item)
             base._write_json(root / "sanity.json", record)
+        behavior = _run_structural_behavior_sanity(
+            root=root, report_root=report_root, preflight=preflight
+        )
+        record["structural_behavior_sanity"] = {
+            "status": behavior["status"],
+            "path": str(root / "structural_behavior_sanity.json"),
+        }
         record["status"] = "PASS"
         record["ended_at_unix"] = time.time()
         record["duration_seconds"] = record["ended_at_unix"] - record["started_at_unix"]
         base._write_json(root / "sanity.json", record)
         state["runtime_sanity_status"] = "PASS"
+        state["structural_behavior_sanity_status"] = "PASS"
+        state["structural_behavior_sanity_path"] = str(root / "structural_behavior_sanity.json")
         state["runtime_sanity"] = record
         _persist_state(root, report_root, state)
         print("STRUCTURE_RUNTIME_SANITY: PASS", flush=True)
@@ -666,6 +1012,9 @@ def _run_runtime_sanity(
         record["ended_at_unix"] = time.time()
         base._write_json(root / "sanity.json", record)
         state["runtime_sanity_status"] = "FAILED"
+        state["structural_behavior_sanity_status"] = (
+            "PASS" if _structural_behavior_sanity_valid(root, preflight) else "FAILED"
+        )
         state["error"] = record["error"]
         _persist_state(root, report_root, state)
         raise
@@ -795,6 +1144,8 @@ def _write_experiment_artifacts(
         "trial_id": trial.get("trial_id"),
         "candidate_top_k": trial.get("candidate_top_k"),
         "max_gap": trial.get("max_gap"),
+        "horizon_label": trial.get("horizon_label"),
+        "horizon_note": trial.get("horizon_note"),
         "score_threshold": trial.get("score_threshold"),
         "margin_threshold": trial.get("margin_threshold"),
         "full_duration_seconds": trial.get("full_duration_seconds"),
@@ -814,6 +1165,10 @@ def _write_experiment_artifacts(
         "fixed_learned_feature_contract": {
             "decision_candidate_top_k": 8,
             "max_gap": 360,
+        },
+        "horizon": {
+            "label": trial.get("horizon_label"),
+            "note": trial.get("horizon_note"),
         },
     })
     base._write_json(exp_root / "log_paths.json", {
@@ -1009,12 +1364,12 @@ def _previous_margin_distributions() -> dict[str, Any]:
 def _write_csvs(report_root: Path, anchor: Mapping[str, Any], candidates: list[Mapping[str, Any]]) -> None:
     all_items = [anchor] + candidates
     metric_fields = [
-        "trial_id", "candidate_top_k", "max_gap", "status",
+        "trial_id", "candidate_top_k", "max_gap", "horizon_label", "status",
     ] + [f"{split}_{name}" for split in ("overall", "base", "novel") for name in base.METRIC_NAMES]
     rows = []
     for item in all_items:
         row = {field: "" for field in metric_fields}
-        row.update({key: item.get(key, "") for key in ("trial_id", "candidate_top_k", "max_gap", "status")})
+        row.update({key: item.get(key, "") for key in ("trial_id", "candidate_top_k", "max_gap", "horizon_label", "status")})
         for split in ("overall", "base", "novel"):
             for name in base.METRIC_NAMES:
                 value = item.get("metrics", {}).get(split, {}).get(name) if isinstance(item.get("metrics"), Mapping) else None
@@ -1089,6 +1444,7 @@ def _write_final_outputs(
     bottleneck = None if overall is None else _bottleneck(overall)
     margin_distributions = _previous_margin_distributions()
     for item in candidates:
+        item.update(_horizon_annotation(int(item.get("max_gap", 360))))
         if item.get("score_distribution") is None and item.get("status") == "COMPLETED":
             try:
                 item["score_distribution"] = base._score_distribution(item)
@@ -1121,6 +1477,20 @@ def _write_final_outputs(
         "runtime_sanity": {
             "path": str(root / "sanity.json"),
             "status": state.get("runtime_sanity_status"),
+        },
+        "structural_behavior_sanity": {
+            "path": str(root / "structural_behavior_sanity.json"),
+            "report_path": str(report_root / "structural_behavior_sanity.json"),
+            "status": state.get("structural_behavior_sanity_status"),
+        },
+        "horizon_interpretation": {
+            "runtime_legal_horizon_for_g720": 720,
+            "checkpoint_feature_normalization_max_gap": 360,
+            "label": "LONG_HORIZON_EXTRAPOLATION",
+            "note": (
+                "For G720, gaps above 360 are outside the checkpoint's learned feature "
+                "normalization horizon. G720 must not be interpreted as a pure memory-horizon effect."
+            ),
         },
         "anchor": anchor,
         "candidates": candidates,
@@ -1213,21 +1583,26 @@ def _write_final_outputs(
         f"- Repository: `{preflight['repository']['branch']}` @ `{preflight['repository']['head']}`",
         f"- Resource policy: `{state.get('resource_policy')}`; selected GPUs: `{','.join(state.get('selected_gpus', []))}`; max complete candidates concurrently: `2`",
         f"- Runtime sanity: `{state.get('runtime_sanity_status')}`",
+        f"- Structural behavior sanity: `{state.get('structural_behavior_sanity_status')}`; artifact `{report_root / 'structural_behavior_sanity.json'}`",
         f"- QDIC learned feature contract: decision K=`8`, feature max_gap=`360`",
+        "",
+        "## G720 interpretation",
+        "",
+        "G720 candidates are labeled `LONG_HORIZON_EXTRAPOLATION`: runtime legal horizon is 720, but the checkpoint feature normalization remains max_gap=360. Therefore gaps above 360 are inference extrapolation outside the learned feature horizon, and G720 is not a pure memory-horizon measurement.",
         "",
         "## Candidates",
         "",
-        "| Trial | K | max_gap | Overall TETA | Base TETA | Novel TETA | Status |",
-        "|---|---:|---:|---:|---:|---:|---|",
+        "| Trial | K | max_gap | Horizon status | Overall TETA | Base TETA | Novel TETA | Status |",
+        "|---|---:|---:|---|---:|---:|---:|---|",
     ]
     if anchor:
         lines.append(
-            f"| {anchor.get('trial_id')} (anchor) | {anchor.get('candidate_top_k')} | {anchor.get('max_gap')} | "
+            f"| {anchor.get('trial_id')} (anchor) | {anchor.get('candidate_top_k')} | {anchor.get('max_gap')} | {anchor.get('horizon_label', 'WITHIN_CHECKPOINT_FEATURE_HORIZON')} | "
             f"{_metric(anchor, 'overall', 'TETA'):.3f} | {_metric(anchor, 'base', 'TETA'):.3f} | {_metric(anchor, 'novel', 'TETA'):.3f} | {anchor.get('status')} |"
         )
     for item in candidates:
         lines.append(
-            f"| {item.get('trial_id')} | {item.get('candidate_top_k')} | {item.get('max_gap')} | "
+            f"| {item.get('trial_id')} | {item.get('candidate_top_k')} | {item.get('max_gap')} | {item.get('horizon_label')} | "
             f"{_metric(item, 'overall', 'TETA'):.3f} | {_metric(item, 'base', 'TETA'):.3f} | {_metric(item, 'novel', 'TETA'):.3f} | {item.get('status')} |"
         )
     lines.extend(["", "## Overall TETA champion", ""])
@@ -1251,24 +1626,24 @@ def _write_final_outputs(
             lines.extend([_comparison_table(overall, item), ""])
     if not original_baselines:
         lines.append("没有可用的 original Full-Test baseline。\n")
-    lines.extend(["## Candidate-supply and QDIC-rank diagnostics", "", "| Trial | Group | Association events | Positive | Candidate recall | Prefilter R@64 | QDIC R@64 | Assoc recall | Assoc precision | False merge |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"])
+    lines.extend(["## Candidate-supply and QDIC-rank diagnostics", "", "`accepted_correct` and `Assoc recall/precision` are strict. Mixed local-track mappings are reported separately; relaxed values are diagnostic only.", "", "| Trial | Group | Association events | Positive | Candidate recall | Prefilter R@64 | QDIC R@64 | Strict Assoc recall | Relaxed Assoc recall | Ambiguous mapping | Strict Assoc precision | False merge |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"])
     for item in candidates:
         diag = item.get("diagnostics", {})
         group = diag.get("groups", {}).get("overall", {}) if isinstance(diag, Mapping) else {}
         lines.append(
-            f"| {item.get('trial_id')} | overall | {group.get('association_events', 'NA')} | {group.get('positive_events', 'NA')} | {fmt(group.get('candidate_recall'))} | {fmt((group.get('prefilter_recall_at') or {}).get('64'))} | {fmt((group.get('qdic_recall_at') or {}).get('64'))} | {fmt(group.get('association_recall'))} | {fmt(group.get('association_precision'))} | {group.get('false_merge', 'NA')} |"
+            f"| {item.get('trial_id')} | overall | {group.get('association_events', 'NA')} | {group.get('positive_events', 'NA')} | {fmt(group.get('candidate_recall'))} | {fmt((group.get('prefilter_recall_at') or {}).get('64'))} | {fmt((group.get('qdic_recall_at') or {}).get('64'))} | {fmt(group.get('association_recall'))} | {fmt(group.get('association_recall_relaxed'))} | {group.get('ambiguous_identity_mapping', 'NA')} | {fmt(group.get('association_precision'))} | {group.get('false_merge', 'NA')} |"
         )
     lines.extend(["", "## Temporal gap diagnostics", ""])
     for item in candidates:
         diag = item.get("diagnostics", {})
         lines.append(f"### {item.get('trial_id')}")
         lines.append("")
-        lines.append("| Gap bin | Events | Positive | Candidate recall | Accepted correct | False merge | Assoc recall | Assoc precision |")
-        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+        lines.append("| Gap bin | Events | Positive | Candidate recall | Strict accepted correct | Relaxed accepted correct | Ambiguous mapping | False merge | Strict Assoc recall | Assoc precision |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for name in ("gap_le_180", "gap_181_360", "gap_361_720", "gap_gt_720"):
             group = diag.get("temporal_gap_bins", {}).get(name, {}) if isinstance(diag, Mapping) else {}
             lines.append(
-                f"| {name} | {group.get('association_events', 'NA')} | {group.get('positive_events', 'NA')} | {fmt(group.get('candidate_recall'))} | {group.get('accepted_correct', 'NA')} | {group.get('false_merge', 'NA')} | {fmt(group.get('association_recall'))} | {fmt(group.get('association_precision'))} |"
+                f"| {name} | {group.get('association_events', 'NA')} | {group.get('positive_events', 'NA')} | {fmt(group.get('candidate_recall'))} | {group.get('accepted_correct', 'NA')} | {group.get('accepted_correct_relaxed', 'NA')} | {group.get('ambiguous_identity_mapping', 'NA')} | {group.get('false_merge', 'NA')} | {fmt(group.get('association_recall'))} | {fmt(group.get('association_precision'))} |"
             )
         lines.append("")
     lines.extend(["## Bottleneck diagnosis", ""])
@@ -1369,7 +1744,14 @@ def main() -> int:
             _write_text(report_root / "structure_search_config_diff.md", _config_diff(plan, preflight))
         if not (report_root / "structure_search_manifest.json").is_file() and (root / "structure_search_manifest.json").is_file():
             base._write_json(report_root / "structure_search_manifest.json", base._read_json(root / "structure_search_manifest.json"))
-        if state.get("runtime_sanity_status") != "PASS":
+        if args.preflight_only:
+            state["status"] = "PREPARED"
+            state["phase"] = "SANITY"
+            base._append_event(state, "preflight_completed", preflight_only=True)
+            _persist_state(root, report_root, state)
+            print(f"STRUCTURE_PREFLIGHT_COMPLETED root={root}", flush=True)
+            return 0
+        if state.get("runtime_sanity_status") != "PASS" or not _runtime_sanity_valid(root, preflight):
             _run_runtime_sanity(
                 args=args, root=root, report_root=report_root,
                 preflight=preflight, state=state,
