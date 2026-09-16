@@ -33,7 +33,10 @@ from tempotrack_v10.qdic_trainer import sha256  # noqa: E402
 from run_candidate_aware_qdic_fulltest import _validate_structure_gate  # noqa: E402
 
 
-ARCHITECTURES = ("A0", "A0-D", "A1", "A2")
+# Keep the comparison registry in the same canonical namespace used by the
+# trainer/checkpoint loader.  The CLI still accepts the short A1/A2 aliases,
+# but validation must happen after canonicalisation.
+ARCHITECTURES = ("A0", "A0-D", "A1-DS-QDIC", "A2-DGSA-QDIC")
 
 
 def _write_json(path: Path, value: Any) -> None:
