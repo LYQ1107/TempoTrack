@@ -1589,7 +1589,7 @@ def _worker_command(
     gpu: str,
     tempo_config: Path | None = None,
 ) -> list[str]:
-    return [
+    command = [
         str(args.worker_python or sys.executable),
         str(_path(args.repo) / "tools" / "v11_run_covtrack_full_trial.py"),
         "--repo",
