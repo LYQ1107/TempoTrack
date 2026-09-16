@@ -11,7 +11,9 @@ reranker.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -29,6 +31,10 @@ from .qdic_features import (
     QDIC_RECENT_K,
 )
 from .qdic_loader import load_qdic_checkpoint
+from .candidate_aware_qdic_loader import (
+    CANDIDATE_AWARE_STATUS,
+    load_candidate_aware_checkpoint,
+)
 from .reranker import load_exact_v9_reranker
 
 
@@ -216,10 +222,24 @@ class TempoTrackOverlay:
         if self.config.qdic_weight > 0.0 and qdic is None:
             if not self.config.qdic_checkpoint:
                 raise SnapshotContractError("BLOCKED_QDIC_CHECKPOINT_MISSING")
-            qdic = load_qdic_checkpoint(
-                self.config.qdic_checkpoint,
-                device=self.config.qdic_device,
-            )
+            checkpoint_path = Path(self.config.qdic_checkpoint).resolve()
+            receipt_path = checkpoint_path.parent / "training.json"
+            if not receipt_path.is_file():
+                raise SnapshotContractError("BLOCKED_QDIC_TRAINING_RECEIPT_MISSING")
+            try:
+                receipt_artifact = json.loads(receipt_path.read_text(encoding="utf-8")).get("artifact")
+            except (OSError, json.JSONDecodeError) as exc:
+                raise SnapshotContractError("BLOCKED_QDIC_TRAINING_RECEIPT_INVALID") from exc
+            if receipt_artifact == "candidate_aware_qdic_training":
+                qdic = load_candidate_aware_checkpoint(
+                    checkpoint_path,
+                    device=self.config.qdic_device,
+                )
+            else:
+                qdic = load_qdic_checkpoint(
+                    checkpoint_path,
+                    device=self.config.qdic_device,
+                )
         if self.config.qdic_weight > 0.0 and qdic is not None:
             if not (
                 np.isclose(self.config.alpha_fast, 0.70, rtol=0.0, atol=1e-8)
@@ -235,14 +255,20 @@ class TempoTrackOverlay:
             if not callable(getattr(qdic, "score_event", None)):
                 raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: score_event")
             provenance = getattr(qdic, "provenance", None)
-            if not isinstance(provenance, Mapping) or provenance.get("status") != "QDIC_V11_MODEL_CODE_AND_WEIGHTS":
+            if not isinstance(provenance, Mapping) or provenance.get("status") not in {
+                "QDIC_V11_MODEL_CODE_AND_WEIGHTS",
+                CANDIDATE_AWARE_STATUS,
+            }:
                 raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: exact provenance")
             if int(provenance.get("feature_dim", -1)) != QDIC_RAW_DIM or tuple(
                 provenance.get("feature_names", ())
             ) != tuple(QDIC_FEATURE_NAMES):
                 raise SnapshotContractError("BLOCKED_QDIC_FEATURE_SCHEMA_MISMATCH")
             if (
-                provenance.get("training_protocol") != "QDIC_V11_BASE_ONLY_TRAINING"
+                provenance.get("training_protocol") not in {
+                    "QDIC_V11_BASE_ONLY_TRAINING",
+                    "QDIC_V11_BASE_ONLY_CANDIDATE_AWARE_TRAINING",
+                }
                 or not bool(provenance.get("base_only_supervision"))
                 or bool(provenance.get("novel_gt_used"))
                 or bool(provenance.get("test_weights_used"))

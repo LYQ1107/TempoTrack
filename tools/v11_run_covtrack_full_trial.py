@@ -209,11 +209,17 @@ def _validate_runtime_contract(
     if not isinstance(status, Mapping):
         failures.append("qdic_provenance")
     else:
-        if status.get("status") != "QDIC_V11_MODEL_CODE_AND_WEIGHTS":
+        if status.get("status") not in {
+            "QDIC_V11_MODEL_CODE_AND_WEIGHTS",
+            "CANDIDATE_AWARE_QDIC_MODEL_CODE_AND_WEIGHTS",
+        }:
             failures.append("qdic_status")
         if status.get("checkpoint_sha256") != expected_checkpoint_sha256:
             failures.append("qdic_checkpoint_sha256")
-        if status.get("training_protocol") != "QDIC_V11_BASE_ONLY_TRAINING":
+        if status.get("training_protocol") not in {
+            "QDIC_V11_BASE_ONLY_TRAINING",
+            "QDIC_V11_BASE_ONLY_CANDIDATE_AWARE_TRAINING",
+        }:
             failures.append("qdic_training_protocol")
         if status.get("base_only_supervision") is not True:
             failures.append("qdic_base_only")
