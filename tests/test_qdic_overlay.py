@@ -216,7 +216,7 @@ def test_qdic_misaligned_history_and_evidence_is_fail_closed():
 
 @pytest.mark.parametrize(
     ("name", "checkpoint_value", "runtime_value"),
-    (("top_r", 5, 3), ("min_gap", 1, 0), ("max_gap", 180, 360)),
+    (("top_r", 5, 3), ("min_gap", 1, 0)),
 )
 def test_qdic_runtime_contract_compares_top_r_and_gap_bounds(
     name, checkpoint_value, runtime_value
@@ -226,6 +226,25 @@ def test_qdic_runtime_contract_compares_top_r_and_gap_bounds(
             _config(**{name: runtime_value}),
             qdic=_FakeQDIC(**{name: checkpoint_value}),
         )
+
+
+def test_qdic_structural_k_and_gap_are_runtime_fields_not_checkpoint_fields():
+    overlay = TempoTrackOverlay(
+        _config(candidate_top_k=16, max_gap=180),
+        qdic=_FakeQDIC(),
+    )
+    proposal = overlay.propose(
+        _snapshot(
+            frame=200,
+            histories=tuple(
+                np.asarray([[1.0, 0.0]], dtype=np.float32) for _ in range(16)
+            ),
+        )
+    )
+    assert proposal.diagnostics["structural_candidate_top_k"] == 16
+    assert proposal.diagnostics["structural_max_gap"] == 180
+    assert proposal.diagnostics["qdic_feature_decision_candidate_top_k"] == 8
+    assert proposal.diagnostics["qdic_feature_max_gap"] == 360
 
 
 def test_qdic_weight_is_an_exact_enable_switch():

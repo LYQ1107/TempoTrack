@@ -160,6 +160,13 @@ def _runtime_env(
             "PYTHONPATH": str(args.runtime_pythonpath),
         }
     )
+    event_path = getattr(args, "event_diagnostics", None)
+    if event_path:
+        env["V11_COV_REPLAY_EVENT_DIAGNOSTICS"] = str(Path(event_path).resolve())
+    master_port = getattr(args, "master_port", None)
+    if master_port is not None:
+        env["MASTER_PORT"] = str(int(master_port))
+        env["V11_MASTER_PORT"] = str(int(master_port))
     return env
 
 
@@ -167,6 +174,8 @@ def _validate_runtime_contract(
     diagnostics_path: Path,
     *,
     expected_checkpoint_sha256: str,
+    expected_candidate_top_k: int = 8,
+    expected_max_gap: int = 360,
 ) -> dict[str, Any]:
     if not diagnostics_path.is_file():
         raise RuntimeError(f"QDIC_RUNTIME_DIAGNOSTICS_MISSING: {diagnostics_path}")
@@ -180,8 +189,16 @@ def _validate_runtime_contract(
         failures.append("actual_query_observations")
     if int(diagnostics.get("qdic_context_candidate_top_k", -1)) != 64:
         failures.append("context_top_k")
-    if int(diagnostics.get("qdic_decision_candidate_top_k", -1)) != 8:
+    if int(diagnostics.get("qdic_decision_candidate_top_k", -1)) != int(expected_candidate_top_k):
         failures.append("decision_top_k")
+    if int(diagnostics.get("structural_candidate_top_k", -1)) != int(expected_candidate_top_k):
+        failures.append("structural_candidate_top_k")
+    if int(diagnostics.get("structural_max_gap", -1)) != int(expected_max_gap):
+        failures.append("structural_max_gap")
+    if int(diagnostics.get("qdic_feature_decision_candidate_top_k", -1)) != 8:
+        failures.append("qdic_feature_decision_top_k")
+    if int(diagnostics.get("qdic_feature_max_gap", -1)) != 360:
+        failures.append("qdic_feature_max_gap")
     if bool(diagnostics.get("qdic_context_contract_mismatch", True)):
         failures.append("context_contract")
     if int(diagnostics.get("qdic_missing_evidence", -1)) != 0:
@@ -231,6 +248,10 @@ def run(args: argparse.Namespace) -> int:
     shard_dir = Path(args.shard_dir).resolve()
     receipt_path = shard_dir / "receipt.json"
     started = time.time()
+    if int(args.candidate_top_k) < 1 or int(args.candidate_top_k) > 64:
+        raise ValueError("candidate_top_k must be in [1, 64]")
+    if int(args.max_gap) < 0:
+        raise ValueError("max_gap must be non-negative")
     if receipt_path.is_file():
         existing = _load_json(receipt_path)
         if existing.get("status") == "COMPLETED":
@@ -253,6 +274,8 @@ def run(args: argparse.Namespace) -> int:
         "spec": {
             "score_threshold": float(args.score_threshold),
             "margin_threshold": float(args.margin_threshold),
+            "candidate_top_k": int(args.candidate_top_k),
+            "max_gap": int(args.max_gap),
         },
         "contract": {
             "protocol": "TEST_TUNED_MODEL_SPECIFIC",
@@ -304,6 +327,12 @@ def run(args: argparse.Namespace) -> int:
             "scalabel_root_exists": Path(args.scalabel_root).is_dir(),
             "reference_receipt": args.runtime_reference_receipt,
             "reference_stream_script": args.runtime_reference_stream_script,
+            "master_port": None if getattr(args, "master_port", None) is None else int(args.master_port),
+            "event_diagnostics": (
+                None
+                if getattr(args, "event_diagnostics", None) is None
+                else str(Path(args.event_diagnostics).resolve())
+            ),
         },
         "started_at_unix": started,
         "resources_start": _resource_snapshot(str(args.gpu)),
@@ -316,6 +345,14 @@ def run(args: argparse.Namespace) -> int:
         annotation=annotation,
     )
     receipt["command"] = command
+    print(
+        "STRUCTURE_PARAMS "
+        f"candidate_top_k={int(args.candidate_top_k)} "
+        f"max_gap={int(args.max_gap)} "
+        f"score_threshold={float(args.score_threshold)} "
+        f"margin_threshold={float(args.margin_threshold)}",
+        flush=True,
+    )
     _write_json(receipt_path, receipt)
     log_path = shard_dir / "stream.log"
     try:
@@ -363,6 +400,8 @@ def run(args: argparse.Namespace) -> int:
         diagnostics = _validate_runtime_contract(
             shard_dir / "diagnostics.json",
             expected_checkpoint_sha256=_sha256(Path(args.qdic_checkpoint).resolve()),
+            expected_candidate_top_k=int(args.candidate_top_k),
+            expected_max_gap=int(args.max_gap),
         )
         receipt["runtime_contract"] = {
             "status": "PASS",
@@ -381,6 +420,13 @@ def run(args: argparse.Namespace) -> int:
             "diagnostics": str(shard_dir / "diagnostics.json"),
             "diagnostics_sha256": _sha256(shard_dir / "diagnostics.json"),
         }
+        if getattr(args, "event_diagnostics", None):
+            event_path = Path(args.event_diagnostics).resolve()
+            if not event_path.is_file():
+                raise FileNotFoundError(f"event diagnostics missing: {event_path}")
+            receipt["outputs"]["event_diagnostics"] = str(event_path)
+            receipt["outputs"]["event_diagnostics_sha256"] = _sha256(event_path)
+            receipt["outputs"]["event_diagnostics_bytes"] = event_path.stat().st_size
         receipt["status"] = "COMPLETED"
         receipt["ended_at_unix"] = time.time()
         receipt["duration_seconds"] = receipt["ended_at_unix"] - started
@@ -441,6 +487,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-videos", type=int, required=True)
     parser.add_argument("--score-threshold", type=float, required=True)
     parser.add_argument("--margin-threshold", type=float, required=True)
+    parser.add_argument("--candidate-top-k", type=int, default=8)
+    parser.add_argument("--max-gap", type=int, default=360)
+    parser.add_argument("--event-diagnostics")
+    parser.add_argument("--master-port", type=int)
     parser.add_argument(
         "--stream-python", default="/home/lwr/anaconda3/envs/ovtr/bin/python"
     )

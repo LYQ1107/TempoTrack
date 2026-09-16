@@ -981,9 +981,18 @@ def _materialize_config(
     trial_id: str,
     score_threshold: float,
     margin_threshold: float,
+    candidate_top_k: int = 8,
+    max_gap: int = 360,
+    search_fields: list[str] | None = None,
 ) -> dict[str, Any]:
+    if not 1 <= int(candidate_top_k) <= 64:
+        raise ValueError("candidate_top_k must be in [1, 64]")
+    if int(max_gap) < 0:
+        raise ValueError("max_gap must be non-negative")
     raw = _validate_base_config(base_config)
     tempo = dict(raw["tempo"])
+    tempo["candidate_top_k"] = int(candidate_top_k)
+    tempo["max_gap"] = int(max_gap)
     tempo["score_threshold"] = float(score_threshold)
     tempo["margin_threshold"] = float(margin_threshold)
     tempo["qdic_checkpoint"] = str(qdic_checkpoint)
@@ -991,15 +1000,16 @@ def _materialize_config(
     tempo["reranker_weight"] = 0.0
     tempo["reranker_checkpoint"] = None
     raw["tempo"] = tempo
+    fields = list(search_fields or ["score_threshold", "margin_threshold"])
     raw["protocol"] = {
         "name": "TEST_TUNED_MODEL_SPECIFIC",
         "test_tuned_model_specific": True,
         "unbiased_test": False,
-        "search_fields": ["score_threshold", "margin_threshold"],
+        "search_fields": fields,
         "trial_id": str(trial_id),
         "qdic_checkpoint_sha256": _sha256(qdic_checkpoint),
     }
-    raw["search_fields"] = ["score_threshold", "margin_threshold"]
+    raw["search_fields"] = fields
     _dump_yaml(output, raw)
     return raw
 
@@ -1474,7 +1484,8 @@ def _completed_shard(candidate_root: Path, index: int) -> tuple[Path, dict[str, 
 
 
 def _validate_completed_shard_receipt(
-    *, receipt: Mapping[str, Any], shard: Mapping[str, Any], preflight: Mapping[str, Any]
+    *, receipt: Mapping[str, Any], shard: Mapping[str, Any], preflight: Mapping[str, Any],
+    expected_spec: Mapping[str, Any] | None = None,
 ) -> None:
     if receipt.get("status") != "COMPLETED":
         raise RuntimeError("completed shard receipt is not COMPLETED")
@@ -1498,6 +1509,20 @@ def _validate_completed_shard_receipt(
         raise RuntimeError("completed shard COV source path mismatch")
     if receipt.get("external_source", {}).get("commit") != preflight["cov"].get("commit"):
         raise RuntimeError("completed shard COV source commit mismatch")
+    if expected_spec is not None:
+        spec = receipt.get("spec")
+        if not isinstance(spec, Mapping):
+            raise RuntimeError("completed shard lacks trial spec")
+        for key in ("score_threshold", "margin_threshold", "candidate_top_k", "max_gap"):
+            if key not in expected_spec:
+                continue
+            expected = expected_spec[key]
+            actual = spec.get(key)
+            if key in {"score_threshold", "margin_threshold"}:
+                if not math.isclose(float(actual), float(expected), rel_tol=0.0, abs_tol=1e-12):
+                    raise RuntimeError(f"completed shard trial spec mismatch: {key}")
+            elif int(actual) != int(expected):
+                raise RuntimeError(f"completed shard trial spec mismatch: {key}")
     runtime = receipt.get("runtime_environment")
     expected_runtime = preflight.get("runtime_environment")
     if not isinstance(runtime, Mapping) or not isinstance(expected_runtime, Mapping):
@@ -1605,6 +1630,10 @@ def _worker_command(
         str(float(trial["score_threshold"])),
         "--margin-threshold",
         str(float(trial["margin_threshold"])),
+        "--candidate-top-k",
+        str(int(trial.get("candidate_top_k", 8))),
+        "--max-gap",
+        str(int(trial.get("max_gap", 360))),
         "--stream-python",
         str(args.stream_python),
         "--teta-source-root",
@@ -1620,6 +1649,16 @@ def _worker_command(
         "--runtime-reference-stream-script",
         str(preflight["runtime_environment"]["reference_stream_script"]),
     ]
+    if bool(trial.get("collect_event_diagnostics", False)):
+        command.extend(
+            [
+                "--event-diagnostics",
+                str(shard_dir / "event_diagnostics.jsonl"),
+            ]
+        )
+    if trial.get("master_port") is not None:
+        command.extend(["--master-port", str(int(trial["master_port"]))])
+    return command
 
 
 def _candidate_receipt_base(
@@ -1638,12 +1677,18 @@ def _candidate_receipt_base(
         "spec": {
             "score_threshold": float(trial["score_threshold"]),
             "margin_threshold": float(trial["margin_threshold"]),
+            "candidate_top_k": int(trial.get("candidate_top_k", 8)),
+            "max_gap": int(trial.get("max_gap", 360)),
         },
         "contract": {
             "protocol": "TEST_TUNED_MODEL_SPECIFIC",
             "unbiased_test": False,
             "frontend_cache_used": False,
-            "search_fields": ["score_threshold", "margin_threshold"],
+            "search_fields": list(
+                _read_json(_path(args.root) / "search_plan.json").get(
+                    "search_fields", ["score_threshold", "margin_threshold"]
+                )
+            ),
             "fixed_runtime": _read_json(_path(args.root) / "search_plan.json")["fixed_runtime"],
         },
         "runtime_environment": dict(preflight["runtime_environment"]),
@@ -1701,6 +1746,10 @@ def _run_candidate(
             raise RuntimeError(f"existing candidate config score mismatch: {config_path}")
         if float(tempo.get("margin_threshold")) != float(trial["margin_threshold"]):
             raise RuntimeError(f"existing candidate config margin mismatch: {config_path}")
+        if int(tempo.get("candidate_top_k", -1)) != int(trial.get("candidate_top_k", 8)):
+            raise RuntimeError(f"existing candidate config candidate_top_k mismatch: {config_path}")
+        if int(tempo.get("max_gap", -1)) != int(trial.get("max_gap", 360)):
+            raise RuntimeError(f"existing candidate config max_gap mismatch: {config_path}")
     else:
         _materialize_config(
             base_config=_path(args.base_config),
@@ -1709,6 +1758,13 @@ def _run_candidate(
             trial_id=str(trial["trial_id"]),
             score_threshold=float(trial["score_threshold"]),
             margin_threshold=float(trial["margin_threshold"]),
+            candidate_top_k=int(trial.get("candidate_top_k", 8)),
+            max_gap=int(trial.get("max_gap", 360)),
+            search_fields=list(
+                _read_json(_path(args.root) / "search_plan.json").get(
+                    "search_fields", ["score_threshold", "margin_threshold"]
+                )
+            ),
         )
     receipt_path = candidate_root / "receipt.json"
     if receipt_path.is_file():
@@ -1737,7 +1793,8 @@ def _run_candidate(
         complete = _completed_shard(candidate_root, index)
         if complete is not None:
             _validate_completed_shard_receipt(
-                receipt=complete[1], shard=shard, preflight=preflight
+                receipt=complete[1], shard=shard, preflight=preflight,
+                expected_spec=trial,
             )
             continue
         running_path: Path | None = None
@@ -1906,7 +1963,8 @@ def _run_candidate(
             return False
         directory, receipt = complete
         _validate_completed_shard_receipt(
-            receipt=receipt, shard=shard, preflight=preflight
+            receipt=receipt, shard=shard, preflight=preflight,
+            expected_spec=trial,
         )
         completed_records.append(
             {

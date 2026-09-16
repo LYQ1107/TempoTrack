@@ -163,6 +163,10 @@ def _diagnostic_state(path: Path) -> dict[str, Any]:
             "qdic_actual_query_observations": None,
             "qdic_context_candidate_top_k": None,
             "qdic_decision_candidate_top_k": None,
+            "structural_candidate_top_k": None,
+            "structural_max_gap": None,
+            "qdic_feature_decision_candidate_top_k": None,
+            "qdic_feature_max_gap": None,
             "qdic_context_contract_mismatch": False,
             "qdic_native_memo_bootstrap_count": 0,
             "qdic_status": None,
@@ -259,6 +263,20 @@ def _record_overlay_diagnostics(decision: Any) -> None:
         if value is not None and state[name] is None:
             state[name] = int(value)
     for name in ("qdic_context_candidate_top_k", "qdic_decision_candidate_top_k"):
+        value = diagnostics.get(name)
+        if value is None:
+            continue
+        value = int(value)
+        if state[name] is None:
+            state[name] = value
+        elif int(state[name]) != value:
+            state["qdic_context_contract_mismatch"] = True
+    for name in (
+        "structural_candidate_top_k",
+        "structural_max_gap",
+        "qdic_feature_decision_candidate_top_k",
+        "qdic_feature_max_gap",
+    ):
         value = diagnostics.get(name)
         if value is None:
             continue
@@ -377,6 +395,12 @@ def _write_covtrack_diagnostics(path: Path, *, status: str = "COMPLETED") -> Non
         "qdic_actual_query_observations": state["qdic_actual_query_observations"],
         "qdic_context_candidate_top_k": state["qdic_context_candidate_top_k"],
         "qdic_decision_candidate_top_k": state["qdic_decision_candidate_top_k"],
+        "structural_candidate_top_k": state["structural_candidate_top_k"],
+        "structural_max_gap": state["structural_max_gap"],
+        "qdic_feature_decision_candidate_top_k": state[
+            "qdic_feature_decision_candidate_top_k"
+        ],
+        "qdic_feature_max_gap": state["qdic_feature_max_gap"],
         "qdic_context_contract_mismatch": bool(state["qdic_context_contract_mismatch"]),
         "qdic_native_memo_bootstrap_count": int(state["qdic_native_memo_bootstrap_count"]),
         "qdic_status": state["qdic_status"],
@@ -748,6 +772,21 @@ def _prepare(
         kwargs=kwargs,
         video_id=current_video,
     )
+    category_ids = getattr(tracker, "_v11_replay_cache_category_ids", None)
+    observation_category_ids = None
+    if category_ids is not None:
+        labels_array = np.asarray(
+            labels.detach().cpu().numpy() if hasattr(labels, "detach") else labels,
+            dtype=np.int64,
+        ).reshape(-1)
+        observation_category_ids = [
+            (
+                int(category_ids[int(label)])
+                if 0 <= int(label) < len(category_ids)
+                else None
+            )
+            for label in labels_array.tolist()
+        ]
     decision = adapter.prepare(
         video_id=int(current_video),
         frame_id=int(frame_id),
@@ -762,6 +801,7 @@ def _prepare(
         metadata={
             "filename": str(kwargs.get("filename", "")),
             "image_id": getattr(tracker, "_v11_replay_cache_image_id", None),
+            "observation_category_ids": observation_category_ids,
             "frontend": "covtrack",
             "association_stage": "pre_association",
             "native_affinity_stage": "post_mcf_pre_id_commit",

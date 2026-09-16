@@ -226,7 +226,9 @@ class TempoTrackOverlay:
                 and np.isclose(self.config.alpha_slow, 0.15, rtol=0.0, atol=1e-8)
             ):
                 raise SnapshotContractError("BLOCKED_QDIC_ALPHA_MISMATCH")
-            if self.config.memory_capacity != 64 or self.config.candidate_top_k != 8:
+            if self.config.memory_capacity != 64 or not (
+                1 <= int(self.config.candidate_top_k) <= int(self.config.qdic_context_top_k) <= 64
+            ):
                 raise SnapshotContractError("BLOCKED_QDIC_RUNTIME_SHAPE_MISMATCH")
             if self.config.qdic_recent_k != QDIC_RECENT_K or self.config.qdic_context_top_k != 64:
                 raise SnapshotContractError("BLOCKED_QDIC_RUNTIME_FEATURE_MISMATCH")
@@ -256,10 +258,16 @@ class TempoTrackOverlay:
                 ("recent_k", self.config.qdic_recent_k),
                 ("memory_capacity", self.config.memory_capacity),
                 ("context_candidate_top_k", self.config.qdic_context_top_k),
-                ("decision_candidate_top_k", self.config.candidate_top_k),
+                # The checkpoint was trained with decision K=8.  Structural
+                # Full-Test trials may retain a different runtime K, but the
+                # learned feature schema must remain bound to its own K.
+                ("decision_candidate_top_k", 8),
                 ("top_r", self.config.top_r),
                 ("min_gap", self.config.min_gap),
-                ("max_gap", self.config.max_gap),
+                # Likewise, runtime max_gap controls legal candidate supply;
+                # QDIC feature normalization remains the trained 360-frame
+                # value and is passed to the model below from this metadata.
+                ("max_gap", 360),
             ):
                 if key not in feature_config:
                     raise SnapshotContractError(f"BLOCKED_QDIC_FEATURE_CONFIG_MISSING: {key}")
@@ -899,7 +907,7 @@ class TempoTrackOverlay:
                 snapshot, observation_index, context, selected
             )
             reranker_missing_total += missing
-            if self._replay_event_diagnostics and context:
+            if self._replay_event_diagnostics:
                 reranker_by_id = {
                     int(memory_id): float(logit)
                     for memory_id, logit in zip(
@@ -958,6 +966,18 @@ class TempoTrackOverlay:
                     ],
                     "observation_score": float(snapshot.det_scores[observation_index]),
                     "observation_label": int(snapshot.labels[observation_index]),
+                    "observation_category_id": (
+                        None
+                        if self._observation_value(
+                            snapshot, "observation_category_ids", observation_index
+                        )
+                        is None
+                        else int(
+                            self._observation_value(
+                                snapshot, "observation_category_ids", observation_index
+                            )
+                        )
+                    ),
                     "candidate_memory_ids": context_ids,
                     "candidate_root_ids": [
                         int(candidate.root_id) for _, candidate in context
@@ -1103,6 +1123,8 @@ class TempoTrackOverlay:
                 "enabled": True,
                 "observation_hash": observation_hash,
                 "candidate_top_k": int(self.config.candidate_top_k),
+                "structural_candidate_top_k": int(self.config.candidate_top_k),
+                "structural_max_gap": int(self.config.max_gap),
                 "native_candidate_count": int(native_count),
                 "dormant_candidate_count": int(len(candidates) - native_count),
                 "legal_candidate_count": int(sum(len(values) for values in all_candidates)),
@@ -1131,6 +1153,12 @@ class TempoTrackOverlay:
                     self.config.qdic_context_top_k if self.config.qdic_weight > 0.0 else self.config.candidate_top_k
                 ),
                 "qdic_decision_candidate_top_k": int(self.config.candidate_top_k),
+                "qdic_feature_decision_candidate_top_k": int(
+                    self._qdic_feature_config.get("decision_candidate_top_k", 8)
+                ),
+                "qdic_feature_max_gap": int(
+                    self._qdic_feature_config.get("max_gap", 360)
+                ),
                 "qdic_missing_evidence": int(qdic_missing_total),
                 "qdic_native_memo_bootstrap_count": int(
                     self._qdic_native_memo_bootstrap_count

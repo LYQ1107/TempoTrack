@@ -206,7 +206,10 @@ def streaming_single_gpu_test(model: Any, data_loader: Any, show: bool = False,
             # as a causal fallback; OVTrack's native path is unaffected.
             target_model = getattr(model, "module", model)
             target_model._v10_dataset_video_id = int(info["video_id"])
-            if os.environ.get("V11_COV_REPLAY_CACHE_ROOT"):
+            if (
+                os.environ.get("V11_COV_REPLAY_CACHE_ROOT")
+                or os.environ.get("V11_COV_REPLAY_EVENT_DIAGNOSTICS")
+            ):
                 # These are dataset/ontology metadata only.  Detector tensors
                 # and all tracker state still enter the opt-in cache through
                 # the model's pre-match boundary hook.
@@ -218,7 +221,10 @@ def streaming_single_gpu_test(model: Any, data_loader: Any, show: bool = False,
             if target_tracker is not None and getattr(target_tracker, "_v10_cov_adapter", None) is not None:
                 target_tracker._v10_dataset_video_id = int(info["video_id"])
                 target_tracker._v10_current_video_id = int(info["video_id"])
-                if os.environ.get("V11_COV_REPLAY_CACHE_ROOT"):
+                if (
+                    os.environ.get("V11_COV_REPLAY_CACHE_ROOT")
+                    or os.environ.get("V11_COV_REPLAY_EVENT_DIAGNOSTICS")
+                ):
                     target_tracker._v11_replay_cache_image_id = int(info["id"])
             with torch.no_grad():
                 result = model(return_loss=False, rescale=True, **data)
