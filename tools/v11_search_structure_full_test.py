@@ -324,7 +324,7 @@ def _validate_structure_resume(
     ]:
         raise RuntimeError("RESUME_PROVENANCE_FAIL: shard annotations changed")
     cov_source = base._path(args.cov_source)
-    if _git_value(cov_source, "rev-parse", "HEAD") != preflight["cov"]["commit"] or base._git_source_status(cov_source) != "":
+    if base._git_value(cov_source, "rev-parse", "HEAD") != preflight["cov"]["commit"] or base._git_source_status(cov_source) != "":
         raise RuntimeError("RESUME_PROVENANCE_FAIL: COV source changed")
     for key, path_arg in (("config", args.external_config), ("checkpoint", args.external_checkpoint)):
         path = base._path(path_arg)
