@@ -28,6 +28,18 @@ from tempotrack_v10.qdic_trainer import sha256  # noqa: E402
 from run_candidate_aware_qdic_fulltest import _validate_structure_gate  # noqa: E402
 
 
+NEW_ARCHITECTURES = ("A1-DS-QDIC", "A2-DGSA-QDIC")
+
+
+def _canonical_architecture(value: str) -> str:
+    name = str(value).strip().upper()
+    if name in {"A1", "A1-DS-QDIC", "DS-QDIC"}:
+        return "A1-DS-QDIC"
+    if name in {"A2", "A2-DGSA-QDIC", "DGSA-QDIC"}:
+        return "A2-DGSA-QDIC"
+    return name
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -104,8 +116,23 @@ def run(args: argparse.Namespace) -> int:
     architectures = list(comparison.get("architectures", []))
     if not architectures:
         raise RuntimeError("architecture comparison has no architecture rows")
+    # A0 has no distributional branch, so its total objective omits L_dist
+    # and is not numerically comparable to the A0-D/A1/A2 totals.  The
+    # protocol explicitly selects the best *new* architecture first; only
+    # that winner is eligible for the subsequent lambda search.
+    eligible = [
+        row
+        for row in architectures
+        if row.get("status") == "COMPLETED"
+        and _canonical_architecture(row.get("architecture_name", ""))
+        in NEW_ARCHITECTURES
+    ]
+    if not eligible:
+        raise RuntimeError(
+            "architecture comparison has no completed A1/A2 candidate-aware architecture"
+        )
     winner = min(
-        architectures,
+        eligible,
         key=lambda row: (
             float(row.get("best_holdout_loss", float("inf"))),
             -float(row.get("best_holdout_final_top1") or float("-inf")),
@@ -113,11 +140,7 @@ def run(args: argparse.Namespace) -> int:
             str(row.get("architecture_name")),
         ),
     )
-    architecture = str(winner["architecture_name"])
-    if architecture == "A0":
-        raise RuntimeError(
-            "lambda search is not meaningful for A0: the architecture winner is the frozen current parent"
-        )
+    architecture = _canonical_architecture(str(winner["architecture_name"]))
     features_dir = Path(args.features_dir).resolve()
     parent_checkpoint = Path(args.parent_checkpoint).resolve()
     output_root = Path(args.output_root).resolve()
@@ -199,7 +222,13 @@ def run(args: argparse.Namespace) -> int:
             "lambda_dist_fixed_lambda_hard": float(args.lambda_hard_fixed),
             "lambda_hard_values": list(lambda_hard_values),
             "lambda_hard_fixed_lambda_dist": float(best_dist["lambda_dist"]),
-            "selection_metric": "minimum video-disjoint holdout total loss; final top1/mrr tie-break",
+            "selection_metric": (
+                "minimum video-disjoint holdout total loss among completed A1/A2 "
+                "new architectures; final top1/mrr tie-break; A0/A0-D excluded "
+                "from architecture selection"
+            ),
+            "architecture_selection_eligible": list(NEW_ARCHITECTURES),
+            "architecture_selection_excluded": ["A0", "A0-D"],
             "no_other_architecture_searched": True,
             "no_full_test_started": True,
         },
