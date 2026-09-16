@@ -1,0 +1,45 @@
+{
+  "artifact": "post_search_extension_plan",
+  "status": "PROPOSED",
+  "launch": false,
+  "reason": "Bounded sequential search is complete; this proposal is not auto-started.",
+  "selection": {
+    "overall_margin_champion": "FT_B",
+    "ov_margin_champion": "FT_M120"
+  },
+  "source_distributions": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_margin_score_distributions.json",
+  "candidates": [
+    {
+      "proposal_id": "OVERALL_SCORE_OFF",
+      "source_margin_champion": "FT_B",
+      "score_threshold": -1.024055551337242,
+      "margin_threshold": 0.37210235595703123,
+      "score_source": "FT_B.winner_score_min",
+      "launch": false
+    },
+    {
+      "proposal_id": "OVERALL_P03",
+      "source_margin_champion": "FT_B",
+      "score_threshold": 0.9627598524093628,
+      "margin_threshold": 0.37210235595703123,
+      "score_source": "FT_B.p03",
+      "launch": false
+    },
+    {
+      "proposal_id": "OV_SCORE_OFF",
+      "source_margin_champion": "FT_M120",
+      "score_threshold": -1.0240762937743664,
+      "margin_threshold": 0.44652282714843744,
+      "score_source": "FT_M120.winner_score_min",
+      "launch": false
+    },
+    {
+      "proposal_id": "OV_P03",
+      "source_margin_champion": "FT_M120",
+      "score_threshold": 0.9801726341247559,
+      "margin_threshold": 0.44652282714843744,
+      "score_source": "FT_M120.p03",
+      "launch": false
+    }
+  ]
+}

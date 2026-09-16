@@ -1,0 +1,33 @@
+# TEST_TUNED_MODEL_SPECIFIC
+# NOT_UNBIASED_TEST
+frontend: covtrack
+protocol:
+  name: TEST_TUNED_MODEL_SPECIFIC
+  test_tuned_model_specific: true
+  unbiased_test: false
+  search_fields:
+  - score_threshold
+  - margin_threshold
+  trial_id: FT_M60
+  qdic_checkpoint_sha256: fb62d6d3f04260bb2eb41a000deec3cf09130060228eb5af1f402ba0af99fab7
+tempo:
+  enabled: true
+  alpha_fast: 0.7
+  alpha_slow: 0.15
+  min_gap: 0
+  max_gap: 360
+  candidate_top_k: 8
+  qdic_context_top_k: 64
+  top_r: 3
+  memory_capacity: 64
+  qdic_weight: 1.0
+  qdic_recent_k: 8
+  qdic_checkpoint: /data2/usr_for_deadline/tempotrack_v11_qdic_pilot_20260913_224455/val_base/qdic_training/best.pt
+  qdic_device: cpu
+  score_threshold: 0.0
+  margin_threshold: 0.22326141357421872
+  reranker_weight: 0.0
+  reranker_checkpoint: null
+search_fields:
+- score_threshold
+- margin_threshold

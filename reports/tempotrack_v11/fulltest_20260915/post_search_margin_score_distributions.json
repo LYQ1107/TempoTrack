@@ -1,0 +1,1103 @@
+{
+  "artifact": "v11_qdic_margin_score_distributions",
+  "status": "PASS",
+  "generated_at": "2026-09-15T22:31:19.391383+00:00",
+  "source_state": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/search_state.json",
+  "margins": {
+    "FT_B": {
+      "trial_id": "FT_B",
+      "status": "PASS",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.37210235595703123,
+      "distribution": {
+        "winner_score_min": -1.0240545272827148,
+        "winner_score_max": 9.075597763061523,
+        "p01": 0.5695024728775024,
+        "p03": 0.9627598524093628,
+        "p05": 1.185793161392212,
+        "p10": 1.5503381490707397,
+        "p25": 2.3637709617614746,
+        "p50": 3.958487033843994,
+        "p95": 6.013485431671143,
+        "winner_score_quantiles": {
+          "p01": 0.5695024728775024,
+          "p03": 0.9627598524093628,
+          "p05": 1.185793161392212,
+          "p10": 1.5503381490707397,
+          "p25": 2.3637709617614746,
+          "p50": 3.958487033843994,
+          "p95": 6.013485431671143
+        },
+        "weighted_samples": 2288491.0000002417,
+        "shards": [
+          {
+            "shard": 0,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_00_retry02/diagnostics.json",
+            "score_seen": 235077,
+            "reservoir": 200000,
+            "winner_score_min": -0.7115709185600281,
+            "winner_score_max": 8.948370933532715,
+            "score_quantiles": {
+              "p01": 0.580416556596756,
+              "p03": 0.9654505270719528,
+              "p05": 1.191067671775818,
+              "p10": 1.5613199591636657,
+              "p25": 2.4053345918655396,
+              "p50": 4.0844902992248535,
+              "p75": 5.329332947731018,
+              "p95": 6.013064622879027,
+              "p99": 6.489366226196289
+            }
+          },
+          {
+            "shard": 1,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_01_retry02/diagnostics.json",
+            "score_seen": 240936,
+            "reservoir": 200000,
+            "winner_score_min": -0.690228283405304,
+            "winner_score_max": 8.973191261291504,
+            "score_quantiles": {
+              "p01": 0.6138620537519455,
+              "p03": 1.0142038750648497,
+              "p05": 1.2451606392860415,
+              "p10": 1.6172674775123599,
+              "p25": 2.4696505665779114,
+              "p50": 4.037085294723511,
+              "p75": 5.277236819267273,
+              "p95": 5.977929782867431,
+              "p99": 6.432882428169256
+            }
+          },
+          {
+            "shard": 2,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_02_retry02/diagnostics.json",
+            "score_seen": 230239,
+            "reservoir": 200000,
+            "winner_score_min": -0.6936137676239014,
+            "winner_score_max": 8.293265342712402,
+            "score_quantiles": {
+              "p01": 0.6067124742269516,
+              "p03": 1.0059948647022248,
+              "p05": 1.2275585949420929,
+              "p10": 1.5972640156745912,
+              "p25": 2.435254991054535,
+              "p50": 4.070397853851318,
+              "p75": 5.330543398857117,
+              "p95": 6.037822484970092,
+              "p99": 6.562126903533936
+            }
+          },
+          {
+            "shard": 3,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_03_retry02/diagnostics.json",
+            "score_seen": 219643,
+            "reservoir": 200000,
+            "winner_score_min": -0.8867227435112,
+            "winner_score_max": 8.716243743896484,
+            "score_quantiles": {
+              "p01": 0.539238201379776,
+              "p03": 0.9221198379993438,
+              "p05": 1.1399604082107544,
+              "p10": 1.4940977454185487,
+              "p25": 2.2535744309425354,
+              "p50": 3.794145703315735,
+              "p75": 5.204031348228455,
+              "p95": 6.010022282600402,
+              "p99": 6.454916377067567
+            }
+          },
+          {
+            "shard": 4,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_04_retry02/diagnostics.json",
+            "score_seen": 229736,
+            "reservoir": 200000,
+            "winner_score_min": -0.7813846468925476,
+            "winner_score_max": 9.075597763061523,
+            "score_quantiles": {
+              "p01": 0.5603019618988038,
+              "p03": 0.9435014712810517,
+              "p05": 1.1582704484462738,
+              "p10": 1.5135294437408446,
+              "p25": 2.310271441936493,
+              "p50": 3.9429742097854614,
+              "p75": 5.252007603645325,
+              "p95": 6.017541980743408,
+              "p99": 6.484216780662539
+            }
+          },
+          {
+            "shard": 5,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_05_retry02/diagnostics.json",
+            "score_seen": 226635,
+            "reservoir": 200000,
+            "winner_score_min": -0.6905010342597961,
+            "winner_score_max": 9.047929763793945,
+            "score_quantiles": {
+              "p01": 0.5675909352302552,
+              "p03": 0.9687805634737013,
+              "p05": 1.1890377581119538,
+              "p10": 1.5543968439102174,
+              "p25": 2.3486006259918213,
+              "p50": 3.897672414779663,
+              "p75": 5.250964641571045,
+              "p95": 5.9955397844314575,
+              "p99": 6.436747612953191
+            }
+          },
+          {
+            "shard": 6,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_06_retry02/diagnostics.json",
+            "score_seen": 222025,
+            "reservoir": 200000,
+            "winner_score_min": -1.0240545272827148,
+            "winner_score_max": 8.474117279052734,
+            "score_quantiles": {
+              "p01": 0.5479535353183747,
+              "p03": 0.9421236431598663,
+              "p05": 1.162858110666275,
+              "p10": 1.5255734205245972,
+              "p25": 2.3328179121017456,
+              "p50": 3.895773410797119,
+              "p75": 5.225346922874451,
+              "p95": 6.012319898605346,
+              "p99": 6.4991449260711684
+            }
+          },
+          {
+            "shard": 7,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_07_retry02/diagnostics.json",
+            "score_seen": 231410,
+            "reservoir": 200000,
+            "winner_score_min": -0.6899039149284363,
+            "winner_score_max": 8.557674407958984,
+            "score_quantiles": {
+              "p01": 0.5709258180856704,
+              "p03": 0.9585845786333084,
+              "p05": 1.1827711284160614,
+              "p10": 1.5490893125534058,
+              "p25": 2.3451938033103943,
+              "p50": 3.8825854063034058,
+              "p75": 5.237677812576294,
+              "p95": 6.016117143630981,
+              "p99": 6.510470023155213
+            }
+          },
+          {
+            "shard": 8,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_08_retry02/diagnostics.json",
+            "score_seen": 229130,
+            "reservoir": 200000,
+            "winner_score_min": -0.7008229494094849,
+            "winner_score_max": 8.310093879699707,
+            "score_quantiles": {
+              "p01": 0.5520176249742508,
+              "p03": 0.9515765130519866,
+              "p05": 1.1769442856311798,
+              "p10": 1.538378667831421,
+              "p25": 2.3384164571762085,
+              "p50": 3.9495433568954468,
+              "p75": 5.309280276298523,
+              "p95": 6.034583473205565,
+              "p99": 6.445821523666384
+            }
+          },
+          {
+            "shard": 9,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/shards/shard_09_retry02/diagnostics.json",
+            "score_seen": 223660,
+            "reservoir": 200000,
+            "winner_score_min": -0.722772479057312,
+            "winner_score_max": 8.38543701171875,
+            "score_quantiles": {
+              "p01": 0.5646085405349731,
+              "p03": 0.966386194229126,
+              "p05": 1.187048774957657,
+              "p10": 1.557119607925415,
+              "p25": 2.4024665355682373,
+              "p50": 4.006790637969971,
+              "p75": 5.303506135940552,
+              "p95": 6.020456457138061,
+              "p99": 6.514283590316773
+            }
+          }
+        ]
+      }
+    },
+    "FT_M80": {
+      "trial_id": "FT_M80",
+      "status": "PASS",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.297681884765625,
+      "distribution": {
+        "winner_score_min": -1.0240925550460815,
+        "winner_score_max": 9.07038688659668,
+        "p01": 0.553847074508667,
+        "p03": 0.9455921053886414,
+        "p05": 1.1687650680541992,
+        "p10": 1.5342847108840942,
+        "p25": 2.3510873317718506,
+        "p50": 3.952538013458252,
+        "p95": 6.025083541870117,
+        "winner_score_quantiles": {
+          "p01": 0.553847074508667,
+          "p03": 0.9455921053886414,
+          "p05": 1.1687650680541992,
+          "p10": 1.5342847108840942,
+          "p25": 2.3510873317718506,
+          "p50": 3.952538013458252,
+          "p95": 6.025083541870117
+        },
+        "weighted_samples": 2288491.0000002417,
+        "shards": [
+          {
+            "shard": 0,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_00_retry02/diagnostics.json",
+            "score_seen": 235077,
+            "reservoir": 200000,
+            "winner_score_min": -0.8286967277526855,
+            "winner_score_max": 8.948370933532715,
+            "score_quantiles": {
+              "p01": 0.563008781671524,
+              "p03": 0.9496437501907348,
+              "p05": 1.174405860900879,
+              "p10": 1.5445634841918947,
+              "p25": 2.3932005167007446,
+              "p50": 4.079066753387451,
+              "p75": 5.333600163459778,
+              "p95": 6.029217529296874,
+              "p99": 6.547519688606262
+            }
+          },
+          {
+            "shard": 1,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_01_retry02/diagnostics.json",
+            "score_seen": 240936,
+            "reservoir": 200000,
+            "winner_score_min": -0.7082343697547913,
+            "winner_score_max": 8.973241806030273,
+            "score_quantiles": {
+              "p01": 0.5973866921663284,
+              "p03": 0.9978987014293671,
+              "p05": 1.2328814387321472,
+              "p10": 1.6022995233535766,
+              "p25": 2.4567570090293884,
+              "p50": 4.031157970428467,
+              "p75": 5.279620289802551,
+              "p95": 5.989711833000183,
+              "p99": 6.486879830360414
+            }
+          },
+          {
+            "shard": 2,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_02_retry02/diagnostics.json",
+            "score_seen": 230239,
+            "reservoir": 200000,
+            "winner_score_min": -0.6936137676239014,
+            "winner_score_max": 8.293438911437988,
+            "score_quantiles": {
+              "p01": 0.5936576181650162,
+              "p03": 0.9889357733726502,
+              "p05": 1.210897195339203,
+              "p10": 1.5784155607223511,
+              "p25": 2.4228016138076782,
+              "p50": 4.063765525817871,
+              "p75": 5.334910869598389,
+              "p95": 6.050820350646971,
+              "p99": 6.612830348014833
+            }
+          },
+          {
+            "shard": 3,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_03_retry02/diagnostics.json",
+            "score_seen": 219643,
+            "reservoir": 200000,
+            "winner_score_min": -0.8867227435112,
+            "winner_score_max": 8.716243743896484,
+            "score_quantiles": {
+              "p01": 0.5166862440109253,
+              "p03": 0.9034957212209701,
+              "p05": 1.1243174493312835,
+              "p10": 1.4815258502960207,
+              "p25": 2.2382187843322754,
+              "p50": 3.7876651287078857,
+              "p75": 5.20682430267334,
+              "p95": 6.0226939678192135,
+              "p99": 6.493856806755066
+            }
+          },
+          {
+            "shard": 4,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_04_retry02/diagnostics.json",
+            "score_seen": 229736,
+            "reservoir": 200000,
+            "winner_score_min": -0.7813846468925476,
+            "winner_score_max": 9.072492599487305,
+            "score_quantiles": {
+              "p01": 0.5436302328109741,
+              "p03": 0.9247172015905379,
+              "p05": 1.1385859727859498,
+              "p10": 1.4961453318595888,
+              "p25": 2.2987003326416016,
+              "p50": 3.935319662094116,
+              "p75": 5.253994703292847,
+              "p95": 6.0284987688064575,
+              "p99": 6.5128595685958866
+            }
+          },
+          {
+            "shard": 5,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_05_retry02/diagnostics.json",
+            "score_seen": 226635,
+            "reservoir": 200000,
+            "winner_score_min": -0.6849979758262634,
+            "winner_score_max": 9.04792594909668,
+            "score_quantiles": {
+              "p01": 0.5490346109867096,
+              "p03": 0.9467284166812897,
+              "p05": 1.1693344950675966,
+              "p10": 1.5389389753341676,
+              "p25": 2.333813786506653,
+              "p50": 3.892105460166931,
+              "p75": 5.25419294834137,
+              "p95": 6.0084433317184445,
+              "p99": 6.479090623855594
+            }
+          },
+          {
+            "shard": 6,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_06_retry02/diagnostics.json",
+            "score_seen": 222025,
+            "reservoir": 200000,
+            "winner_score_min": -1.0240925550460815,
+            "winner_score_max": 8.477993965148926,
+            "score_quantiles": {
+              "p01": 0.5327843105793,
+              "p03": 0.9224547898769379,
+              "p05": 1.1431138813495638,
+              "p10": 1.5114723324775696,
+              "p25": 2.3210545778274536,
+              "p50": 3.890171527862549,
+              "p75": 5.228677988052368,
+              "p95": 6.024117636680603,
+              "p99": 6.536319956779481
+            }
+          },
+          {
+            "shard": 7,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_07_retry02/diagnostics.json",
+            "score_seen": 231410,
+            "reservoir": 200000,
+            "winner_score_min": -0.6234402656555176,
+            "winner_score_max": 8.557449340820312,
+            "score_quantiles": {
+              "p01": 0.5589773952960968,
+              "p03": 0.9432447522878646,
+              "p05": 1.1652333974838256,
+              "p10": 1.5305793404579162,
+              "p25": 2.3343809843063354,
+              "p50": 3.8773880004882812,
+              "p75": 5.2401957511901855,
+              "p95": 6.024482583999633,
+              "p99": 6.5292197561264045
+            }
+          },
+          {
+            "shard": 8,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_08_retry02/diagnostics.json",
+            "score_seen": 229130,
+            "reservoir": 200000,
+            "winner_score_min": -0.7064847946166992,
+            "winner_score_max": 8.43167781829834,
+            "score_quantiles": {
+              "p01": 0.5395272797346116,
+              "p03": 0.9361486268043516,
+              "p05": 1.1621249675750733,
+              "p10": 1.5235051274299622,
+              "p25": 2.3268333077430725,
+              "p50": 3.9459015130996704,
+              "p75": 5.31206476688385,
+              "p95": 6.045369577407835,
+              "p99": 6.476107230186466
+            }
+          },
+          {
+            "shard": 9,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/shards/shard_09_retry02/diagnostics.json",
+            "score_seen": 223660,
+            "reservoir": 200000,
+            "winner_score_min": -0.6595364809036255,
+            "winner_score_max": 8.385412216186523,
+            "score_quantiles": {
+              "p01": 0.5514639592170716,
+              "p03": 0.9506354147195816,
+              "p05": 1.1702233850955963,
+              "p10": 1.5401852607727051,
+              "p25": 2.3927398324012756,
+              "p50": 4.000293254852295,
+              "p75": 5.306784629821777,
+              "p95": 6.026779198646545,
+              "p99": 6.529648957252503
+            }
+          }
+        ]
+      }
+    },
+    "FT_M120": {
+      "trial_id": "FT_M120",
+      "status": "PASS",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.44652282714843744,
+      "distribution": {
+        "winner_score_min": -1.0240752696990967,
+        "winner_score_max": 9.07559871673584,
+        "p01": 0.5878208875656128,
+        "p03": 0.9801726341247559,
+        "p05": 1.2016549110412598,
+        "p10": 1.5638437271118164,
+        "p25": 2.375182867050171,
+        "p50": 3.9637551307678223,
+        "p95": 6.003885269165039,
+        "winner_score_quantiles": {
+          "p01": 0.5878208875656128,
+          "p03": 0.9801726341247559,
+          "p05": 1.2016549110412598,
+          "p10": 1.5638437271118164,
+          "p25": 2.375182867050171,
+          "p50": 3.9637551307678223,
+          "p95": 6.003885269165039
+        },
+        "weighted_samples": 2288491.0000002207,
+        "shards": [
+          {
+            "shard": 0,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_00_retry02/diagnostics.json",
+            "score_seen": 235077,
+            "reservoir": 200000,
+            "winner_score_min": -0.6922077536582947,
+            "winner_score_max": 8.948370933532715,
+            "score_quantiles": {
+              "p01": 0.5990473282337189,
+              "p03": 0.9813285708427429,
+              "p05": 1.208271998167038,
+              "p10": 1.574635922908783,
+              "p25": 2.4156389236450195,
+              "p50": 4.088154077529907,
+              "p75": 5.326992988586426,
+              "p95": 6.00522482395172,
+              "p99": 6.46093661308289
+            }
+          },
+          {
+            "shard": 1,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_01_retry02/diagnostics.json",
+            "score_seen": 240936,
+            "reservoir": 200000,
+            "winner_score_min": -0.6987149715423584,
+            "winner_score_max": 8.973142623901367,
+            "score_quantiles": {
+              "p01": 0.6267240476608277,
+              "p03": 1.0319745540618896,
+              "p05": 1.2588099718093873,
+              "p10": 1.6313039779663085,
+              "p25": 2.478216230869293,
+              "p50": 4.041776180267334,
+              "p75": 5.275747299194336,
+              "p95": 5.970078158378601,
+              "p99": 6.41052519321442
+            }
+          },
+          {
+            "shard": 2,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_02_retry02/diagnostics.json",
+            "score_seen": 230239,
+            "reservoir": 200000,
+            "winner_score_min": -0.8345180749893188,
+            "winner_score_max": 8.293403625488281,
+            "score_quantiles": {
+              "p01": 0.6214011991024018,
+              "p03": 1.022908444404602,
+              "p05": 1.2433292806148528,
+              "p10": 1.6101649165153504,
+              "p25": 2.4460660219192505,
+              "p50": 4.072780609130859,
+              "p75": 5.326383113861084,
+              "p95": 6.023787307739258,
+              "p99": 6.52472252368927
+            }
+          },
+          {
+            "shard": 3,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_03_retry02/diagnostics.json",
+            "score_seen": 219643,
+            "reservoir": 200000,
+            "winner_score_min": -0.8867227435112,
+            "winner_score_max": 8.716243743896484,
+            "score_quantiles": {
+              "p01": 0.5544523918628692,
+              "p03": 0.9393113219738006,
+              "p05": 1.1565366625785827,
+              "p10": 1.5082371354103088,
+              "p25": 2.262272298336029,
+              "p50": 3.8004579544067383,
+              "p75": 5.202457785606384,
+              "p95": 6.002732491493224,
+              "p99": 6.433289203643799
+            }
+          },
+          {
+            "shard": 4,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_04_retry02/diagnostics.json",
+            "score_seen": 229736,
+            "reservoir": 200000,
+            "winner_score_min": -0.8135207295417786,
+            "winner_score_max": 9.07559871673584,
+            "score_quantiles": {
+              "p01": 0.5734995204210281,
+              "p03": 0.9596482747793198,
+              "p05": 1.1747124075889588,
+              "p10": 1.528602957725525,
+              "p25": 2.3228508830070496,
+              "p50": 3.9491606950759888,
+              "p75": 5.251391410827637,
+              "p95": 6.007973194122314,
+              "p99": 6.445110654830935
+            }
+          },
+          {
+            "shard": 5,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_05_retry02/diagnostics.json",
+            "score_seen": 226635,
+            "reservoir": 200000,
+            "winner_score_min": -0.6778931021690369,
+            "winner_score_max": 9.048269271850586,
+            "score_quantiles": {
+              "p01": 0.5859238356351852,
+              "p03": 0.9821923661231995,
+              "p05": 1.2049357652664185,
+              "p10": 1.5683130502700806,
+              "p25": 2.358056664466858,
+              "p50": 3.9040058851242065,
+              "p75": 5.2475444078445435,
+              "p95": 5.98825478553772,
+              "p99": 6.417342638969423
+            }
+          },
+          {
+            "shard": 6,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_06_retry02/diagnostics.json",
+            "score_seen": 222025,
+            "reservoir": 200000,
+            "winner_score_min": -1.0240752696990967,
+            "winner_score_max": 8.177939414978027,
+            "score_quantiles": {
+              "p01": 0.5704247850179672,
+              "p03": 0.9588978469371795,
+              "p05": 1.1799204528331757,
+              "p10": 1.538529372215271,
+              "p25": 2.3449974060058594,
+              "p50": 3.899967074394226,
+              "p75": 5.222301006317139,
+              "p95": 6.0011563539505,
+              "p99": 6.459120855331422
+            }
+          },
+          {
+            "shard": 7,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_07_retry02/diagnostics.json",
+            "score_seen": 231410,
+            "reservoir": 200000,
+            "winner_score_min": -0.6745324730873108,
+            "winner_score_max": 8.196447372436523,
+            "score_quantiles": {
+              "p01": 0.587829915881157,
+              "p03": 0.9758097875118255,
+              "p05": 1.1984199047088624,
+              "p10": 1.5615163683891298,
+              "p25": 2.3583418130874634,
+              "p50": 3.8881107568740845,
+              "p75": 5.235365867614746,
+              "p95": 6.00539379119873,
+              "p99": 6.461728110313421
+            }
+          },
+          {
+            "shard": 8,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_08_retry02/diagnostics.json",
+            "score_seen": 229130,
+            "reservoir": 200000,
+            "winner_score_min": -0.7256366014480591,
+            "winner_score_max": 8.324103355407715,
+            "score_quantiles": {
+              "p01": 0.5701342308521271,
+              "p03": 0.9701680278778075,
+              "p05": 1.1910435140132904,
+              "p10": 1.5530643582344055,
+              "p25": 2.3529379963874817,
+              "p50": 3.9563040733337402,
+              "p75": 5.305729150772095,
+              "p95": 6.027661943435668,
+              "p99": 6.42068422317505
+            }
+          },
+          {
+            "shard": 9,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/shards/shard_09_retry02/diagnostics.json",
+            "score_seen": 223660,
+            "reservoir": 200000,
+            "winner_score_min": -0.7580928206443787,
+            "winner_score_max": 8.160385131835938,
+            "score_quantiles": {
+              "p01": 0.5872414970397949,
+              "p03": 0.9872196233272551,
+              "p05": 1.2060533225536347,
+              "p10": 1.5703440070152284,
+              "p25": 2.4157370924949646,
+              "p50": 4.010508060455322,
+              "p75": 5.300806283950806,
+              "p95": 6.00798807144165,
+              "p99": 6.462965993881226
+            }
+          }
+        ]
+      }
+    },
+    "FT_M60": {
+      "trial_id": "FT_M60",
+      "status": "PASS",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.22326141357421872,
+      "distribution": {
+        "winner_score_min": -1.0240623950958252,
+        "winner_score_max": 9.070379257202148,
+        "p01": 0.5342661142349243,
+        "p03": 0.9255058169364929,
+        "p05": 1.1503617763519287,
+        "p10": 1.5191301107406616,
+        "p25": 2.337799549102783,
+        "p50": 3.9460349082946777,
+        "p95": 6.035640716552734,
+        "winner_score_quantiles": {
+          "p01": 0.5342661142349243,
+          "p03": 0.9255058169364929,
+          "p05": 1.1503617763519287,
+          "p10": 1.5191301107406616,
+          "p25": 2.337799549102783,
+          "p50": 3.9460349082946777,
+          "p95": 6.035640716552734
+        },
+        "weighted_samples": 2288491.0000002165,
+        "shards": [
+          {
+            "shard": 0,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_00/diagnostics.json",
+            "score_seen": 235077,
+            "reservoir": 200000,
+            "winner_score_min": -0.8983455300331116,
+            "winner_score_max": 8.948370933532715,
+            "score_quantiles": {
+              "p01": 0.5510116237401962,
+              "p03": 0.9304167991876602,
+              "p05": 1.1560194671154023,
+              "p10": 1.5293434500694274,
+              "p25": 2.377174496650696,
+              "p50": 4.070562124252319,
+              "p75": 5.3363752365112305,
+              "p95": 6.038683438301086,
+              "p99": 6.568054003715515
+            }
+          },
+          {
+            "shard": 1,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_01/diagnostics.json",
+            "score_seen": 240936,
+            "reservoir": 200000,
+            "winner_score_min": -0.8207367658615112,
+            "winner_score_max": 8.97330093383789,
+            "score_quantiles": {
+              "p01": 0.5828094244003296,
+              "p03": 0.9801658064126968,
+              "p05": 1.2149746119976044,
+              "p10": 1.5898544549942017,
+              "p25": 2.4428966641426086,
+              "p50": 4.02383279800415,
+              "p75": 5.282017827033997,
+              "p95": 5.998562216758727,
+              "p99": 6.515686459541328
+            }
+          },
+          {
+            "shard": 2,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_02/diagnostics.json",
+            "score_seen": 230239,
+            "reservoir": 200000,
+            "winner_score_min": -0.8237091302871704,
+            "winner_score_max": 8.293733596801758,
+            "score_quantiles": {
+              "p01": 0.572187882065773,
+              "p03": 0.9686753553152084,
+              "p05": 1.193564349412918,
+              "p10": 1.5658567905426026,
+              "p25": 2.4105862379074097,
+              "p50": 4.061039209365845,
+              "p75": 5.338238716125488,
+              "p95": 6.064930129051208,
+              "p99": 6.658640060424807
+            }
+          },
+          {
+            "shard": 3,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_03/diagnostics.json",
+            "score_seen": 219643,
+            "reservoir": 200000,
+            "winner_score_min": -0.8867227435112,
+            "winner_score_max": 8.716243743896484,
+            "score_quantiles": {
+              "p01": 0.5047755122184754,
+              "p03": 0.8874531424045563,
+              "p05": 1.1045369505882263,
+              "p10": 1.4640542984008789,
+              "p25": 2.226439416408539,
+              "p50": 3.7804986238479614,
+              "p75": 5.21033787727356,
+              "p95": 6.033503532409667,
+              "p99": 6.54384481906891
+            }
+          },
+          {
+            "shard": 4,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_04/diagnostics.json",
+            "score_seen": 229736,
+            "reservoir": 200000,
+            "winner_score_min": -0.781377375125885,
+            "winner_score_max": 9.072487831115723,
+            "score_quantiles": {
+              "p01": 0.5180901408195495,
+              "p03": 0.9062392628192901,
+              "p05": 1.1212446033954622,
+              "p10": 1.4821566104888917,
+              "p25": 2.284057080745697,
+              "p50": 3.9290326833724976,
+              "p75": 5.257244944572449,
+              "p95": 6.04037446975708,
+              "p99": 6.5425551223754885
+            }
+          },
+          {
+            "shard": 5,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_05/diagnostics.json",
+            "score_seen": 226635,
+            "reservoir": 200000,
+            "winner_score_min": -0.7436187267303467,
+            "winner_score_max": 9.047947883605957,
+            "score_quantiles": {
+              "p01": 0.5248089826107025,
+              "p03": 0.9276059120893478,
+              "p05": 1.1553861320018768,
+              "p10": 1.5261881947517395,
+              "p25": 2.3234413266181946,
+              "p50": 3.88408362865448,
+              "p75": 5.258501410484314,
+              "p95": 6.0170461416244505,
+              "p99": 6.505336861610413
+            }
+          },
+          {
+            "shard": 6,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_06/diagnostics.json",
+            "score_seen": 222025,
+            "reservoir": 200000,
+            "winner_score_min": -1.0240623950958252,
+            "winner_score_max": 8.490128517150879,
+            "score_quantiles": {
+              "p01": 0.5177096754312516,
+              "p03": 0.9020943844318389,
+              "p05": 1.125884509086609,
+              "p10": 1.490252184867859,
+              "p25": 2.306203782558441,
+              "p50": 3.8848648071289062,
+              "p75": 5.231496334075928,
+              "p95": 6.036089348793029,
+              "p99": 6.589377660751343
+            }
+          },
+          {
+            "shard": 7,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_07/diagnostics.json",
+            "score_seen": 231410,
+            "reservoir": 200000,
+            "winner_score_min": -0.6234406232833862,
+            "winner_score_max": 8.55744457244873,
+            "score_quantiles": {
+              "p01": 0.5371939641237259,
+              "p03": 0.920680102109909,
+              "p05": 1.1438993990421296,
+              "p10": 1.5149343967437745,
+              "p25": 2.319074273109436,
+              "p50": 3.8723889589309692,
+              "p75": 5.244570255279541,
+              "p95": 6.036060404777526,
+              "p99": 6.581058025360109
+            }
+          },
+          {
+            "shard": 8,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_08/diagnostics.json",
+            "score_seen": 229130,
+            "reservoir": 200000,
+            "winner_score_min": -0.6737523674964905,
+            "winner_score_max": 8.43175220489502,
+            "score_quantiles": {
+              "p01": 0.5170478844642639,
+              "p03": 0.9107838368415831,
+              "p05": 1.138060700893402,
+              "p10": 1.5049794554710387,
+              "p25": 2.3140597343444824,
+              "p50": 3.9400722980499268,
+              "p75": 5.316453695297241,
+              "p95": 6.05274589061737,
+              "p99": 6.501221575737002
+            }
+          },
+          {
+            "shard": 9,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/shards/shard_09/diagnostics.json",
+            "score_seen": 223660,
+            "reservoir": 200000,
+            "winner_score_min": -0.7130935192108154,
+            "winner_score_max": 8.385403633117676,
+            "score_quantiles": {
+              "p01": 0.5299502164125443,
+              "p03": 0.9305786961317062,
+              "p05": 1.1545101940631866,
+              "p10": 1.5273132801055909,
+              "p25": 2.378042221069336,
+              "p50": 3.993661642074585,
+              "p75": 5.310370206832886,
+              "p95": 6.036293911933897,
+              "p99": 6.557734384536745
+            }
+          }
+        ]
+      }
+    },
+    "FT_M145": {
+      "trial_id": "FT_M145",
+      "status": "PASS",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.5395484161376952,
+      "distribution": {
+        "winner_score_min": -1.0240768194198608,
+        "winner_score_max": 9.075597763061523,
+        "p01": 0.6071913838386536,
+        "p03": 0.9980887174606323,
+        "p05": 1.2194182872772217,
+        "p10": 1.5790735483169556,
+        "p25": 2.3869898319244385,
+        "p50": 3.968822956085205,
+        "p95": 5.994012832641602,
+        "winner_score_quantiles": {
+          "p01": 0.6071913838386536,
+          "p03": 0.9980887174606323,
+          "p05": 1.2194182872772217,
+          "p10": 1.5790735483169556,
+          "p25": 2.3869898319244385,
+          "p50": 3.968822956085205,
+          "p95": 5.994012832641602
+        },
+        "weighted_samples": 2288491.0000002435,
+        "shards": [
+          {
+            "shard": 0,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_00/diagnostics.json",
+            "score_seen": 235077,
+            "reservoir": 200000,
+            "winner_score_min": -0.7069326043128967,
+            "winner_score_max": 8.857461929321289,
+            "score_quantiles": {
+              "p01": 0.6145471620559693,
+              "p03": 0.9986004555225371,
+              "p05": 1.2286249995231628,
+              "p10": 1.5922284603118897,
+              "p25": 2.4265836477279663,
+              "p50": 4.090620040893555,
+              "p75": 5.322876930236816,
+              "p95": 5.997419667243957,
+              "p99": 6.424406547546388
+            }
+          },
+          {
+            "shard": 1,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_01/diagnostics.json",
+            "score_seen": 240936,
+            "reservoir": 200000,
+            "winner_score_min": -0.6987216472625732,
+            "winner_score_max": 8.207486152648926,
+            "score_quantiles": {
+              "p01": 0.6515758156776428,
+              "p03": 1.0491404783725737,
+              "p05": 1.2749659657478332,
+              "p10": 1.6473898053169251,
+              "p25": 2.487747550010681,
+              "p50": 4.04401421546936,
+              "p75": 5.269624829292297,
+              "p95": 5.958703970909118,
+              "p99": 6.378218626976014
+            }
+          },
+          {
+            "shard": 2,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_02/diagnostics.json",
+            "score_seen": 230239,
+            "reservoir": 200000,
+            "winner_score_min": -0.6936137676239014,
+            "winner_score_max": 8.293532371520996,
+            "score_quantiles": {
+              "p01": 0.6392120069265366,
+              "p03": 1.0428573989868164,
+              "p05": 1.2611750841140748,
+              "p10": 1.6245837926864624,
+              "p25": 2.45971018075943,
+              "p50": 4.077588081359863,
+              "p75": 5.322430968284607,
+              "p95": 6.007974147796631,
+              "p99": 6.472283244132999
+            }
+          },
+          {
+            "shard": 3,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_03/diagnostics.json",
+            "score_seen": 219643,
+            "reservoir": 200000,
+            "winner_score_min": -0.8867227435112,
+            "winner_score_max": 8.716241836547852,
+            "score_quantiles": {
+              "p01": 0.5715428054332733,
+              "p03": 0.953588033914566,
+              "p05": 1.1735334813594818,
+              "p10": 1.5238119840621949,
+              "p25": 2.2753288745880127,
+              "p50": 3.807882308959961,
+              "p75": 5.199734091758728,
+              "p95": 5.993988370895385,
+              "p99": 6.405007920265203
+            }
+          },
+          {
+            "shard": 4,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_04/diagnostics.json",
+            "score_seen": 229736,
+            "reservoir": 200000,
+            "winner_score_min": -0.8135281205177307,
+            "winner_score_max": 9.075597763061523,
+            "score_quantiles": {
+              "p01": 0.587651401758194,
+              "p03": 0.9774253350496291,
+              "p05": 1.1920384585857393,
+              "p10": 1.5419767379760743,
+              "p25": 2.334966480731964,
+              "p50": 3.955306887626648,
+              "p75": 5.2442662715911865,
+              "p95": 5.99771065711975,
+              "p99": 6.4051747083663955
+            }
+          },
+          {
+            "shard": 5,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_05/diagnostics.json",
+            "score_seen": 226635,
+            "reservoir": 200000,
+            "winner_score_min": -0.6779992580413818,
+            "winner_score_max": 9.048162460327148,
+            "score_quantiles": {
+              "p01": 0.6079485780000686,
+              "p03": 0.999493904709816,
+              "p05": 1.2210820674896241,
+              "p10": 1.586495614051819,
+              "p25": 2.371318280696869,
+              "p50": 3.909040093421936,
+              "p75": 5.245153427124023,
+              "p95": 5.980979108810425,
+              "p99": 6.383474760055543
+            }
+          },
+          {
+            "shard": 6,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_06/diagnostics.json",
+            "score_seen": 222025,
+            "reservoir": 200000,
+            "winner_score_min": -1.0240768194198608,
+            "winner_score_max": 8.177939414978027,
+            "score_quantiles": {
+              "p01": 0.5984779679775238,
+              "p03": 0.981530259847641,
+              "p05": 1.200672060251236,
+              "p10": 1.5561265110969544,
+              "p25": 2.358666718006134,
+              "p50": 3.9036296606063843,
+              "p75": 5.219088673591614,
+              "p95": 5.991140508651733,
+              "p99": 6.435994749069215
+            }
+          },
+          {
+            "shard": 7,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_07/diagnostics.json",
+            "score_seen": 231410,
+            "reservoir": 200000,
+            "winner_score_min": -0.6262887120246887,
+            "winner_score_max": 8.325174331665039,
+            "score_quantiles": {
+              "p01": 0.6044633382558823,
+              "p03": 0.9937642419338225,
+              "p05": 1.217294019460678,
+              "p10": 1.5762081623077393,
+              "p25": 2.3700807094573975,
+              "p50": 3.8935539722442627,
+              "p75": 5.230984210968018,
+              "p95": 5.995778179168701,
+              "p99": 6.4156644773483285
+            }
+          },
+          {
+            "shard": 8,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_08/diagnostics.json",
+            "score_seen": 229130,
+            "reservoir": 200000,
+            "winner_score_min": -0.7007819414138794,
+            "winner_score_max": 8.31009292602539,
+            "score_quantiles": {
+              "p01": 0.5892290890216827,
+              "p03": 0.9874582731723786,
+              "p05": 1.2093782663345336,
+              "p10": 1.5662632942199708,
+              "p25": 2.3662713170051575,
+              "p50": 3.9636861085891724,
+              "p75": 5.304193139076233,
+              "p95": 6.020484566688538,
+              "p99": 6.388697624206543
+            }
+          },
+          {
+            "shard": 9,
+            "diagnostics": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/shards/shard_09/diagnostics.json",
+            "score_seen": 223660,
+            "reservoir": 200000,
+            "winner_score_min": -0.6937211155891418,
+            "winner_score_max": 8.160365104675293,
+            "score_quantiles": {
+              "p01": 0.6044456648826599,
+              "p03": 1.0025742661952972,
+              "p05": 1.2210557341575623,
+              "p10": 1.5862953782081606,
+              "p25": 2.425564706325531,
+              "p50": 4.014599323272705,
+              "p75": 5.296030521392822,
+              "p95": 5.997757935523986,
+              "p99": 6.4320843076705945
+            }
+          }
+        ]
+      }
+    }
+  }
+}

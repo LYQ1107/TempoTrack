@@ -1,0 +1,1136 @@
+{
+  "artifact": "v11_qdic_fulltest_raw_artifact_manifest",
+  "status": "PASS",
+  "generated_at": "2026-09-16T06:44:10.053686+00:00",
+  "repository_report_root": "reports/tempotrack_v11/fulltest_20260915",
+  "dataset": {
+    "annotation_sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+    "frames": 52155,
+    "videos": 1419
+  },
+  "candidate_count": 9,
+  "all_candidates_completed": false,
+  "candidates": [
+    {
+      "trial_id": "FT_B",
+      "status": "COMPLETED",
+      "wave": "M",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.37210235595703123,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.177,
+          "LocA": 54.766,
+          "AssocA": 41.573,
+          "ClsA": 15.191,
+          "LocRe": 57.248,
+          "LocPr": 78.929,
+          "AssocRe": 46.777,
+          "AssocPr": 63.643,
+          "ClsRe": 25.912,
+          "ClsPr": 21.481
+        },
+        "base": {
+          "TETA": 37.96607098765431,
+          "LocA": 55.050613580246896,
+          "AssocA": 42.420404938271645,
+          "ClsA": 16.42712383950618,
+          "LocRe": 57.56623703703703,
+          "LocPr": 79.38957098765427,
+          "AssocRe": 47.488732716049405,
+          "AssocPr": 64.91564197530865,
+          "ClsRe": 28.20300454938272,
+          "ClsPr": 22.927452314814815
+        },
+        "novel": {
+          "TETA": 29.42857272727273,
+          "LocA": 51.97606060606062,
+          "AssocA": 33.25720606060606,
+          "ClsA": 3.0524678787878785,
+          "LocRe": 54.121060606060595,
+          "LocPr": 74.40209090909092,
+          "AssocRe": 39.78721212121212,
+          "AssocPr": 51.14984848484848,
+          "ClsRe": 3.4130739393939393,
+          "ClsPr": 7.278818181818181
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_B/receipt.json",
+          "exists": true,
+          "bytes": 151255,
+          "copied_to_github": true,
+          "sha256": "13e68c78b86c5d54b8864ebb508cf0136123047222b04d63cb5afec3d92f4657"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_B/config.yaml",
+          "exists": true,
+          "bytes": 840,
+          "copied_to_github": true,
+          "sha256": "9a6de16bfc41deb8c755583a75d547f1f18d438e92f11b9d8a011c353b2901d1"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_B/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6264,
+          "copied_to_github": true,
+          "sha256": "8ee62b6d1186baa3f9305d74b4b6d5bfa5c71835b0b04da40c39173b78d0fd03"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_B/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 3929,
+          "copied_to_github": true,
+          "sha256": "c147160bc4fc6254b54415f15c3dadc05b80b9038e63d3ae02369e309b72daab"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/evaluation/QDIC_FT_B/teta_summary_results.pth",
+          "bytes": 285129284,
+          "sha256": "e563bab65ec8d681cf4ec00c8d03022cc480f50b388a72bab7eff717dc4702a7",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_B/merged/tao_track.json",
+          "bytes": 425342976,
+          "sha256": "6d516ee8f8cbdbcbe7edd2d6d1a00934065a773041c313a822a7e36a3823e970",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_M80",
+      "status": "COMPLETED",
+      "wave": "M",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.297681884765625,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.054,
+          "LocA": 54.834,
+          "AssocA": 41.061,
+          "ClsA": 15.265,
+          "LocRe": 57.347,
+          "LocPr": 78.86,
+          "AssocRe": 46.407,
+          "AssocPr": 62.953,
+          "ClsRe": 26.073,
+          "ClsPr": 21.709
+        },
+        "base": {
+          "TETA": 37.851967901234566,
+          "LocA": 55.13109320987658,
+          "AssocA": 41.911949074074116,
+          "ClsA": 16.512836549382726,
+          "LocRe": 57.675704320987684,
+          "LocPr": 79.32651851851848,
+          "AssocRe": 47.120279938271636,
+          "AssocPr": 64.2006728395062,
+          "ClsRe": 28.381439425925926,
+          "ClsPr": 23.190513018518526
+        },
+        "novel": {
+          "TETA": 29.214118181818176,
+          "LocA": 51.919848484848494,
+          "AssocA": 32.7044606060606,
+          "ClsA": 3.0183400000000002,
+          "LocRe": 54.12278787878787,
+          "LocPr": 74.2840909090909,
+          "AssocRe": 39.398757575757585,
+          "AssocPr": 50.70687878787878,
+          "ClsRe": 3.413006666666667,
+          "ClsPr": 7.158424242424242
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/receipt.json",
+          "exists": true,
+          "bytes": 151424,
+          "copied_to_github": true,
+          "sha256": "3245cf382200fd663f81fdebbc576c9a0e583372c6b21a40890a04c899abf971"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/config.yaml",
+          "exists": true,
+          "bytes": 840,
+          "copied_to_github": true,
+          "sha256": "162e1d4d70933083f9afc1203810d4c62c6a35ad7fff2578d58488388195fe58"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6286,
+          "copied_to_github": true,
+          "sha256": "583fffeb2eda5ff71bb31fa861645dbd0e2adcfbcd4178e113ba7561d85914bd"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 3949,
+          "copied_to_github": true,
+          "sha256": "5d9f1eefe55ec11a0d676cf7f68a460818470184238f905297d24e4ec0cd15be"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/evaluation/QDIC_FT_M80/teta_summary_results.pth",
+          "bytes": 285128573,
+          "sha256": "b01a90fb0f55ba9d1d59fe7fb4d889f5c6a929da10a66eb5a49594f3e10e46ff",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M80/merged/tao_track.json",
+          "bytes": 425313854,
+          "sha256": "327abfbf5cc9d1838a2ed086fe481a96505258f3d5d39d8f1b07c8179995c785",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_M120",
+      "status": "COMPLETED",
+      "wave": "M",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.44652282714843744,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.143,
+          "LocA": 54.654,
+          "AssocA": 41.471,
+          "ClsA": 15.305,
+          "LocRe": 57.167,
+          "LocPr": 78.843,
+          "AssocRe": 46.52,
+          "AssocPr": 64.062,
+          "ClsRe": 25.836,
+          "ClsPr": 21.717
+        },
+        "base": {
+          "TETA": 37.92521018518519,
+          "LocA": 54.92382098765432,
+          "AssocA": 42.300318209876565,
+          "ClsA": 16.5514488117284,
+          "LocRe": 57.47458024691361,
+          "LocPr": 79.29538888888891,
+          "AssocRe": 47.2019561728395,
+          "AssocPr": 65.37793580246911,
+          "ClsRe": 28.11947441358025,
+          "ClsPr": 23.184119984567896
+        },
+        "novel": {
+          "TETA": 29.463966666666657,
+          "LocA": 52.00372727272728,
+          "AssocA": 33.32599696969697,
+          "ClsA": 3.0622557575757576,
+          "LocRe": 54.149969696969684,
+          "LocPr": 74.40648484848487,
+          "AssocRe": 39.82481818181818,
+          "AssocPr": 51.14221212121211,
+          "ClsRe": 3.4130739393939393,
+          "ClsPr": 7.310727272727273
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/receipt.json",
+          "exists": true,
+          "bytes": 151638,
+          "copied_to_github": true,
+          "sha256": "9704d0e98ea688caeb15a59cd3d2a7e2cd22d8b53d1f8e0a570b39e6a8abb38e"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/config.yaml",
+          "exists": true,
+          "bytes": 843,
+          "copied_to_github": true,
+          "sha256": "60a4e8b7daff039a79bb348e36e101c88660bafbc78530af7bb40fcfbf814fea"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6297,
+          "copied_to_github": true,
+          "sha256": "e8b892c1cf94a1de25f197c1afd75bbe52bbfb2b4f63309195e7ec80ec589d62"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 3959,
+          "copied_to_github": true,
+          "sha256": "6deeaa9b4247993be51854f39593ece4a8f2263116308b2527f35e9533875d80"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/evaluation/QDIC_FT_M120/teta_summary_results.pth",
+          "bytes": 285130128,
+          "sha256": "a93258a5252b820ce41c9752974985dd2915c7573e033d88f1a8058105089e28",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M120/merged/tao_track.json",
+          "bytes": 425362693,
+          "sha256": "749833b3a1e93ad8913734959010e1d1fac84bce2b6d427dfe81c0fecfe8a013",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_M60",
+      "status": "COMPLETED",
+      "wave": "M",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.22326141357421872,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.035,
+          "LocA": 54.748,
+          "AssocA": 41.054,
+          "ClsA": 15.303,
+          "LocRe": 57.286,
+          "LocPr": 78.804,
+          "AssocRe": 46.522,
+          "AssocPr": 62.616,
+          "ClsRe": 25.912,
+          "ClsPr": 21.24
+        },
+        "base": {
+          "TETA": 37.87987283950618,
+          "LocA": 55.110117901234595,
+          "AssocA": 41.972025617283975,
+          "ClsA": 16.557392018518513,
+          "LocRe": 57.68687716049385,
+          "LocPr": 79.24639506172834,
+          "AssocRe": 47.31214537037037,
+          "AssocPr": 63.858348765432055,
+          "ClsRe": 28.207878703703702,
+          "ClsPr": 22.884928160493814
+        },
+        "novel": {
+          "TETA": 28.743596969696966,
+          "LocA": 51.19633333333334,
+          "AssocA": 32.04293333333333,
+          "ClsA": 2.9916060606060606,
+          "LocRe": 53.351454545454544,
+          "LocPr": 74.4569696969697,
+          "AssocRe": 38.76203030303031,
+          "AssocPr": 50.4170909090909,
+          "ClsRe": 3.3699090909090907,
+          "ClsPr": 5.0849090909090915
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/receipt.json",
+          "exists": true,
+          "bytes": 150995,
+          "copied_to_github": true,
+          "sha256": "e7c8a42e7b8a1fe36ea2d551cf731dcd5ccea2b168feba52ab200f20db4b6a46"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/config.yaml",
+          "exists": true,
+          "bytes": 842,
+          "copied_to_github": true,
+          "sha256": "322bf0ffdd42e0862b7ed88f4bf6ae709ea02eb856c5f8506d641ff3ce300606"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6206,
+          "copied_to_github": true,
+          "sha256": "6abb4008dd25d84e61728c828240928103b9c4730b078e371e8009f983abc646"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 3949,
+          "copied_to_github": true,
+          "sha256": "04818ea3f0226838afda9e24fcd7410918912a499abc7cf49f4e68dd4ad6a0dc"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/evaluation/QDIC_FT_M60/teta_summary_results.pth",
+          "bytes": 285129157,
+          "sha256": "004360776ce7bc0aebeb83bfd150a805c0135b91303d79253c47e642dc501880",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M60/merged/tao_track.json",
+          "bytes": 425286480,
+          "sha256": "22dc55cdf1dac9368f341714c4bd03be3e40faa16fc615c70017699851c201ca",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_M145",
+      "status": "EVALUATING",
+      "wave": "M",
+      "score_threshold": 0.0,
+      "margin_threshold": 0.5395484161376952,
+      "metrics_summary": {
+        "overall": {
+          "TETA": null,
+          "LocA": null,
+          "AssocA": null,
+          "ClsA": null,
+          "LocRe": null,
+          "LocPr": null,
+          "AssocRe": null,
+          "AssocPr": null,
+          "ClsRe": null,
+          "ClsPr": null
+        },
+        "base": {
+          "TETA": null,
+          "LocA": null,
+          "AssocA": null,
+          "ClsA": null,
+          "LocRe": null,
+          "LocPr": null,
+          "AssocRe": null,
+          "AssocPr": null,
+          "ClsRe": null,
+          "ClsPr": null
+        },
+        "novel": {
+          "TETA": null,
+          "LocA": null,
+          "AssocA": null,
+          "ClsA": null,
+          "LocRe": null,
+          "LocPr": null,
+          "AssocRe": null,
+          "AssocPr": null,
+          "ClsRe": null,
+          "ClsPr": null
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/receipt.json",
+          "exists": true,
+          "bytes": 50035,
+          "copied_to_github": true,
+          "sha256": "87fe3fa58e4ddcec7f716a08440368589116e2883e0847768fc6b5316de73302"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/config.yaml",
+          "exists": true,
+          "bytes": 842,
+          "copied_to_github": true,
+          "sha256": "52c8fd0f01f9e4518644dc972eee4d68dcb84b94009e7c87dd0ad4dbbccabeb1"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6217,
+          "copied_to_github": true,
+          "sha256": "a03804d9df224e11dba02f7bc44d2bc17928d3057a472e4336e467a64be57a3c"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 2583,
+          "copied_to_github": true,
+          "sha256": "4820b812921f159a5631e60fb5542f540c56750717a043a81bfdc76bb6d47783"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/evaluation/QDIC_FT_M145/teta_summary_results.pth",
+          "bytes": 285130247,
+          "sha256": null,
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_parallel_20260914/trials/FT_M145/merged/tao_track.json",
+          "bytes": 425386914,
+          "sha256": "408dbd5f204375c8058d27410c893a90e5620eccc20026e1fe719d726ef64435",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_SCORE_OFF",
+      "status": "COMPLETED",
+      "wave": "S",
+      "score_threshold": -1.0240762937743664,
+      "margin_threshold": 0.44652282714843744,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.146,
+          "LocA": 54.635,
+          "AssocA": 41.496,
+          "ClsA": 15.305,
+          "LocRe": 57.157,
+          "LocPr": 78.82,
+          "AssocRe": 46.534,
+          "AssocPr": 64.097,
+          "ClsRe": 25.837,
+          "ClsPr": 21.717
+        },
+        "base": {
+          "TETA": 37.92531203703704,
+          "LocA": 54.922592592592586,
+          "AssocA": 42.300892283950645,
+          "ClsA": 16.55242165123457,
+          "LocRe": 57.47331481481485,
+          "LocPr": 79.29533333333335,
+          "AssocRe": 47.20317222222222,
+          "AssocPr": 65.37679691358022,
+          "ClsRe": 28.12106700617284,
+          "ClsPr": 23.184296836419747
+        },
+        "novel": {
+          "TETA": 29.48957272727272,
+          "LocA": 51.814636363636374,
+          "AssocA": 33.59199696969697,
+          "ClsA": 3.0622557575757576,
+          "LocRe": 54.048939393939385,
+          "LocPr": 74.15545454545455,
+          "AssocRe": 39.96036363636364,
+          "AssocPr": 51.534848484848474,
+          "ClsRe": 3.4130739393939393,
+          "ClsPr": 7.310727272727273
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/receipt.json",
+          "exists": true,
+          "bytes": 160857,
+          "copied_to_github": true,
+          "sha256": "31025cd1e917caace7983c550dbea68acb1721dc765ebc26df8bd82ce661087a"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/config.yaml",
+          "exists": true,
+          "bytes": 864,
+          "copied_to_github": true,
+          "sha256": "46511f3ef5fb66e20083b30766cff4a789b30859c371b5c27b576d5d64e161dd"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6360,
+          "copied_to_github": true,
+          "sha256": "dfe77f1ac108b964426b2e05f8cfe9d90298e3c95de4567350d3976700b70016"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 4049,
+          "copied_to_github": true,
+          "sha256": "089c46ffdcbb7e0fe29942ef04d226b19451c12f161cab7e0db149da057adc05"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_OFF/evaluation/QDIC_FT_SCORE_OFF/teta_summary_results.pth",
+          "bytes": 285130125,
+          "sha256": "8d45bc3c09ef7ebb2e1e8791e42f9d2786203fc369bddbdc8b72c35abee097c6",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_OFF/merged/tao_track.json",
+          "bytes": 425362737,
+          "sha256": "07e309ae949592792c16c0c2894d66135b2c738d4d14088864fa3a6217a16dd5",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_SCORE_P03",
+      "status": "COMPLETED",
+      "wave": "S",
+      "score_threshold": 0.9801726341247559,
+      "margin_threshold": 0.44652282714843744,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.243,
+          "LocA": 54.675,
+          "AssocA": 41.482,
+          "ClsA": 15.573,
+          "LocRe": 57.162,
+          "LocPr": 78.921,
+          "AssocRe": 46.449,
+          "AssocPr": 64.332,
+          "ClsRe": 26.105,
+          "ClsPr": 22.207
+        },
+        "base": {
+          "TETA": 38.037214506172816,
+          "LocA": 54.95368888888889,
+          "AssocA": 42.31027561728397,
+          "ClsA": 16.84769311728395,
+          "LocRe": 57.47640154320989,
+          "LocPr": 79.38062654320987,
+          "AssocRe": 47.12003487654318,
+          "AssocPr": 65.65122283950616,
+          "ClsRe": 28.416144845679014,
+          "ClsPr": 23.72638277777778
+        },
+        "novel": {
+          "TETA": 29.446906060606057,
+          "LocA": 51.93345454545455,
+          "AssocA": 33.348357575757575,
+          "ClsA": 3.0590436363636364,
+          "LocRe": 54.07839393939393,
+          "LocPr": 74.40348484848487,
+          "AssocRe": 39.85572727272727,
+          "AssocPr": 51.38133333333332,
+          "ClsRe": 3.4147406060606063,
+          "ClsPr": 7.287151515151515
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/receipt.json",
+          "exists": true,
+          "bytes": 152690,
+          "copied_to_github": true,
+          "sha256": "5cd03e0b37f9a8bc89c8e9ab2de9358b7999554ef53a407ede542deb2f44702a"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/config.yaml",
+          "exists": true,
+          "bytes": 863,
+          "copied_to_github": true,
+          "sha256": "0547eca84c133fe8d3592c448b441a7fedef72e464a8714b217d719218e14cbb"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6360,
+          "copied_to_github": true,
+          "sha256": "25d6d2b5f2332dc218f3eaf8b19519aa8e6ba46b76246c1557df5acbeea36043"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 4049,
+          "copied_to_github": true,
+          "sha256": "280b37ac287d6a6230ddb2f575d06000c3381283e52fef4b225ea1afd07b0a37"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/evaluation/QDIC_FT_SCORE_P03/teta_summary_results.pth",
+          "bytes": 285130779,
+          "sha256": "99c1b1db4d183eb6a4ea03b7afa00f550f5c3b5811fc3dd75436c213934f99e8",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/merged/tao_track.json",
+          "bytes": 425376365,
+          "sha256": "62f919948907c393ee7d16e9f536f5b11785817ca5ba89534480efa2c4eae338",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_SCORE_P05",
+      "status": "COMPLETED",
+      "wave": "S",
+      "score_threshold": 1.2016549110412598,
+      "margin_threshold": 0.44652282714843744,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.208,
+          "LocA": 54.676,
+          "AssocA": 41.542,
+          "ClsA": 15.408,
+          "LocRe": 57.155,
+          "LocPr": 78.941,
+          "AssocRe": 46.468,
+          "AssocPr": 64.494,
+          "ClsRe": 25.908,
+          "ClsPr": 21.891
+        },
+        "base": {
+          "TETA": 37.99729567901236,
+          "LocA": 54.96010864197532,
+          "AssocA": 42.36667993827161,
+          "ClsA": 16.66512143518518,
+          "LocRe": 57.476089814814785,
+          "LocPr": 79.38691975308637,
+          "AssocRe": 47.1491345679012,
+          "AssocPr": 65.7893432098765,
+          "ClsRe": 28.19928280864198,
+          "ClsPr": 23.378172391975312
+        },
+        "novel": {
+          "TETA": 29.46266363636363,
+          "LocA": 51.88333333333334,
+          "AssocA": 33.44426666666667,
+          "ClsA": 3.060558787878788,
+          "LocRe": 54.00118181818181,
+          "LocPr": 74.56639393939396,
+          "AssocRe": 39.78012121212121,
+          "AssocPr": 51.77733333333333,
+          "ClsRe": 3.4147406060606063,
+          "ClsPr": 7.2944545454545455
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/receipt.json",
+          "exists": true,
+          "bytes": 152649,
+          "copied_to_github": true,
+          "sha256": "b8097bbca1b36642adf46cd20657edcf0502fe49bf265fc12a4b903595eb9402"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/config.yaml",
+          "exists": true,
+          "bytes": 863,
+          "copied_to_github": true,
+          "sha256": "018c9c218c9f8240b5bbba9b764c531b951c95ec8c7eb2ec1ed4d230890bda68"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6360,
+          "copied_to_github": true,
+          "sha256": "b0cddb6415fd8213e5a6d195c62edf999437ae3b6e83e582a5be5c6c9c9aceac"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 4049,
+          "copied_to_github": true,
+          "sha256": "a3e4a415366716bb045ee16df415c99a5983a846e4cbcbe790bc89d78c3f17e9"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P05/evaluation/QDIC_FT_SCORE_P05/teta_summary_results.pth",
+          "bytes": 285130378,
+          "sha256": "82eb2569647631d86a02a5f2fa2ddd7246471e5e74a9456fdf25cd4bee4e509c",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P05/merged/tao_track.json",
+          "bytes": 425387714,
+          "sha256": "4ee340ee64a0f53f816c5d53120320430da901c42a5e7cd95d2928f04e035250",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    },
+    {
+      "trial_id": "FT_LOCAL",
+      "status": "COMPLETED",
+      "wave": "LOCAL",
+      "score_threshold": 1.0909137725830078,
+      "margin_threshold": 0.44652282714843744,
+      "metrics_summary": {
+        "overall": {
+          "TETA": 37.205,
+          "LocA": 54.653,
+          "AssocA": 41.534,
+          "ClsA": 15.427,
+          "LocRe": 57.138,
+          "LocPr": 78.933,
+          "AssocRe": 46.489,
+          "AssocPr": 64.466,
+          "ClsRe": 25.947,
+          "ClsPr": 22.01
+        },
+        "base": {
+          "TETA": 37.99157592592591,
+          "LocA": 54.93449444444447,
+          "AssocA": 42.35340216049383,
+          "ClsA": 16.6867575154321,
+          "LocRe": 57.456521913580254,
+          "LocPr": 79.37791975308642,
+          "AssocRe": 47.16625401234565,
+          "AssocPr": 65.76547283950616,
+          "ClsRe": 28.241546080246916,
+          "ClsPr": 23.509203132716046
+        },
+        "novel": {
+          "TETA": 29.478906060606057,
+          "LocA": 51.88987878787879,
+          "AssocA": 33.48641818181818,
+          "ClsA": 3.060558787878788,
+          "LocRe": 54.00781818181817,
+          "LocPr": 74.56657575757576,
+          "AssocRe": 39.84372727272728,
+          "AssocPr": 51.710787878787876,
+          "ClsRe": 3.4147406060606063,
+          "ClsPr": 7.2944545454545455
+        }
+      },
+      "copied_artifacts": [
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/receipt.json",
+          "exists": true,
+          "bytes": 153925,
+          "copied_to_github": true,
+          "sha256": "63c675eda23404992415ce28d1cf269726cd4a2e6bd9ac6432c99d0ea17484bd"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/config.yaml",
+          "exists": true,
+          "bytes": 859,
+          "copied_to_github": true,
+          "sha256": "67e2b404441325e376bec0be2b38b894e47f7bb177ba113bfbb00412ae24241d"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/merged/merge_manifest.json",
+          "exists": true,
+          "bytes": 6316,
+          "copied_to_github": true,
+          "sha256": "c416b327e16a13925ef9172542e450ff5b67f4d11172e07113c6eb9d8644a4cc"
+        },
+        {
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/evaluation/evaluation.log",
+          "exists": true,
+          "bytes": 2622,
+          "copied_to_github": true,
+          "sha256": "2efbe2e0859be24e349ab253022c573ea02658c50eb3ba52154c7c8c823d8a26"
+        }
+      ],
+      "raw_artifacts": [
+        {
+          "kind": "teta_summary",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_LOCAL/evaluation/QDIC_FT_LOCAL/teta_summary_results.pth",
+          "bytes": 285130509,
+          "sha256": "d403c4daf1c5e58dc04f1058e4ea8ff453219a98a3f4637ba0fff4ed48305c45",
+          "copied_to_github": false,
+          "reason": "official .pth exceeds GitHub normal file limit"
+        },
+        {
+          "kind": "merged_prediction",
+          "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_LOCAL/merged/tao_track.json",
+          "bytes": 425381120,
+          "sha256": "92ca951fbb7c28cb408c4e6ea735b592a18439a3deaede7a9562e7da7e0d9f46",
+          "copied_to_github": false,
+          "reason": "large generated prediction; indexed by SHA256"
+        }
+      ]
+    }
+  ],
+  "baselines": [
+    {
+      "name": "COV native baseline",
+      "scope": "FULL_TEST_ORIGINAL_BASELINE",
+      "path": "/data2/usr_for_deadline/tempotrack_v10_unified/tempo_full/covtrack/test_v10_runtime_gate_sharded/merged/evaluation/COVTrack_V10_Tempo_Test/teta_summary_results.pth",
+      "bytes": 284813677,
+      "sha256": "d8454e184f3bcad01e75d43fd32acaeea2c7c89dbb76d48c5a6c70719b06fdd2",
+      "copied_to_github": false,
+      "reason": "raw official .pth retained on server; metrics and provenance are copied"
+    },
+    {
+      "name": "Q1 OP00",
+      "scope": "PROVENANCE_MISMATCH",
+      "path": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_original_full_sharded_20260915_retry01/evaluation/COV_V10_TEMPO/teta_summary_results.pth",
+      "bytes": 284700644,
+      "sha256": "d7d8992861d061ffb71d124510ee0c6d9d2d18c9d45c426587fbfe983a6a33ef",
+      "copied_to_github": false,
+      "reason": "raw official .pth retained on server; metrics and provenance are copied"
+    }
+  ],
+  "uploaded_files": [
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/README.md",
+      "bytes": 2400,
+      "sha256": "fa9372dc8558803c9a56e2d808e357e64a22a0271b139f5f367558b3f8e78da1"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/controller_final_report.md",
+      "bytes": 11346,
+      "sha256": "617eff4b9a4a87376cf02a4a7c090e3658bd652be2fe58c84d4b93d23a2664fb"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/controller_search_state_raw.json",
+      "bytes": 1587233,
+      "sha256": "cfca018db3068a1992bbf3b387a38b056f6d0d0cc7fa6d9e18724c59789e7264"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/full_results.json",
+      "bytes": 5969970,
+      "sha256": "d412febb633876d0b662eab2f2e61873c10d8f8dee458079d67b9408f5991de9"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_analysis.md",
+      "bytes": 4325,
+      "sha256": "eedc1bdd2357e87a88d73171580b2d1b4b0067ec0720fe275ab25a9030e4b7e5"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_audit.json",
+      "bytes": 103069,
+      "sha256": "60db512cf638ac7cf81e23d6a2297a637ef6f807e27a82088872029b5c39fbd0"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_audit_watcher.log",
+      "bytes": 292,
+      "sha256": "8263bc576cbe85cf4e2864225596b9a8b234230d8a793450135399690ba567bd"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_extension_plan.json",
+      "bytes": 1439,
+      "sha256": "25c6ee96b38dc7e131c36ddd0dab56e7437e802d59434fc2845c209e4c2e8575"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_margin_score_distributions.json",
+      "bytes": 43900,
+      "sha256": "9876913c41dd096c885b34325f61e2a8651e74f6afc359c81267c0dc2d5adb7d"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_official_comparison.json",
+      "bytes": 11116,
+      "sha256": "bf23f0295868dae580289f7d5677ce523485648f54dbe6bf366eb893c780e552"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_official_comparison.md",
+      "bytes": 5408,
+      "sha256": "c52fd532ce8b10c1b83b7f8d1fb7adfaedd89ffc17c1f3c2ac5bf3b5469f9284"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/post_search_recovery_manifest.json",
+      "bytes": 2579,
+      "sha256": "a79c9b94ff8888dee4bae7b8b2dff774827d2886b7c9bd8c79861259c38dee9a"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/preflight.json",
+      "bytes": 3405458,
+      "sha256": "0f41e494a1163751a75f28c6fddb0ca1c8c8aaa4e479e64606d4199312ea70ed"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/recovery_controller.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/runtime_smoke.json",
+      "bytes": 419820,
+      "sha256": "6f9adaa130f527b7ab3ddd7d8fd66865ede0e72d0d5e649a9f7b66e9df8ce5d2"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/search_plan.json",
+      "bytes": 4587,
+      "sha256": "d102bd8c6cc931dc9af7b7f62c873e4348eba76e04beea9dcad21d4a539ea1a4"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_B/config.yaml",
+      "bytes": 840,
+      "sha256": "9a6de16bfc41deb8c755583a75d547f1f18d438e92f11b9d8a011c353b2901d1"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_B/evaluation/evaluation.log",
+      "bytes": 3929,
+      "sha256": "c147160bc4fc6254b54415f15c3dadc05b80b9038e63d3ae02369e309b72daab"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_B/merged/merge_manifest.json",
+      "bytes": 6264,
+      "sha256": "8ee62b6d1186baa3f9305d74b4b6d5bfa5c71835b0b04da40c39173b78d0fd03"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_B/receipt.json",
+      "bytes": 151255,
+      "sha256": "13e68c78b86c5d54b8864ebb508cf0136123047222b04d63cb5afec3d92f4657"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/config.yaml",
+      "bytes": 859,
+      "sha256": "67e2b404441325e376bec0be2b38b894e47f7bb177ba113bfbb00412ae24241d"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/evaluation/evaluation.log",
+      "bytes": 2622,
+      "sha256": "2efbe2e0859be24e349ab253022c573ea02658c50eb3ba52154c7c8c823d8a26"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/merged/merge_manifest.json",
+      "bytes": 6316,
+      "sha256": "c416b327e16a13925ef9172542e450ff5b67f4d11172e07113c6eb9d8644a4cc"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_LOCAL/receipt.json",
+      "bytes": 153925,
+      "sha256": "63c675eda23404992415ce28d1cf269726cd4a2e6bd9ac6432c99d0ea17484bd"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/config.yaml",
+      "bytes": 843,
+      "sha256": "60a4e8b7daff039a79bb348e36e101c88660bafbc78530af7bb40fcfbf814fea"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/evaluation/evaluation.log",
+      "bytes": 3959,
+      "sha256": "6deeaa9b4247993be51854f39593ece4a8f2263116308b2527f35e9533875d80"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/merged/merge_manifest.json",
+      "bytes": 6297,
+      "sha256": "e8b892c1cf94a1de25f197c1afd75bbe52bbfb2b4f63309195e7ec80ec589d62"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M120/receipt.json",
+      "bytes": 151638,
+      "sha256": "9704d0e98ea688caeb15a59cd3d2a7e2cd22d8b53d1f8e0a570b39e6a8abb38e"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/config.yaml",
+      "bytes": 842,
+      "sha256": "52c8fd0f01f9e4518644dc972eee4d68dcb84b94009e7c87dd0ad4dbbccabeb1"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/evaluation/evaluation.log",
+      "bytes": 2583,
+      "sha256": "4820b812921f159a5631e60fb5542f540c56750717a043a81bfdc76bb6d47783"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/merged/merge_manifest.json",
+      "bytes": 6217,
+      "sha256": "a03804d9df224e11dba02f7bc44d2bc17928d3057a472e4336e467a64be57a3c"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M145/receipt.json",
+      "bytes": 50035,
+      "sha256": "87fe3fa58e4ddcec7f716a08440368589116e2883e0847768fc6b5316de73302"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/config.yaml",
+      "bytes": 842,
+      "sha256": "322bf0ffdd42e0862b7ed88f4bf6ae709ea02eb856c5f8506d641ff3ce300606"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/evaluation/evaluation.log",
+      "bytes": 3949,
+      "sha256": "04818ea3f0226838afda9e24fcd7410918912a499abc7cf49f4e68dd4ad6a0dc"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/merged/merge_manifest.json",
+      "bytes": 6206,
+      "sha256": "6abb4008dd25d84e61728c828240928103b9c4730b078e371e8009f983abc646"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M60/receipt.json",
+      "bytes": 150995,
+      "sha256": "e7c8a42e7b8a1fe36ea2d551cf731dcd5ccea2b168feba52ab200f20db4b6a46"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/config.yaml",
+      "bytes": 840,
+      "sha256": "162e1d4d70933083f9afc1203810d4c62c6a35ad7fff2578d58488388195fe58"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/evaluation/evaluation.log",
+      "bytes": 3949,
+      "sha256": "5d9f1eefe55ec11a0d676cf7f68a460818470184238f905297d24e4ec0cd15be"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/merged/merge_manifest.json",
+      "bytes": 6286,
+      "sha256": "583fffeb2eda5ff71bb31fa861645dbd0e2adcfbcd4178e113ba7561d85914bd"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_M80/receipt.json",
+      "bytes": 151424,
+      "sha256": "3245cf382200fd663f81fdebbc576c9a0e583372c6b21a40890a04c899abf971"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/config.yaml",
+      "bytes": 864,
+      "sha256": "46511f3ef5fb66e20083b30766cff4a789b30859c371b5c27b576d5d64e161dd"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/evaluation/evaluation.log",
+      "bytes": 4049,
+      "sha256": "089c46ffdcbb7e0fe29942ef04d226b19451c12f161cab7e0db149da057adc05"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/merged/merge_manifest.json",
+      "bytes": 6360,
+      "sha256": "dfe77f1ac108b964426b2e05f8cfe9d90298e3c95de4567350d3976700b70016"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_OFF/receipt.json",
+      "bytes": 160857,
+      "sha256": "31025cd1e917caace7983c550dbea68acb1721dc765ebc26df8bd82ce661087a"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/config.yaml",
+      "bytes": 863,
+      "sha256": "0547eca84c133fe8d3592c448b441a7fedef72e464a8714b217d719218e14cbb"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/evaluation/evaluation.log",
+      "bytes": 4049,
+      "sha256": "280b37ac287d6a6230ddb2f575d06000c3381283e52fef4b225ea1afd07b0a37"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/merged/merge_manifest.json",
+      "bytes": 6360,
+      "sha256": "25d6d2b5f2332dc218f3eaf8b19519aa8e6ba46b76246c1557df5acbeea36043"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P03/receipt.json",
+      "bytes": 152690,
+      "sha256": "5cd03e0b37f9a8bc89c8e9ab2de9358b7999554ef53a407ede542deb2f44702a"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/config.yaml",
+      "bytes": 863,
+      "sha256": "018c9c218c9f8240b5bbba9b764c531b951c95ec8c7eb2ec1ed4d230890bda68"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/evaluation/evaluation.log",
+      "bytes": 4049,
+      "sha256": "a3e4a415366716bb045ee16df415c99a5983a846e4cbcbe790bc89d78c3f17e9"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/merged/merge_manifest.json",
+      "bytes": 6360,
+      "sha256": "b0cddb6415fd8213e5a6d195c62edf999437ae3b6e83e582a5be5c6c9c9aceac"
+    },
+    {
+      "path": "reports/tempotrack_v11/fulltest_20260915/trials/FT_SCORE_P05/receipt.json",
+      "bytes": 152649,
+      "sha256": "b8097bbca1b36642adf46cd20657edcf0502fe49bf265fc12a4b903595eb9402"
+    }
+  ],
+  "large_raw_files_policy": "GitHub upload contains compact auditable metrics/receipts/configs/manifests and this index; generated prediction JSON and TETA .pth files remain at the recorded server paths because they exceed normal GitHub file limits.",
+  "manifest_self_excluded": true
+}

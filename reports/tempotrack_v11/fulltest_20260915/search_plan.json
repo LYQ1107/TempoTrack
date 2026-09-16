@@ -1,0 +1,156 @@
+{
+  "artifact": "v11_qdic_full_test_search_plan",
+  "created_at_unix": 1789400924.4599507,
+  "derived_trials": [
+    {
+      "margin_threshold": 0.44652282714843744,
+      "reason": "derived from full-Test QDIC winner score distribution after Wave M",
+      "score_threshold": -1.0240762937743664,
+      "trial_id": "FT_SCORE_OFF",
+      "wave": "S"
+    },
+    {
+      "margin_threshold": 0.44652282714843744,
+      "reason": "derived from full-Test QDIC winner score distribution after Wave M",
+      "score_threshold": 0.9801726341247559,
+      "trial_id": "FT_SCORE_P03",
+      "wave": "S"
+    },
+    {
+      "margin_threshold": 0.44652282714843744,
+      "reason": "derived from full-Test QDIC winner score distribution after Wave M",
+      "score_threshold": 1.2016549110412598,
+      "trial_id": "FT_SCORE_P05",
+      "wave": "S"
+    },
+    {
+      "local_axis": "score_threshold",
+      "local_axis_evidence": {
+        "margin_threshold": {
+          "available": false,
+          "axis": "margin_threshold",
+          "best_improvement": 0.0,
+          "best_slope_abs": 0.0,
+          "max_abs_delta": 0.0,
+          "nearest_peer": null,
+          "peer_count": 0,
+          "peers": []
+        },
+        "score_threshold": {
+          "available": true,
+          "axis": "score_threshold",
+          "best_improvement": 0.035000000000003695,
+          "best_slope_abs": 0.15802618831301912,
+          "max_abs_delta": 0.06499999999999773,
+          "nearest_peer": {
+            "delta_teta": 0.035000000000003695,
+            "distance": 0.2214822769165039,
+            "slope_abs": 0.15802618831301912,
+            "teta": 37.243,
+            "trial_id": "FT_SCORE_P03",
+            "value": 0.9801726341247559
+          },
+          "peer_count": 3,
+          "peers": [
+            {
+              "delta_teta": 0.035000000000003695,
+              "distance": 0.2214822769165039,
+              "slope_abs": 0.15802618831301912,
+              "teta": 37.243,
+              "trial_id": "FT_SCORE_P03",
+              "value": 0.9801726341247559
+            },
+            {
+              "delta_teta": -0.06499999999999773,
+              "distance": 1.2016549110412598,
+              "slope_abs": 0.05409206869855326,
+              "teta": 37.143,
+              "trial_id": "FT_M120",
+              "value": 0.0
+            },
+            {
+              "delta_teta": -0.06199999999999761,
+              "distance": 2.2257312048156264,
+              "slope_abs": 0.02785601417900484,
+              "teta": 37.146,
+              "trial_id": "FT_SCORE_OFF",
+              "value": -1.0240762937743664
+            }
+          ]
+        }
+      },
+      "margin_threshold": 0.44652282714843744,
+      "reason": "one adaptive midpoint local refinement",
+      "score_threshold": 1.0909137725830078,
+      "trial_id": "FT_LOCAL",
+      "wave": "LOCAL"
+    }
+  ],
+  "fixed_runtime": {
+    "alpha_fast": 0.7,
+    "alpha_slow": 0.15,
+    "candidate_top_k": 8,
+    "max_gap": 360,
+    "memory_capacity": 64,
+    "min_gap": 0,
+    "qdic_context_top_k": 64,
+    "qdic_recent_k": 8,
+    "qdic_weight": 1.0,
+    "reranker_weight": 0.0,
+    "top_r": 3
+  },
+  "full_test_annotation_sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+  "policy": {
+    "final_reserve_seconds": 7200,
+    "frontend_cache_used": false,
+    "max_full_candidates": 9,
+    "primary_objective": "Overall TETA",
+    "score_source": "full_test_qdic_winner_score_distribution",
+    "tie_break": [
+      "Novel TETA",
+      "Overall AssocA",
+      "Novel AssocA"
+    ]
+  },
+  "protocol": "TEST_TUNED_MODEL_SPECIFIC",
+  "qdic_checkpoint_sha256": "fb62d6d3f04260bb2eb41a000deec3cf09130060228eb5af1f402ba0af99fab7",
+  "repo_head": "18eccacb588e62fc1948ae4a533db0b83855e41a",
+  "schema_version": 1,
+  "search_fields": [
+    "score_threshold",
+    "margin_threshold"
+  ],
+  "trials": [
+    {
+      "margin_threshold": 0.37210235595703123,
+      "score_threshold": 0.0,
+      "trial_id": "FT_B",
+      "wave": "M"
+    },
+    {
+      "margin_threshold": 0.297681884765625,
+      "score_threshold": 0.0,
+      "trial_id": "FT_M80",
+      "wave": "M"
+    },
+    {
+      "margin_threshold": 0.44652282714843744,
+      "score_threshold": 0.0,
+      "trial_id": "FT_M120",
+      "wave": "M"
+    },
+    {
+      "margin_threshold": 0.22326141357421872,
+      "score_threshold": 0.0,
+      "trial_id": "FT_M60",
+      "wave": "M"
+    },
+    {
+      "margin_threshold": 0.5395484161376952,
+      "score_threshold": 0.0,
+      "trial_id": "FT_M145",
+      "wave": "M"
+    }
+  ],
+  "unbiased_test": false
+}

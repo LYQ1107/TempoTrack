@@ -1,0 +1,102 @@
+{
+  "annotation": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/tao_test_burst_v1.json",
+  "annotation_sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+  "images": 52155,
+  "output": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/merged/tao_track.json",
+  "output_sha256": "62f919948907c393ee7d16e9f536f5b11785817ca5ba89534480efa2c4eae338",
+  "rows": 2353689,
+  "semantics": "complete_video_shard_offset_track_id_only",
+  "shards": [
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_01.json",
+      "annotation_sha256": "dd92b2eaf528eda853bb4f9584f4e6e53d9d007578938d4346a134bfe6a942f3",
+      "images": 5219,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_01/stream/tao_track.json",
+      "prediction_sha256": "6369bc15fb8bff7abba138f1b80664239f2d9c9dccda09fec15f48b97ee41263",
+      "rows": 247695,
+      "track_offset_after": 41005
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_00.json",
+      "annotation_sha256": "955c53dad6238b034386e5fca908f659afa69ee8c189f048dd2546ea1f468cc9",
+      "images": 5219,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_00/stream/tao_track.json",
+      "prediction_sha256": "b4bff1bf7f43e2c972666f9c86f6c747848e7b1244108982c217e7c477db7d6d",
+      "rows": 241901,
+      "track_offset_after": 82425
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_05.json",
+      "annotation_sha256": "d36fd8d13a8c1b9282f0e1468f6c1d31e56aa438d15383555cdd71d50878cc3d",
+      "images": 5214,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_05/stream/tao_track.json",
+      "prediction_sha256": "d23e144b2f1586ce793982c5ed818e9e1a5008c6b0040ee54cfbcbec84557424",
+      "rows": 233242,
+      "track_offset_after": 123458
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_06.json",
+      "annotation_sha256": "4e46c935422b90dfdd7089973bdb06d72d80bed8d3da0e30507d9ffa535795a0",
+      "images": 5216,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_06/stream/tao_track.json",
+      "prediction_sha256": "2aee08133c8b3fb92409fff39a418d065d5816f319f042bab866cdc8a4b2a0c4",
+      "rows": 228392,
+      "track_offset_after": 164052
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_04.json",
+      "annotation_sha256": "7d53528fcb72e8847dc517058453df3869d4b175b8257ca664de4b8702126e20",
+      "images": 5216,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_04/stream/tao_track.json",
+      "prediction_sha256": "bb85fe17eb0df92eeba216594619e4de3ffef087750d93359047a92b96b49dbf",
+      "rows": 236424,
+      "track_offset_after": 206388
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_07.json",
+      "annotation_sha256": "2703c0202722ad8e2026618227ea56dcbff5bf49afed6275cc3ab6b26c0f408b",
+      "images": 5216,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_07/stream/tao_track.json",
+      "prediction_sha256": "b5c9822404f6553e9191704fa97391e9406c25c42ea38088176dc1681b77c142",
+      "rows": 237834,
+      "track_offset_after": 248563
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_08.json",
+      "annotation_sha256": "6b532726337cdedd95b8031da1eeee9f22fe48c4f6c589ac446d4d3792c5578d",
+      "images": 5216,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_08/stream/tao_track.json",
+      "prediction_sha256": "11451821d267415e66d48d5a5d05e10953f1b0ee394dc83b4ad56e9f3aeb2d8a",
+      "rows": 235509,
+      "track_offset_after": 290085
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_03.json",
+      "annotation_sha256": "9d478eb9a61c54559911b053c0718834822767afee49a835bdcedb370907adb8",
+      "images": 5217,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_03/stream/tao_track.json",
+      "prediction_sha256": "0e6d1629095b0220060b5d097af2c245cab6965f6f2214116b375e266b124b55",
+      "rows": 225950,
+      "track_offset_after": 331172
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_09.json",
+      "annotation_sha256": "ffb9935f808e7016a866142ddd8cbc2177ebef1f6f6b824f59fb7fb7d030ed68",
+      "images": 5204,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_09/stream/tao_track.json",
+      "prediction_sha256": "44635e3c0a6667bda0c78fe9953c83a733ed76cddacf29c012935090f8a6c1d2",
+      "rows": 230043,
+      "track_offset_after": 370497
+    },
+    {
+      "annotation": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_v104_best20h_20260914/manifests/test/shard_02.json",
+      "annotation_sha256": "bb6c3f6dc589e56245375f1a4b58a84541525b344f2ce0bbecc639f8ea198942",
+      "images": 5218,
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_SCORE_P03/shards/shard_02/stream/tao_track.json",
+      "prediction_sha256": "c2f5a5fe9c8bfdbebc23f43ccc42abde5d8900947a8aea7743a5314e4a2d2971",
+      "rows": 236699,
+      "track_offset_after": 409930
+    }
+  ],
+  "status": "PASS"
+}

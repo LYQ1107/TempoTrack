@@ -1,0 +1,64 @@
+{
+  "artifact": "v11_qdic_full_test_recovery_finalization",
+  "completed_candidates": [
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_B"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_M80"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_M120"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_M60"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_M145"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_SCORE_OFF"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_SCORE_P03"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_SCORE_P05"
+    },
+    {
+      "status": "COMPLETED",
+      "trial_id": "FT_LOCAL"
+    }
+  ],
+  "ft_local_summary_sha256": "d403c4daf1c5e58dc04f1058e4ea8ff453219a98a3f4637ba0fff4ed48305c45",
+  "full_tests_restarted": false,
+  "generated_at": "2026-09-15T22:31:19.409042+00:00",
+  "modified_artifacts": [
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_LOCAL/receipt.json",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/full_results.json",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/final_report.md",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_margin_score_distributions.json",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_extension_plan.json",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_audit.json",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_analysis.md"
+  ],
+  "protected_artifacts": [
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/preflight.json",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/search_plan.json",
+    "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/search_state.json"
+  ],
+  "reason": "FT_LOCAL official TETA summary was complete but controller parser hit a transient EOF/write race; the summary was re-parsed successfully after the process exited.",
+  "recovered_status": "COMPLETED_BOUNDED_CAPACITY",
+  "source_search_state": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/search_state.json",
+  "source_search_state_sha256": "cfca018db3068a1992bbf3b387a38b056f6d0d0cc7fa6d9e18724c59789e7264",
+  "source_status": "FAILED",
+  "status": "PASS"
+}
