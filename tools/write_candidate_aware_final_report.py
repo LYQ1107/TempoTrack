@@ -165,6 +165,81 @@ def _load_completed(path: Path, label: str, allowed_statuses: set[str]) -> dict[
     return dict(value)
 
 
+def _load_optional_artifact(path: Path | None, label: str) -> dict[str, Any]:
+    if path is None:
+        return {"status": "NOT_PROVIDED", "payload": None}
+    value = _read_json(path)
+    if not isinstance(value, Mapping):
+        raise RuntimeError(f"{label} must be a JSON object")
+    return {
+        "status": str(value.get("status", "UNKNOWN")),
+        "path": str(path),
+        "sha256": _sha256(path),
+        "artifact": value.get("artifact"),
+        "payload": dict(value),
+    }
+
+
+def _margin_search_analysis(
+    comparison_path: Path | None,
+    distribution_path: Path | None,
+    extension_path: Path | None,
+) -> dict[str, Any]:
+    """Load the prior margin-champion audit without conflating it with QDIC."""
+    comparison = _load_optional_artifact(comparison_path, "margin search comparison")
+    distributions = _load_optional_artifact(distribution_path, "margin score distributions")
+    extension = _load_optional_artifact(extension_path, "margin extension plan")
+    payload = comparison.get("payload") or {}
+    distribution_payload = distributions.get("payload") or {}
+    margin_rows = distribution_payload.get("margins", {})
+    compact_distributions: dict[str, Any] = {}
+    if isinstance(margin_rows, Mapping):
+        for name, row in margin_rows.items():
+            if not isinstance(row, Mapping):
+                continue
+            values = row.get("distribution", {})
+            if not isinstance(values, Mapping):
+                values = {}
+            compact_distributions[str(name)] = {
+                "trial_id": row.get("trial_id"),
+                "score_threshold": row.get("score_threshold"),
+                "margin_threshold": row.get("margin_threshold"),
+                "winner_score_min": values.get("winner_score_min"),
+                "p01": values.get("p01"),
+                "p03": values.get("p03"),
+                "p05": values.get("p05"),
+                "p10": values.get("p10"),
+                "p25": values.get("p25"),
+                "p50": values.get("p50"),
+                "p95": values.get("p95"),
+            }
+    return {
+        "status": "PASS" if comparison.get("status") == "PASS" and distributions.get("status") == "PASS" else "INCOMPLETE",
+        "comparison": {
+            "path": comparison.get("path"),
+            "sha256": comparison.get("sha256"),
+            "status": comparison.get("status"),
+        },
+        "overall_margin_champion": payload.get("margin_champions"),
+        "ov_margin_champion": payload.get("ov_margin_champion"),
+        "program_champion": payload.get("program_champion"),
+        "absolute_overall_teta_leader": payload.get("absolute_overall_teta_leader"),
+        "score_distribution_artifact": {
+            "path": distributions.get("path"),
+            "sha256": distributions.get("sha256"),
+            "status": distributions.get("status"),
+            "margins": compact_distributions,
+        },
+        "extension_plan": {
+            "path": extension.get("path"),
+            "sha256": extension.get("sha256"),
+            "status": extension.get("status"),
+            "payload": extension.get("payload"),
+        },
+        "interpretation": "Margin champion selection and score search are bounded sequential evidence; they do not establish a global score-by-margin optimum.",
+    }
+
+
 def _load_final_result(path: Path) -> dict[str, Any]:
     result = _load_completed(path, "final candidate Full-Test result", {"PASS", "COMPLETED"})
     if not isinstance(result.get("metrics"), Mapping):
@@ -553,6 +628,32 @@ def _write_markdown(path: Path, report: Mapping[str, Any]) -> None:
             lines.append(
                 f"| {row['label']} | {_fmt(row['cls_a'])} | {_fmt(row['cls_re'])} | {_fmt(row['assoc_a'])} | {_fmt(row['delta_cls_a_vs_q1'])} | {_fmt(row['delta_cls_re_vs_q1'])} | {_fmt(row['delta_assoc_a_vs_q1'])} |"
             )
+    margin = report.get("margin_search", {})
+    lines.extend(
+        [
+            "",
+            "## Margin champion and score-distribution audit",
+            "",
+            f"- Audit status: `{margin.get('status')}`",
+            f"- `OVERALL_MARGIN_CHAMPION`: `{(margin.get('overall_margin_champion') or {}).get('trial_id')}`; margin=`{(margin.get('overall_margin_champion') or {}).get('margin_threshold')}`.",
+            f"- `OV_MARGIN_CHAMPION`: `{(margin.get('ov_margin_champion') or {}).get('trial_id')}`; margin=`{(margin.get('ov_margin_champion') or {}).get('margin_threshold')}`.",
+            "- These are separate selection definitions. Wave-S score search is a bounded sequential search around one selected margin and is not a global score×margin optimum.",
+            "",
+            "| Margin trial | Margin | winner min | p01 | p03 | p05 | p10 | p25 | p50 | p95 |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for name, row in (margin.get("score_distribution_artifact", {}).get("margins", {}) or {}).items():
+        lines.append(
+            f"| {name} | {_fmt(row.get('margin_threshold'))} | {_fmt(row.get('winner_score_min'))} | {_fmt(row.get('p01'))} | {_fmt(row.get('p03'))} | {_fmt(row.get('p05'))} | {_fmt(row.get('p10'))} | {_fmt(row.get('p25'))} | {_fmt(row.get('p50'))} | {_fmt(row.get('p95'))} |"
+        )
+    extension_payload = (margin.get("extension_plan") or {}).get("payload") or {}
+    lines.extend(
+        [
+            "",
+            f"- Extension plan: `{extension_payload.get('status', 'NOT_PROVIDED')}`; `launch={extension_payload.get('launch')}`. It is recorded for review and is not auto-started.",
+        ]
+    )
     lines.extend(
         [
             "",
@@ -605,9 +706,25 @@ def run(args: argparse.Namespace) -> int:
     final_metrics = final_raw["validated_metrics"]
     training_receipt = _candidate_training_receipt(final_raw)
     score_path = None if args.score_search is None else Path(args.score_search).resolve()
+    margin_comparison_path = (
+        None if args.margin_search is None else Path(args.margin_search).resolve()
+    )
+    margin_distribution_path = (
+        None
+        if args.margin_score_distributions is None
+        else Path(args.margin_score_distributions).resolve()
+    )
+    margin_extension_path = (
+        None if args.margin_extension_plan is None else Path(args.margin_extension_plan).resolve()
+    )
     preferred_q1_name = "Q1 tuned champion" if "Q1 tuned champion" in q1_references else "Q1 OP00"
     q1 = q1_references.get(preferred_q1_name)
     score_analysis = _score_analysis(score_path, final_metrics, q1)
+    margin_search = _margin_search_analysis(
+        margin_comparison_path,
+        margin_distribution_path,
+        margin_extension_path,
+    )
     structure_gate = structural.get("structure_gate", {})
     report = {
         "schema_version": 1,
@@ -640,6 +757,7 @@ def run(args: argparse.Namespace) -> int:
         "deltas": _deltas(final_metrics, baseline["metrics"]),
         "q1_analysis": _reference_analysis(final_metrics, q1_references),
         "score_analysis": score_analysis,
+        "margin_search": margin_search,
         "selection": selection,
         "architecture_comparison": {
             "path": str(architecture_path),
@@ -704,6 +822,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--structural-sanity", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--score-search")
+    parser.add_argument("--margin-search")
+    parser.add_argument("--margin-score-distributions")
+    parser.add_argument("--margin-extension-plan")
     return parser
 
 
