@@ -99,7 +99,8 @@ def _stream_command(
         f"data.test.img_prefix={Path(args.img_prefix).resolve()}/",
         "data.workers_per_gpu=1",
         "model.roi_head.only_validation_categories=False",
-        "model.roi_head.only_test_categories=True",
+        "model.roi_head.only_test_categories="
+        + ("True" if args.only_test_categories else "False"),
         "model.tracker.match_score_thr=0.37",
         "model.tracker.memo_frames=50",
         "model.tracker.momentum_embed=0.4",
@@ -495,6 +496,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--margin-threshold", type=float, required=True)
     parser.add_argument("--candidate-top-k", type=int, default=8)
     parser.add_argument("--max-gap", type=int, default=360)
+    parser.add_argument(
+        "--only-test-categories",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Keep the historical Test-category filter; disable for Official Val replay.",
+    )
     parser.add_argument("--event-diagnostics")
     parser.add_argument("--master-port", type=int)
     parser.add_argument(
