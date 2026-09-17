@@ -1,0 +1,383 @@
+{
+  "artifact": "v11_qdic_official_full_test_comparison",
+  "status": "PASS",
+  "generated_at": "2026-09-15T22:37:05.967037+00:00",
+  "scope": "FULL_TEST_OFFICIAL_TETA",
+  "selection_rule": "controller champion: max Overall TETA, then Novel TETA, Overall AssocA, Novel AssocA within 0.05; absolute Overall-TETA leader reported separately",
+  "candidate_count": 9,
+  "all_candidates_completed": true,
+  "program_champion": {
+    "trial_id": "FT_LOCAL",
+    "score_threshold": 1.0909137725830078,
+    "margin_threshold": 0.44652282714843744,
+    "metrics": {
+      "overall": {
+        "TETA": 37.205,
+        "LocA": 54.653,
+        "AssocA": 41.534,
+        "ClsA": 15.427,
+        "LocRe": 57.138,
+        "LocPr": 78.933,
+        "AssocRe": 46.489,
+        "AssocPr": 64.466,
+        "ClsRe": 25.947,
+        "ClsPr": 22.01
+      },
+      "base": {
+        "TETA": 37.992,
+        "LocA": 54.934,
+        "AssocA": 42.353,
+        "ClsA": 16.687,
+        "LocRe": 57.457,
+        "LocPr": 79.378,
+        "AssocRe": 47.166,
+        "AssocPr": 65.765,
+        "ClsRe": 28.242,
+        "ClsPr": 23.509
+      },
+      "novel": {
+        "TETA": 29.479,
+        "LocA": 51.89,
+        "AssocA": 33.486,
+        "ClsA": 3.061,
+        "LocRe": 54.008,
+        "LocPr": 74.567,
+        "AssocRe": 39.844,
+        "AssocPr": 51.711,
+        "ClsRe": 3.415,
+        "ClsPr": 7.294
+      }
+    }
+  },
+  "absolute_overall_teta_leader": {
+    "trial_id": "FT_SCORE_P03",
+    "score_threshold": 0.9801726341247559,
+    "margin_threshold": 0.44652282714843744,
+    "metrics": {
+      "overall": {
+        "TETA": 37.243,
+        "LocA": 54.675,
+        "AssocA": 41.482,
+        "ClsA": 15.573,
+        "LocRe": 57.162,
+        "LocPr": 78.921,
+        "AssocRe": 46.449,
+        "AssocPr": 64.332,
+        "ClsRe": 26.105,
+        "ClsPr": 22.207
+      },
+      "base": {
+        "TETA": 38.037,
+        "LocA": 54.954,
+        "AssocA": 42.31,
+        "ClsA": 16.848,
+        "LocRe": 57.476,
+        "LocPr": 79.381,
+        "AssocRe": 47.12,
+        "AssocPr": 65.651,
+        "ClsRe": 28.416,
+        "ClsPr": 23.726
+      },
+      "novel": {
+        "TETA": 29.447,
+        "LocA": 51.933,
+        "AssocA": 33.348,
+        "ClsA": 3.059,
+        "LocRe": 54.078,
+        "LocPr": 74.403,
+        "AssocRe": 39.856,
+        "AssocPr": 51.381,
+        "ClsRe": 3.415,
+        "ClsPr": 7.287
+      }
+    }
+  },
+  "baseline_provenance": {
+    "Q1_OP00": {
+      "status": "PASS",
+      "merge_manifest": "/data2/usr_for_deadline/tempotrack_v10_unified/search/covtrack_q1_original_full_sharded_20260915_retry01/merged/merge_manifest.json",
+      "annotation_sha256": "f5650b85dba14d3721316121c8141ad0b33e1446583d140fddd1992002b26ec2",
+      "frames": 52155
+    },
+    "COV_native": {
+      "summary": "/data2/usr_for_deadline/tempotrack_v10_unified/tempo_full/covtrack/test_v10_runtime_gate_sharded/merged/evaluation/COVTrack_V10_Tempo_Test/teta_summary_results.pth",
+      "frames": 52155
+    }
+  },
+  "baselines": {
+    "Q1_OP00": {
+      "overall": {
+        "TETA": 37.306,
+        "LocA": 54.916,
+        "AssocA": 41.018,
+        "ClsA": 15.984,
+        "LocRe": 57.444,
+        "LocPr": 78.853,
+        "AssocRe": 47.079,
+        "AssocPr": 60.75,
+        "ClsRe": 27.091,
+        "ClsPr": 22.121
+      },
+      "base": {
+        "TETA": 38.12,
+        "LocA": 55.283,
+        "AssocA": 41.9,
+        "ClsA": 17.177,
+        "LocRe": 57.831,
+        "LocPr": 79.346,
+        "AssocRe": 47.86,
+        "AssocPr": 61.935,
+        "ClsRe": 29.377,
+        "ClsPr": 23.576
+      },
+      "novel": {
+        "TETA": 29.316,
+        "LocA": 51.319,
+        "AssocA": 32.355,
+        "ClsA": 4.272,
+        "LocRe": 53.64,
+        "LocPr": 74.02,
+        "AssocRe": 39.41,
+        "AssocPr": 49.116,
+        "ClsRe": 4.644,
+        "ClsPr": 7.836
+      }
+    },
+    "COV_native": {
+      "overall": {
+        "TETA": 37.166,
+        "LocA": 54.841,
+        "AssocA": 41.149,
+        "ClsA": 15.507,
+        "LocRe": 57.442,
+        "LocPr": 78.6,
+        "AssocRe": 48.168,
+        "AssocPr": 58.996,
+        "ClsRe": 25.692,
+        "ClsPr": 22.008
+      },
+      "base": {
+        "TETA": 38.029,
+        "LocA": 55.182,
+        "AssocA": 42.158,
+        "ClsA": 16.746,
+        "LocRe": 57.828,
+        "LocPr": 79.059,
+        "AssocRe": 48.923,
+        "AssocPr": 60.413,
+        "ClsRe": 27.959,
+        "ClsPr": 23.269
+      },
+      "novel": {
+        "TETA": 28.696,
+        "LocA": 51.5,
+        "AssocA": 31.247,
+        "ClsA": 3.34,
+        "LocRe": 53.655,
+        "LocPr": 74.092,
+        "AssocRe": 40.75,
+        "AssocPr": 45.081,
+        "ClsRe": 3.432,
+        "ClsPr": 9.63
+      }
+    }
+  },
+  "deltas_vs_Q1": {
+    "program_champion": {
+      "overall": {
+        "TETA": -0.101,
+        "LocA": -0.263,
+        "AssocA": 0.516,
+        "ClsA": -0.557,
+        "LocRe": -0.306,
+        "LocPr": 0.08,
+        "AssocRe": -0.59,
+        "AssocPr": 3.716,
+        "ClsRe": -1.144,
+        "ClsPr": -0.111
+      },
+      "base": {
+        "TETA": -0.128,
+        "LocA": -0.348,
+        "AssocA": 0.453,
+        "ClsA": -0.49,
+        "LocRe": -0.375,
+        "LocPr": 0.032,
+        "AssocRe": -0.694,
+        "AssocPr": 3.831,
+        "ClsRe": -1.135,
+        "ClsPr": -0.066
+      },
+      "novel": {
+        "TETA": 0.163,
+        "LocA": 0.571,
+        "AssocA": 1.131,
+        "ClsA": -1.211,
+        "LocRe": 0.368,
+        "LocPr": 0.547,
+        "AssocRe": 0.434,
+        "AssocPr": 2.595,
+        "ClsRe": -1.23,
+        "ClsPr": -0.541
+      }
+    },
+    "absolute_overall_teta_leader": {
+      "overall": {
+        "TETA": -0.063,
+        "LocA": -0.241,
+        "AssocA": 0.464,
+        "ClsA": -0.411,
+        "LocRe": -0.282,
+        "LocPr": 0.068,
+        "AssocRe": -0.63,
+        "AssocPr": 3.582,
+        "ClsRe": -0.986,
+        "ClsPr": 0.086
+      },
+      "base": {
+        "TETA": -0.083,
+        "LocA": -0.329,
+        "AssocA": 0.41,
+        "ClsA": -0.329,
+        "LocRe": -0.355,
+        "LocPr": 0.035,
+        "AssocRe": -0.74,
+        "AssocPr": 3.716,
+        "ClsRe": -0.961,
+        "ClsPr": 0.151
+      },
+      "novel": {
+        "TETA": 0.131,
+        "LocA": 0.614,
+        "AssocA": 0.993,
+        "ClsA": -1.213,
+        "LocRe": 0.438,
+        "LocPr": 0.383,
+        "AssocRe": 0.446,
+        "AssocPr": 2.265,
+        "ClsRe": -1.23,
+        "ClsPr": -0.548
+      }
+    }
+  },
+  "margin_champions": {
+    "trial_id": "FT_B",
+    "score_threshold": 0.0,
+    "margin_threshold": 0.37210235595703123
+  },
+  "ov_margin_champion": {
+    "trial_id": "FT_M120",
+    "score_threshold": 0.0,
+    "margin_threshold": 0.44652282714843744
+  },
+  "score_distribution_artifact": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_margin_score_distributions.json",
+  "extension_plan": {
+    "artifact": "post_search_extension_plan",
+    "status": "PROPOSED",
+    "launch": false,
+    "reason": "Bounded sequential search is complete; this proposal is not auto-started.",
+    "selection": {
+      "overall_margin_champion": "FT_B",
+      "ov_margin_champion": "FT_M120"
+    },
+    "source_distributions": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_margin_score_distributions.json",
+    "candidates": [
+      {
+        "proposal_id": "OVERALL_SCORE_OFF",
+        "source_margin_champion": "FT_B",
+        "score_threshold": -1.024055551337242,
+        "margin_threshold": 0.37210235595703123,
+        "score_source": "FT_B.winner_score_min",
+        "launch": false
+      },
+      {
+        "proposal_id": "OVERALL_P03",
+        "source_margin_champion": "FT_B",
+        "score_threshold": 0.9627598524093628,
+        "margin_threshold": 0.37210235595703123,
+        "score_source": "FT_B.p03",
+        "launch": false
+      },
+      {
+        "proposal_id": "OV_SCORE_OFF",
+        "source_margin_champion": "FT_M120",
+        "score_threshold": -1.0240762937743664,
+        "margin_threshold": 0.44652282714843744,
+        "score_source": "FT_M120.winner_score_min",
+        "launch": false
+      },
+      {
+        "proposal_id": "OV_P03",
+        "source_margin_champion": "FT_M120",
+        "score_threshold": 0.9801726341247559,
+        "margin_threshold": 0.44652282714843744,
+        "score_source": "FT_M120.p03",
+        "launch": false
+      }
+    ]
+  },
+  "recovery": {
+    "artifact": "v11_qdic_full_test_recovery_finalization",
+    "completed_candidates": [
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_B"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_M80"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_M120"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_M60"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_M145"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_SCORE_OFF"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_SCORE_P03"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_SCORE_P05"
+      },
+      {
+        "status": "COMPLETED",
+        "trial_id": "FT_LOCAL"
+      }
+    ],
+    "ft_local_summary_sha256": "d403c4daf1c5e58dc04f1058e4ea8ff453219a98a3f4637ba0fff4ed48305c45",
+    "full_tests_restarted": false,
+    "generated_at": "2026-09-15T22:31:19.409042+00:00",
+    "modified_artifacts": [
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/trials/FT_LOCAL/receipt.json",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/full_results.json",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/final_report.md",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_margin_score_distributions.json",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_extension_plan.json",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_audit.json",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/post_search_analysis.md"
+    ],
+    "protected_artifacts": [
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/preflight.json",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/search_plan.json",
+      "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/search_state.json"
+    ],
+    "reason": "FT_LOCAL official TETA summary was complete but controller parser hit a transient EOF/write race; the summary was re-parsed successfully after the process exited.",
+    "recovered_status": "COMPLETED_BOUNDED_CAPACITY",
+    "source_search_state": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_recovery_20260915_racefix/search_state.json",
+    "source_search_state_sha256": "cfca018db3068a1992bbf3b387a38b056f6d0d0cc7fa6d9e18724c59789e7264",
+    "source_status": "FAILED",
+    "status": "PASS"
+  }
+}

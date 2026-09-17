@@ -1,0 +1,42 @@
+{
+  "artifact": "tempotrack_v11_qdic_mo_final_experimental_bundle",
+  "generated_at": "2026-09-17",
+  "final_report": {
+    "path": "final_report.json",
+    "sha256": "22bc618c70dfd3b8ec7f8ca4ad4b20f0b63f9d5491fc0b365376f49dfb2fbd0f"
+  },
+  "included_artifacts": {
+    "final_report.md": "3b30b805b77d87f0b4b64c993198c1776f1f38fbdfcddd63e08ea8c443ccc7fe",
+    "final_result.json": "fbf5588d395ae89e8b9683acf0691f6d70e0d2d1ccd6e28be6747a096b5a1f31",
+    "diagnostic_statistics.json": "973bca1e442b6c6c2e8db8e0f5e4ac2e9aa6bb97988d07cb132c4ac50d445f6e",
+    "architecture_comparison.json": "c6423e9b756f2d62cb0ca7e14e1e9894bd2e5c8ae942ec42d0a0dd99feb24016",
+    "loss_search.json": "381033e4aac95e80d02a2d8c4093a29c86abb7175d8c801a1bfed27a0cfc1a93",
+    "structural_search_final.json": "6f015fe88b8927bc2acb6238e0b2f6f1517aae9d797780e628f4ef399070d45b",
+    "structural_behavior_sanity.json": "9308c5acbc3093998e13e88b736457b465458c51f13279b1fe92d4022bc938f9",
+    "threshold_margin_search.json": "bf23f0295868dae580289f7d5677ce523485648f54dbe6bf366eb893c780e552",
+    "margin_score_distributions.json": "9876913c41dd096c885b34325f61e2a8651e74f6afc359c81267c0dc2d5adb7d",
+    "post_search_extension_plan.json": "25c6ee96b38dc7e131c36ddd0dab56e7437e802d59434fc2845c209e4c2e8575",
+    "qdic_bottleneck_report.md": "d33abed3890f7d37d829a59c2e76bc2e5010fd7648b106562efc28acb21650b5"
+  },
+  "external_references": {
+    "original_cov_native_baseline": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_20h_20260914/full_results.json",
+      "sha256": "9734f50a09855b15360e6d613954e0af300cedbb18cdb99ed0396c70d2e85cab"
+    },
+    "selected_checkpoint": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_diagnostic_cache/reports/ca_qdic/loss_search/lambda_hard/value_0.1/best.pt",
+      "sha256": "263e09d1740ddb2844e76eb004d7d5e6b562bd7c6b447ff7200d7352690f2359"
+    },
+    "parent_v11_checkpoint": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_qdic_pilot_20260913_224455/val_base/qdic_training/best.pt",
+      "sha256": "fb62d6d3f04260bb2eb41a000deec3cf09130060228eb5af1f402ba0af99fab7"
+    },
+    "runtime_provenance": "observed_live_proc_environ_sidecar"
+  },
+  "omitted_large_artifacts": [
+    "raw merged prediction streams",
+    "feature cache",
+    "runtime environment capture",
+    "model checkpoints"
+  ]
+}
