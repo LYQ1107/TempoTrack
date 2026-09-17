@@ -38,9 +38,16 @@ def _required_path(name: str) -> Path:
 def _stream_frame(dataset: Any, info: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     track_results = result["track_results"]
     rows: list[dict[str, Any]] = []
+    cache_category_ids = getattr(dataset, "_v11_cache_category_ids", None)
+    use_cache_category_ids = cache_category_ids is not None and len(track_results) == len(cache_category_ids)
     use_cat_ids = len(track_results) == len(dataset.cat_ids)
     for label, bboxes in enumerate(track_results):
-        category_id = int(dataset.cat_ids[label]) if use_cat_ids else int(label + 1)
+        if use_cache_category_ids:
+            category_id = int(cache_category_ids[label])
+        elif use_cat_ids:
+            category_id = int(dataset.cat_ids[label])
+        else:
+            category_id = int(label + 1)
         if hasattr(bboxes, "detach"):
             bboxes = bboxes.detach().cpu().numpy()
         for bbox in np.asarray(bboxes):
@@ -187,6 +194,13 @@ def streaming_single_gpu_test(model: Any, data_loader: Any, show: bool = False,
 
     model.eval()
     dataset = data_loader.dataset
+    provenance_path = os.environ.get("V11_COV_REPLAY_PROVENANCE_JSON")
+    if provenance_path:
+        document = json.loads(Path(provenance_path).read_text(encoding="utf-8"))
+        values = document.get("category_ids")
+        if not isinstance(values, list) or not values:
+            raise RuntimeError("Official COV frontend provenance lacks full category_ids mapping")
+        dataset._v11_cache_category_ids = [int(value) for value in values]
     # The official config currently selects ovtrack.apis, but patching the
     # mmdet export as well is intentional: a release config may set
     # USE_MMDET through an inherited base without changing the model's
@@ -214,9 +228,9 @@ def streaming_single_gpu_test(model: Any, data_loader: Any, show: bool = False,
                 # and all tracker state still enter the opt-in cache through
                 # the model's pre-match boundary hook.
                 target_model._v11_replay_cache_image_id = int(info["id"])
-                target_model._v11_replay_cache_category_ids = [
-                    int(value) for value in dataset.cat_ids
-                ]
+                target_model._v11_replay_cache_category_ids = list(
+                    getattr(dataset, "_v11_cache_category_ids", dataset.cat_ids)
+                )
             target_tracker = getattr(target_model, "tracker", None)
             if target_tracker is not None and getattr(target_tracker, "_v10_cov_adapter", None) is not None:
                 target_tracker._v10_dataset_video_id = int(info["video_id"])

@@ -18,6 +18,8 @@ import sys
 import time
 from typing import Any, Mapping
 
+from tempotrack_v10.cov_category_ontology import build_category_mapping
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAIN_ANNOTATION = Path(
@@ -172,6 +174,10 @@ def provenance(
     shard_index: int,
 ) -> dict[str, Any]:
     capture = audit["capture"]
+    category_ids, category_metadata = build_category_mapping(
+        annotation=annotation,
+        cov_source=COV_SOURCE,
+    )
     return {
         "artifact": "v11_dssl_official_train_frontend_provenance",
         "input_source": "COVTRACK_FRONTEND",
@@ -201,6 +207,10 @@ def provenance(
         "capture_pid": capture.get("captured_pid"),
         "reference_receipt": str(REFERENCE_RECEIPT),
         "reference_receipt_sha256": sha256(REFERENCE_RECEIPT),
+        # COV emits global detector labels in this exact order.  This mapping
+        # is ontology metadata only; it does not contain GT boxes/tracks and
+        # never changes the causal frontend arrays.
+        "category_ids": category_ids,
         "runtime_contract": {
             "max_gap": 360,
             "candidate_top_k": 8,
@@ -213,8 +223,7 @@ def provenance(
         },
         "category_provenance": {
             "train_annotation_category_count": len(annotation.get("categories", [])),
-            "mapping": "official COV dataset name-based dataset.cat_ids; no aliases invented",
-            "v11_model_category_count": 1203,
+            **category_metadata,
         },
     }
 

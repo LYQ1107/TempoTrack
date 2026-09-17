@@ -29,6 +29,7 @@ from tempotrack_v10.replay_cache import FrontendReplayCacheReader, sha256_file
 from tempotrack_research.config import object_hash
 from tempotrack_research.v6_cli import _cache_shards, _frames_for_shard, _rows_from_frame
 from tempotrack_research.orchestration.v9_parameter_search import build_event_cache
+from tempotrack_v10.cov_category_ontology import build_category_mapping
 
 
 EXPECTED_CONTRACT = {
@@ -155,6 +156,7 @@ def _build_native_cache(
     output: Path,
     prediction: Path,
     manifest: Mapping[str, Any],
+    cov_source: Path,
 ) -> tuple[Path, Path]:
     native_root = output / "native_cache"
     manifest_path = native_root / "manifest.json"
@@ -168,9 +170,22 @@ def _build_native_cache(
     if not category_ids:
         raise RuntimeError("frontend cache did not record COV category ontology")
     annotation_doc = _read(annotation)
-    category_index = {int(item["id"]): index for index, item in enumerate(annotation_doc.get("categories", []))}
-    if any(int(value) not in category_index for value in category_ids):
-        raise RuntimeError("COV category ontology cannot be bound to Official Train annotation")
+    annotation_category_ids = [int(item["id"]) for item in annotation_doc.get("categories", [])]
+    category_index = {category_id: index for index, category_id in enumerate(annotation_category_ids)}
+    # Unknown COV-only classes remain in the causal candidate stream as
+    # explicit negative sentinels.  They are never matched to GT because the
+    # sentinel namespace is disjoint from Official Train IDs.
+    extended_category_ids = list(annotation_category_ids)
+    for category_id in category_ids:
+        if category_id not in category_index:
+            category_index[category_id] = len(extended_category_ids)
+            extended_category_ids.append(category_id)
+    expected_category_ids, expected_category_metadata = build_category_mapping(
+        annotation=annotation_doc,
+        cov_source=cov_source,
+    )
+    if category_ids != expected_category_ids:
+        raise RuntimeError("FAIL_CLOSED_COV_CATEGORY_MAPPING_MISMATCH")
     assignments = _load_prediction_index(prediction)
     recorder = NativeObservationRecorder(
         native_root / "shards",
@@ -186,6 +201,7 @@ def _build_native_cache(
             "source_frontend_cache_sha256": _sha256(frontend_root / "cache_manifest.json" if (frontend_root / "cache_manifest.json").is_file() else frontend_root / "manifest.json"),
             "annotation_hash": _sha256(annotation),
             "observation_source": "COVTrack_generated_causal_frontend_replay",
+            "category_provenance": expected_category_metadata,
         },
     )
     synthetic_unmatched = 0
@@ -272,10 +288,12 @@ def _build_native_cache(
         "exact_split_name": "train",
         "gt_loaded_during_native_adapter": False,
         "synthetic_unmatched_rows": int(synthetic_unmatched),
+        "category_id_by_index": {str(index): int(category_id) for index, category_id in enumerate(extended_category_ids)},
+        "category_provenance": expected_category_metadata,
     }
     _write(manifest_path, native_manifest)
     _write(native_root / "cache_manifest.json", native_manifest)
-    category_by_index = {index: int(item["id"]) for index, item in enumerate(annotation_doc.get("categories", []))}
+    category_by_index = {index: int(category_id) for index, category_id in enumerate(extended_category_ids)}
     output_rows = []
     for shard in _cache_shards(native_manifest):
         for frame in _frames_for_shard(shard):
@@ -321,6 +339,7 @@ def main() -> int:
         output=output,
         prediction=replay_prediction,
         manifest=frontend_manifest,
+        cov_source=args.cov_source.resolve(),
     )
     events_root = output / "official_train_qdic_events"
     if not (events_root / "metadata.json").is_file():

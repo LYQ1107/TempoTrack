@@ -290,6 +290,12 @@ def _videos_from_cache(manifest: Path, annotation: Path, frontend_prediction: Pa
     from ..v6_cli import _cache_shards, _frames_for_shard, _load_cache_manifest, _native_uid
     native = _load_cache_manifest(manifest)
     base_ids, _, category_by_index = _category_sets(annotation)
+    native_category_by_index = native.get("category_id_by_index")
+    if isinstance(native_category_by_index, Mapping):
+        category_by_index = {
+            int(index): int(category_id)
+            for index, category_id in native_category_by_index.items()
+        }
     gt_data = _json(annotation)
     by_image: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for item in gt_data.get("annotations", []):
