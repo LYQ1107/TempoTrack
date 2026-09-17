@@ -295,7 +295,11 @@ def _metrics(
             start, end = offsets[group : group + 2]
             value, target, _ = _select_rows(
                 int(start), int(end), features, labels, allowed,
-                np.zeros(end - start, dtype=bool), candidate_k=candidate_k,
+                # ``_select_rows`` indexes the conflict vector with global
+                # feature-row offsets.  Keep the diagnostic zero vector
+                # global as well; a local ``end-start`` array would make
+                # valid later holdout groups index out of bounds.
+                np.zeros(len(features), dtype=bool), candidate_k=candidate_k,
             )
             if len(target) == 0 or not np.any(target == 1) or not np.any(target == 0):
                 continue
