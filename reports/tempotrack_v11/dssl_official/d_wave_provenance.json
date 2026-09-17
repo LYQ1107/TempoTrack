@@ -1,0 +1,46 @@
+{
+  "artifact": "tempotrack_v11_dssl_official_d_wave_provenance",
+  "status": "DSSL_NEGATIVE_GATE",
+  "protocol_scope": "OFFICIAL_TRAIN_BASE_ONLY_OFFICIAL_VAL_BASE_SELECTION",
+  "calibration_status": "NOT_COMPLETED_BEFORE_OP00_D_WAVE",
+  "current_test_status": "NOT_RUN_GATE_FAILED",
+  "expansion_status": "STOPPED_FAIL_CLOSED",
+  "replay_repo_head": "c4f1babfaca88cc20f6e8d269fbcb6f25685c00d",
+  "selection_artifact_repo_head": "7ae2145b95814777eb6a2879776689d41f946106",
+  "external_artifacts": {
+    "train_annotation": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/TAO/TAO-download/TAO-Amodal/annotations/train.json",
+      "sha256": "7eb551fdeeeebc76b876ae255f91dc5662c7270a125955c5f1be2d9bd30921d0"
+    },
+    "val_annotation": {
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/validation_ours_v1.json",
+      "sha256": "1347fdc4e3eb6880f957e81014fa505080b55d895f27afcc3d6343cff4dc6fe7"
+    },
+    "train_cache_audit": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_cache_audit.json",
+      "sha256": "ec846095f4e735cc4d6832a81321fb12df42f8d600904aa33146969b4c08a2d0"
+    },
+    "val_cache_audit": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/official_val_cache_audit.json",
+      "sha256": "fe54da2e0fefe9c648f2cfe04abe624ca53c141a33a737ee5ddd9b5a6eb566d4"
+    },
+    "d_wave_selection": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/05_selection/d_wave_selection.json",
+      "sha256": "b8e7455beda7f4ddfaa4cf6b01fe8d70215899a2c56d32d85fd8b59e0a75c580"
+    },
+    "negative_gate_report": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/05_selection/DSSL_NEGATIVE_RESULT_REPORT.md",
+      "sha256": "a0aee47a2fa8a8ef0f3b305cb94c3aeab62db4ae89d3a83ff5ed50dfe400f127"
+    }
+  },
+  "gate": {
+    "selected_card": "D4_LS100",
+    "val_base_assocA": 41.5711969348659,
+    "b0_val_base_assocA": 41.762096,
+    "val_base_assocA_gt_b0": false,
+    "net_correction_gt_b0": true,
+    "repeated_internal_final_mrr_improvement": true,
+    "overall_teta_not_obvious_collapse": true
+  },
+  "source_of_compact_metrics": "d_wave_metrics.csv"
+}

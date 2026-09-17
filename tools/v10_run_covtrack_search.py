@@ -70,7 +70,11 @@ def _validate_external_source_checkout(source: Path, expected_commit: str | None
     runtime assets as source edits.
     """
     source = source.resolve()
-    raw = _git_value(source, "status", "--porcelain", "--untracked-files=all")
+    # Keep the provenance check at Git's directory-level porcelain view.  The
+    # audited runtime trees are intentionally untracked directories/symlinks;
+    # expanding every nested generated asset would make an otherwise valid
+    # audited checkout fail merely because a runtime created cache files.
+    raw = _git_value(source, "status", "--porcelain")
     if raw is None:
         raise RuntimeError("EXTERNAL_COV_SOURCE_STATUS_UNAVAILABLE")
     lines = sorted(line for line in raw.splitlines() if line)
