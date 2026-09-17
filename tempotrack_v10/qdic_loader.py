@@ -33,6 +33,10 @@ _QDIC_SOURCE_BASENAMES = (
     "qdic_loader.py",
     "query_conditioned_reranker.py",
 )
+_DSSL_SOURCE_BASENAMES = _QDIC_SOURCE_BASENAMES + (
+    "distributional_losses.py",
+    "qdic_dssl_trainer.py",
+)
 _REQUIRED_CONFIG = (
     "query_observations",
     "recent_k",
@@ -150,6 +154,7 @@ class QDICV11Artifact:
             "feature_names": list(self.feature_names),
             "feature_dim": QDIC_RAW_DIM,
             "feature_config": dict(self.feature_config),
+            "structured_branch_mode": self.model.structured_branch_mode,
             "source_hashes": dict(self.source_hashes),
             "receipt_source_hashes": dict(self.receipt_source_hashes),
             "model_source_hash_match": _receipt_hash_for(
@@ -185,9 +190,9 @@ class QDICV11Artifact:
         return self.model(features, **kwargs)
 
 
-def _current_source_hashes() -> dict[str, str]:
+def _current_source_hashes(names: tuple[str, ...] = _QDIC_SOURCE_BASENAMES) -> dict[str, str]:
     base = Path(__file__).resolve().parent
-    paths = tuple(base / name for name in _QDIC_SOURCE_BASENAMES)
+    paths = tuple(base / name for name in names)
     return {str(path): _sha256(path) for path in paths}
 
 
@@ -246,6 +251,9 @@ def load_qdic_checkpoint(
         raise SnapshotContractError("BLOCKED_QDIC_INVALID_SUPERVISION_PROVENANCE")
     if receipt.get("novel_gt_used") is not False or receipt.get("test_weights_used") is not False:
         raise SnapshotContractError("BLOCKED_QDIC_INVALID_SUPERVISION_PROVENANCE")
+    branch_mode = str(receipt.get("structured_branch_mode", "legacy"))
+    if branch_mode not in {"legacy", "dssl"}:
+        raise SnapshotContractError("BLOCKED_QDIC_STRUCTURED_BRANCH_INVALID")
     try:
         if tuple(receipt.get("feature_names", ())) != tuple(QDIC_FEATURE_NAMES):
             raise SnapshotContractError("BLOCKED_QDIC_FEATURE_SCHEMA_MISMATCH")
@@ -257,12 +265,13 @@ def load_qdic_checkpoint(
     if checkpoint_hash != receipt.get("checkpoint_hash"):
         raise SnapshotContractError("BLOCKED_QDIC_CHECKPOINT_HASH_MISMATCH")
 
-    current_hashes = _current_source_hashes()
+    source_basenames = _DSSL_SOURCE_BASENAMES if branch_mode == "dssl" else _QDIC_SOURCE_BASENAMES
+    current_hashes = _current_source_hashes(source_basenames)
     raw_receipt_hashes = receipt.get("source_hashes")
     if not isinstance(raw_receipt_hashes, Mapping):
         raise SnapshotContractError("BLOCKED_QDIC_SOURCE_HASHES_MISSING")
     receipt_hashes = {str(key): str(value) for key, value in raw_receipt_hashes.items()}
-    for name in _QDIC_SOURCE_BASENAMES:
+    for name in source_basenames:
         expected = _receipt_hash_for(receipt_hashes, name)
         current = _receipt_hash_for(current_hashes, name)
         if expected is None or current != expected:
@@ -276,10 +285,12 @@ def load_qdic_checkpoint(
         raise SnapshotContractError("BLOCKED_QDIC_CHECKPOINT_STATE_INVALID")
     if state.get("status") != QDIC_STATUS:
         raise SnapshotContractError("BLOCKED_QDIC_CHECKPOINT_STATUS_INVALID")
+    if str(state.get("structured_branch_mode", "legacy")) != branch_mode:
+        raise SnapshotContractError("BLOCKED_QDIC_STRUCTURED_BRANCH_MISMATCH")
     state_hashes = state.get("source_hashes")
     if not isinstance(state_hashes, Mapping):
         raise SnapshotContractError("BLOCKED_QDIC_SOURCE_HASHES_MISSING")
-    for name in _QDIC_SOURCE_BASENAMES:
+    for name in source_basenames:
         if _receipt_hash_for(state_hashes, name) != _receipt_hash_for(receipt_hashes, name):
             raise SnapshotContractError(f"BLOCKED_QDIC_{Path(name).stem.upper()}_SOURCE_HASH_MISMATCH")
     try:
@@ -310,7 +321,9 @@ def load_qdic_checkpoint(
     if "model_state" not in state:
         raise SnapshotContractError("BLOCKED_QDIC_MODEL_STATE_MISSING")
 
-    model = QueryDistributionalCalibrator().to(device)
+    model = QueryDistributionalCalibrator(
+        structured_branch_mode=branch_mode
+    ).to(device)
     try:
         model.load_state_dict(state["model_state"], strict=True)
     except (RuntimeError, TypeError) as exc:

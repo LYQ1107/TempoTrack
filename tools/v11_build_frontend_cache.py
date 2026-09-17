@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 import json
+import os
 from pathlib import Path
 import shutil
 from typing import Any
@@ -64,12 +65,41 @@ def main() -> None:
     global_video_items: list[dict[str, Any]] = []
     source_shards: list[dict[str, Any]] = []
     category_ids: list[int] | None = None
+    contract: dict[str, Any] | None = None
 
     for shard_root in args.shard:
         shard_root = shard_root.resolve()
         reader = FrontendReplayCacheReader(shard_root)
         manifest = reader.manifest
         provenance = dict(manifest.get("provenance", {}))
+        shard_contract = {
+            key: manifest.get(key, provenance.get(key))
+            for key in (
+                "input_source",
+                "supervision_source",
+                "oracle_features_used",
+                "gt_boxes_used_as_model_input",
+                "gt_tracks_used_as_memory",
+                "gt_used_only_for_supervision",
+            )
+        }
+        expected_contract = {
+            "input_source": "COVTRACK_FRONTEND",
+            "supervision_source": "OFFICIAL_TRAIN_GT",
+            "oracle_features_used": False,
+            "gt_boxes_used_as_model_input": False,
+            "gt_tracks_used_as_memory": False,
+            "gt_used_only_for_supervision": True,
+        }
+        if shard_contract != expected_contract:
+            raise RuntimeError(
+                f"Official-Train frontend supervision contract mismatch: "
+                f"{shard_root}: {shard_contract} != {expected_contract}"
+            )
+        if contract is None:
+            contract = shard_contract
+        elif contract != shard_contract:
+            raise RuntimeError(f"frontend data contract mismatch: {shard_root}")
         if provenance.get("source_annotation_sha256") not in (None, annotation_hash):
             raise RuntimeError(f"annotation hash mismatch in cache shard: {shard_root}")
         if common_provenance is None:
@@ -112,7 +142,10 @@ def main() -> None:
                 raise RuntimeError(f"duplicate image ownership for video {video_id}")
             seen_images.update(image_ids)
             target = output / "videos" / video_key
-            shutil.copytree(video_path, target)
+            # The frontend arrays are immutable.  Hardlinks preserve the
+            # complete artifact boundary without duplicating tens of GB on
+            # the already-constrained /data2 volume.
+            shutil.copytree(video_path, target, copy_function=os.link)
             copied_summary = dict(summary)
             copied_summary["path"] = str(Path("videos") / video_key)
             copied_summary["frames_jsonl_sha256"] = sha256_file(target / "frames.jsonl")
@@ -183,8 +216,10 @@ def main() -> None:
         "videos": global_video_items,
         "provenance": provenance,
         "cache_size_bytes": _size(output),
+        **(contract or {}),
     }
     _write(output / "manifest.json", manifest)
+    _write(output / "cache_manifest.json", manifest)
     print(json.dumps({"status": "PASS", "frames": len(source_images), "videos": len(ordered_videos), "bytes": manifest["cache_size_bytes"]}))
 
 

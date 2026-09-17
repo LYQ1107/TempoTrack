@@ -83,13 +83,17 @@ class QueryDistributionalCalibrator(nn.Module):
         gate_hidden: tuple[int, int] = (16, 8),
         residual_hidden: tuple[int, int] = (64, 32),
         dropout: float = 0.1,
+        structured_branch_mode: str = "legacy",
     ) -> None:
         super().__init__()
         if int(input_dim) != QDIC_RAW_DIM:
             raise ValueError(f"QDIC V11 requires input_dim={QDIC_RAW_DIM}")
         if len(gate_hidden) != 2 or len(residual_hidden) != 2:
             raise ValueError("gate_hidden and residual_hidden must contain two widths")
+        if structured_branch_mode not in {"legacy", "dssl"}:
+            raise ValueError("structured_branch_mode must be 'legacy' or 'dssl'")
         self.input_dim = QDIC_RAW_DIM
+        self.structured_branch_mode = str(structured_branch_mode)
         self.register_buffer("feature_mean", torch.zeros(QDIC_RAW_DIM))
         self.register_buffer("feature_scale", torch.ones(QDIC_RAW_DIM))
         self.gate = nn.Sequential(
@@ -119,6 +123,22 @@ class QueryDistributionalCalibrator(nn.Module):
         self.variance_penalty_raw = nn.Parameter(
             torch.tensor(_inverse_softplus(0.1), dtype=torch.float32)
         )
+        if self.structured_branch_mode == "dssl":
+            # DSSL keeps recent and long support distributions independent.
+            # Each softmax weighs three observable supports within its own
+            # temporal branch; no branch receives the other branch's logits.
+            self.recent_support = nn.Linear(GATE_INPUT_DIM, 3)
+            self.long_support = nn.Linear(GATE_INPUT_DIM, 3)
+            self.recent_variance_penalty_raw = nn.Parameter(
+                torch.tensor(_inverse_softplus(0.1), dtype=torch.float32)
+            )
+            self.long_variance_penalty_raw = nn.Parameter(
+                torch.tensor(_inverse_softplus(0.1), dtype=torch.float32)
+            )
+            nn.init.zeros_(self.recent_support.weight)
+            nn.init.zeros_(self.recent_support.bias)
+            nn.init.zeros_(self.long_support.weight)
+            nn.init.zeros_(self.long_support.bias)
         nn.init.zeros_(self.gate[-2].weight)
         nn.init.zeros_(self.gate[-2].bias)
         nn.init.zeros_(self.residual_calibrator[-1].weight)
@@ -152,24 +172,54 @@ class QueryDistributionalCalibrator(nn.Module):
         fast_variance = flat[:, FEATURE_INDEX["projected_fast_variance"]]
         slow_mean = flat[:, FEATURE_INDEX["projected_slow_mean"]]
         slow_variance = flat[:, FEATURE_INDEX["projected_slow_variance"]]
-        variance_penalty = F.softplus(self.variance_penalty_raw)
-        fast_branch = 0.5 * (q_fast + fast_mean) - variance_penalty * fast_variance
-        slow_branch = 0.5 * (q_slow + slow_mean) - variance_penalty * slow_variance
-        structured_score = alpha * fast_branch + (1.0 - alpha) * slow_branch
+        if self.structured_branch_mode == "legacy":
+            # Keep this branch byte-for-byte equivalent in its arithmetic to
+            # the pre-DSSL V11 implementation.  Existing checkpoints have no
+            # DSSL parameters and are loaded into this branch by default.
+            variance_penalty = F.softplus(self.variance_penalty_raw)
+            fast_branch = 0.5 * (q_fast + fast_mean) - variance_penalty * fast_variance
+            slow_branch = 0.5 * (q_slow + slow_mean) - variance_penalty * slow_variance
+            structured_score = alpha * fast_branch + (1.0 - alpha) * slow_branch
+            recent_support_weights = None
+            long_support_weights = None
+            recent_variance_penalty = variance_penalty
+            long_variance_penalty = variance_penalty
+        else:
+            fast_supports = torch.stack(
+                (q_fast, fast_mean, flat[:, FEATURE_INDEX["projected_fast_mo"]]), dim=-1
+            )
+            slow_supports = torch.stack(
+                (q_slow, slow_mean, flat[:, FEATURE_INDEX["projected_slow_mo"]]), dim=-1
+            )
+            recent_support_weights = F.softmax(self.recent_support(gate_values), dim=-1)
+            long_support_weights = F.softmax(self.long_support(gate_values), dim=-1)
+            recent_support = (recent_support_weights * fast_supports).sum(dim=-1)
+            long_support = (long_support_weights * slow_supports).sum(dim=-1)
+            recent_variance_penalty = F.softplus(self.recent_variance_penalty_raw)
+            long_variance_penalty = F.softplus(self.long_variance_penalty_raw)
+            fast_branch = recent_support - recent_variance_penalty * fast_variance
+            slow_branch = long_support - long_variance_penalty * slow_variance
+            structured_score = alpha * fast_branch + (1.0 - alpha) * slow_branch
         residual_input = torch.cat((normalized, alpha[:, None], structured_score[:, None]), dim=-1)
         delta = self.residual_calibrator(residual_input).squeeze(-1)
         logit = F.softplus(self.structured_scale) * structured_score + delta
         if not return_diagnostics:
             return logit.reshape(leading)
-        return {
+        diagnostics = {
             "logit": logit.reshape(leading),
             "alpha": alpha.reshape(leading),
             "structured_score": structured_score.reshape(leading),
             "fast_branch": fast_branch.reshape(leading),
             "slow_branch": slow_branch.reshape(leading),
-            "variance_penalty": variance_penalty.expand_as(alpha).reshape(leading),
+            "variance_penalty": recent_variance_penalty.expand_as(alpha).reshape(leading),
+            "recent_variance_penalty": recent_variance_penalty.expand_as(alpha).reshape(leading),
+            "long_variance_penalty": long_variance_penalty.expand_as(alpha).reshape(leading),
             "residual": delta.reshape(leading),
         }
+        if recent_support_weights is not None and long_support_weights is not None:
+            diagnostics["recent_support_weights"] = recent_support_weights.reshape(*leading, 3)
+            diagnostics["long_support_weights"] = long_support_weights.reshape(*leading, 3)
+        return diagnostics
 
     @staticmethod
     def _candidate_mapping(candidate: Any) -> Mapping[str, Any]:

@@ -776,6 +776,27 @@ def build_event_cache(
         "rows_hash": _sha256(rows_path),
         "audit": audit,
     }
+    # Official-Train DSSL consumes only causal COV frontend/event artifacts.
+    # GT is used by _videos_from_cache/_make_event_rows to assign labels and
+    # Base/Novel supervision, never to construct the native observations.
+    frontend_manifest_doc = _json(manifest_path)
+    metadata.update({
+        "input_source": frontend_manifest_doc.get("input_source", "COVTRACK_FRONTEND"),
+        "supervision_source": "OFFICIAL_TRAIN_GT" if str(split).lower() == "train" else frontend_manifest_doc.get("supervision_source"),
+        "oracle_features_used": False,
+        "gt_boxes_used_as_model_input": False,
+        "gt_tracks_used_as_memory": False,
+        "gt_used_only_for_supervision": True,
+        "source_role": "OFFICIAL_TRAIN" if str(split).lower() == "train" else frontend_manifest_doc.get("source_role"),
+        "exact_split_name": str(split),
+        "optimizer_source_allowed": bool(str(split).lower() == "train"),
+        "video_disjoint_split": True,
+        "normalization_fit": "internal_train_base_only_after_video_split" if str(split).lower() == "train" else None,
+        "official_train_annotation_sha256": _sha256(annotation_path) if str(split).lower() == "train" else None,
+        "source_event_cache": str(output_path),
+        "source_frontend_cache": frontend_manifest_doc.get("frontend_cache", frontend_manifest_doc.get("repo")),
+        "test_gt_used_for_optimizer": False,
+    })
     _write_json(output_path / "metadata.json", metadata)
     _write_json(output_path / "event_cache.json", {key: value for key, value in metadata.items() if key != "rows"})
     return {"status": "COMPLETED", "output": str(output_path), "metadata": str(output_path / "metadata.json"), "events": count, "arrays": array_paths, "arrays_hash": metadata["arrays_hash"], "audit": audit}

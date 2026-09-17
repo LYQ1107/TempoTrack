@@ -1,0 +1,30 @@
+# Pure official COVTrack frontend capture for the Official-Train DSSL cache.
+# The TempoTrack overlay is disabled; these structural values are recorded so
+# every later replay uses the same V11 causal contract.
+frontend: covtrack
+protocol: V11_DSSL_OFFICIAL_TRAIN_FRONTEND_CAPTURE
+tempo:
+  enabled: false
+  alpha_fast: 0.70
+  alpha_slow: 0.15
+  min_gap: 0
+  max_gap: 360
+  candidate_top_k: 8
+  top_r: 3
+  native_weight: 0.45
+  active_weight: 0.35
+  support_weight: 0.20
+  gap_penalty: 0.02
+  score_threshold: 0.0
+  margin_threshold: 0.0
+  reliability_weight: 0.0
+  memory_capacity: 64
+  reranker_weight: 0.0
+  reranker_checkpoint: null
+  reranker_source_root: null
+  reranker_device: cpu
+  qdic_weight: 0.0
+  qdic_checkpoint: null
+  qdic_device: cpu
+  qdic_recent_k: 8
+  qdic_context_top_k: 64

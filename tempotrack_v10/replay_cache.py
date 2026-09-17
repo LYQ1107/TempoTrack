@@ -242,6 +242,18 @@ class FrontendReplayCacheWriter:
 
     def _manifest(self, status: str) -> dict[str, Any]:
         videos = list(self._closed_summaries.values())
+        # These fields are a hard provenance contract for Official-Train
+        # supervision.  The frontend writer itself never receives GT; the
+        # values only describe the downstream artifact boundary and therefore
+        # remain auditable in both shard and merged manifests.
+        data_contract = {
+            "input_source": self.provenance.get("input_source", "UNKNOWN"),
+            "supervision_source": self.provenance.get("supervision_source", "UNKNOWN"),
+            "oracle_features_used": bool(self.provenance.get("oracle_features_used", True)),
+            "gt_boxes_used_as_model_input": bool(self.provenance.get("gt_boxes_used_as_model_input", True)),
+            "gt_tracks_used_as_memory": bool(self.provenance.get("gt_tracks_used_as_memory", True)),
+            "gt_used_only_for_supervision": bool(self.provenance.get("gt_used_only_for_supervision", False)),
+        }
         return {
             "schema_version": REPLAY_CACHE_SCHEMA_VERSION,
             "artifact": REPLAY_CACHE_ARTIFACT,
@@ -258,6 +270,7 @@ class FrontendReplayCacheWriter:
             "ordered_video_ids": [item["video_id"] for item in videos],
             "videos": videos,
             "provenance": _jsonable(self.provenance),
+            **data_contract,
         }
 
     def finalize(self, status: str = "COMPLETED") -> Path:
@@ -269,6 +282,16 @@ class FrontendReplayCacheWriter:
         temporary = self.root / f".manifest.{os.getpid()}.tmp"
         temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, self.root / "manifest.json")
+        # Keep an explicitly named contract receipt next to the reader's
+        # historical manifest.  It is intentionally identical, so no second
+        # mutable source of truth is introduced.
+        contract_path = self.root / "cache_manifest.json"
+        contract_temporary = self.root / f".cache_manifest.{os.getpid()}.tmp"
+        contract_temporary.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(contract_temporary, contract_path)
         return self.root / "manifest.json"
 
 
