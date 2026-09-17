@@ -23,7 +23,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from tempotrack_v10.data.native_observation_recorder import NativeObservationRecorder
+from tempotrack_research.data.native_observation_recorder import NativeObservationRecorder
 from tempotrack_v10.qdic_features import build_qdic_features
 from tempotrack_v10.replay_cache import FrontendReplayCacheReader, sha256_file
 from tempotrack_research.config import object_hash
