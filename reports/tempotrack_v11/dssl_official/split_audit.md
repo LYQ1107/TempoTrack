@@ -1,9 +1,9 @@
 # V11 DSSL Official-Train split audit
 
-- Status: **PASS_SPLIT_DISJOINT_FRONTEND_TRAIN_PENDING**
+- Status: **PASS_SPLIT_DISJOINT_AND_TRAIN_FRONTEND_BOUND**
 - Split disjointness: **True**
-- Optimizer source ready: **False**
-- Repository commit: `18e12ea6af33df70fe5212c19355776c9efa1ed9`
+- Optimizer source ready: **True**
+- Repository commit: `4906ed8c5413621f66bc2e81b17c4474ec1af7b2`
 
 ## Exact annotation contract
 
@@ -39,11 +39,11 @@ The audit records these spaces separately and does not invent a Train-to-Val/Tes
 
 ## Frontend and feature provenance
 
-- Official Train frontend: **MISSING_AUDITED_OUTPUT**. A Val cache, Test output, OVTR output, or the historical pilot cache cannot substitute for it.
+- Official Train frontend: **AVAILABLE_AUDITED_COVTRACK_FRONTEND_AND_QDIC_EVENTS**; optimizer source allowed: **True**. A Val cache, Test output, OVTR output, or the historical pilot cache cannot substitute for it.
 - Existing Val event cache: `/data1/LWR/vranlee/SERVER_ONLY/avis/masa_psmr_v9/outputs/tempotrack_v9/covtrack/val/event_cache`; optimizer source allowed: **False**.
 - Forbidden historical optimizer source: `/data2/usr_for_deadline/tempotrack_v11_qdic_pilot_20260913_224455/val_base/qdic_features`.
 - QDIC feature construction remains bound to the existing `qdic_features.py` and V9.1 event-cache builder; no second feature definition is introduced by this audit.
 
 ## Gate
 
-Do not build the Official-Train cache or start DSSL training until an audited Train frontend output/manifest is bound to the exact `train` annotation and recorded in a new receipt.
+Official Train COV frontend, event cache, and QDIC feature cache are now bound to the exact `train` annotation and pass the optimizer-source contract.

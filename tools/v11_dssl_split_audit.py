@@ -13,9 +13,14 @@ import argparse
 import hashlib
 import json
 import subprocess
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
+
+from tempotrack_v10.dssl_cache_contract import (
+    validate_official_train_cov_contract,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +69,12 @@ AUDITED_REFERENCE_RECEIPT = Path(
     "/data2/usr_for_deadline/tempotrack_v10_unified/search/"
     "covtrack_v104_best20h_20260914/full/s03_m01/trials/shard_00/receipt.json"
 )
+OFFICIAL_TRAIN_ARTIFACT_ROOT = Path(
+    "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full"
+)
+OFFICIAL_TRAIN_FRONTEND = OFFICIAL_TRAIN_ARTIFACT_ROOT / "official_train_cov_frontend"
+OFFICIAL_TRAIN_EVENTS = OFFICIAL_TRAIN_ARTIFACT_ROOT / "official_train_qdic_events"
+OFFICIAL_TRAIN_FEATURES = OFFICIAL_TRAIN_EVENTS / "qdic_features"
 
 
 def sha256_file(path: Path) -> str:
@@ -177,6 +188,81 @@ def intersection_record(left: set[int], right: set[int]) -> dict[str, Any]:
     return {"count": len(values), "video_ids": values}
 
 
+def audited_official_train_source(annotation: Path) -> dict[str, Any]:
+    """Validate the current Train causal cache and optimizer boundary."""
+
+    frontend_manifest_path = OFFICIAL_TRAIN_FRONTEND / "cache_manifest.json"
+    event_manifest_path = OFFICIAL_TRAIN_EVENTS / "cache_manifest.json"
+    feature_metadata_path = OFFICIAL_TRAIN_FEATURES / "features.json"
+    result: dict[str, Any] = {
+        "artifact_root": str(OFFICIAL_TRAIN_ARTIFACT_ROOT),
+        "frontend_cache": source_record("Official Train COV frontend", OFFICIAL_TRAIN_FRONTEND),
+        "frontend_manifest": source_record("Official Train frontend manifest", frontend_manifest_path),
+        "event_cache": source_record("Official Train QDIC event cache", OFFICIAL_TRAIN_EVENTS),
+        "event_manifest": source_record("Official Train event manifest", event_manifest_path),
+        "qdic_features": source_record("Official Train QDIC features", OFFICIAL_TRAIN_FEATURES),
+        "qdic_feature_metadata": source_record("Official Train QDIC feature metadata", feature_metadata_path),
+        "optimizer_source_allowed": False,
+        "status": "MISSING_AUDITED_OUTPUT",
+    }
+    required = (frontend_manifest_path, event_manifest_path, feature_metadata_path)
+    if any(not path.is_file() for path in required):
+        return result
+    try:
+        frontend = load_json(frontend_manifest_path)
+        event_manifest = load_json(event_manifest_path)
+        features = load_json(feature_metadata_path)
+        validate_official_train_cov_contract(frontend, context="split audit frontend")
+        validate_official_train_cov_contract(event_manifest, context="split audit event cache")
+        validate_official_train_cov_contract(features, context="split audit QDIC features")
+        provenance = frontend.get("provenance")
+        annotation_hash = sha256_file(annotation)
+        if not isinstance(provenance, dict):
+            raise ValueError("frontend provenance is missing")
+        if provenance.get("source_role") != "OFFICIAL_TRAIN":
+            raise ValueError("frontend source_role is not OFFICIAL_TRAIN")
+        if provenance.get("exact_split_name") != "train":
+            raise ValueError("frontend exact_split_name is not train")
+        if provenance.get("source_annotation_sha256") != annotation_hash:
+            raise ValueError("frontend annotation hash mismatch")
+        for name, metadata in (("event cache", event_manifest), ("QDIC features", features)):
+            if metadata.get("source_role") != "OFFICIAL_TRAIN":
+                raise ValueError(f"{name} source_role is not OFFICIAL_TRAIN")
+            if metadata.get("exact_split_name") != "train":
+                raise ValueError(f"{name} exact_split_name is not train")
+            if metadata.get("official_train_annotation_sha256") != annotation_hash:
+                raise ValueError(f"{name} annotation hash mismatch")
+        if features.get("artifact") != "qdic_v11_feature_cache":
+            raise ValueError("wrong QDIC feature artifact")
+        if features.get("optimizer_source_allowed") is not True:
+            raise ValueError("QDIC features are not optimizer-allowed")
+        if features.get("base_only_supervision") is not True:
+            raise ValueError("QDIC features are not Base-only")
+        if features.get("novel_gt_used_for_optimizer") is not False:
+            raise ValueError("Novel GT optimizer guard is not false")
+        if features.get("test_gt_used_for_optimizer") is not False:
+            raise ValueError("Test GT optimizer guard is not false")
+        if Path(str(features.get("source_frontend_cache", ""))).resolve() != OFFICIAL_TRAIN_FRONTEND.resolve():
+            raise ValueError("QDIC features point to a different frontend")
+        result.update(
+            {
+                "optimizer_source_allowed": True,
+                "status": "AVAILABLE_AUDITED_COVTRACK_FRONTEND_AND_QDIC_EVENTS",
+                "frontend_manifest_sha256": sha256_file(frontend_manifest_path),
+                "event_manifest_sha256": sha256_file(event_manifest_path),
+                "qdic_features_sha256": sha256_file(feature_metadata_path),
+                "frame_count": int(frontend.get("frame_count", -1)),
+                "video_count": int(frontend.get("video_count", -1)),
+                "feature_rows": int(features.get("rows", -1)),
+                "feature_dim": int(features.get("feature_dim", -1)),
+                "feature_config": features.get("feature_config"),
+            }
+        )
+    except Exception as exc:
+        result.update({"status": "FAIL_CLOSED_TRAIN_FRONTEND_OR_FEATURE_CONTRACT", "error": str(exc)})
+    return result
+
+
 def build_audit(train: Path, val: Path, test: Path) -> dict[str, Any]:
     records = {
         "OFFICIAL_TRAIN": annotation_record("OFFICIAL_TRAIN", "train", train),
@@ -204,6 +290,7 @@ def build_audit(train: Path, val: Path, test: Path) -> dict[str, Any]:
     }
     disjoint = all(item["count"] == 0 for item in intersections.values())
 
+    train_source = audited_official_train_source(train)
     feature_sources = {
         "qdic_event_cache_builder": source_record(
             "qdic_event_cache_builder",
@@ -220,10 +307,13 @@ def build_audit(train: Path, val: Path, test: Path) -> dict[str, Any]:
             "fixed_dual_memory_source",
             REPO_ROOT / "tempotrack_research/memory/fixed_dual.py",
         ),
+        "dssl_cache_contract": source_record(
+            "Official Train cache contract", REPO_ROOT / "tempotrack_v10/dssl_cache_contract.py"
+        ),
     }
     frontend_sources = {
         "official_train_covtrack_native": {
-            "status": "MISSING_AUDITED_OUTPUT",
+            **train_source,
             "source": "COVTrack-native frontend output bound to OFFICIAL_TRAIN",
             "required_before_train_cache": True,
             "substitutions_forbidden": [
@@ -336,12 +426,35 @@ def build_audit(train: Path, val: Path, test: Path) -> dict[str, Any]:
                 "source": "current_v11_test_contract",
             },
         },
+        "artifact_allowlist": {
+            "OFFICIAL_TRAIN_COV_FRONTEND": {
+                "path": str(OFFICIAL_TRAIN_FRONTEND),
+                "manifest": str(OFFICIAL_TRAIN_FRONTEND / "cache_manifest.json"),
+                "manifest_sha256": train_source.get("frontend_manifest_sha256"),
+            },
+            "OFFICIAL_TRAIN_QDIC_EVENTS": {
+                "path": str(OFFICIAL_TRAIN_EVENTS),
+                "manifest": str(OFFICIAL_TRAIN_EVENTS / "cache_manifest.json"),
+                "manifest_sha256": train_source.get("event_manifest_sha256"),
+                "optimizer_source_allowed": train_source.get("optimizer_source_allowed", False),
+            },
+        },
         "category_protocol": category_note,
         "frontend_sources": frontend_sources,
         "feature_sources": feature_sources,
         "pilot_guard": pilot_guard,
-        "optimizer_ready": bool(disjoint and frontend_sources["official_train_covtrack_native"]["status"] == "AVAILABLE"),
-        "status": "PASS_SPLIT_DISJOINT_FRONTEND_TRAIN_PENDING" if disjoint else "FAIL_CLOSED_VIDEO_OVERLAP",
+        "optimizer_ready": bool(
+            disjoint
+            and frontend_sources["official_train_covtrack_native"]["optimizer_source_allowed"]
+        ),
+        "status": (
+            "PASS_SPLIT_DISJOINT_AND_TRAIN_FRONTEND_BOUND"
+            if disjoint and frontend_sources["official_train_covtrack_native"]["optimizer_source_allowed"]
+            else "PASS_SPLIT_DISJOINT_FRONTEND_TRAIN_PENDING"
+            if disjoint
+            else "FAIL_CLOSED_VIDEO_OVERLAP"
+        ),
+        "generated_at_unix": time.time(),
     }
 
 
@@ -389,7 +502,7 @@ def markdown(audit: Mapping[str, Any]) -> str:
     lines += ["", "## Frontend and feature provenance", ""]
     train_frontend = audit["frontend_sources"]["official_train_covtrack_native"]
     lines.append(
-        f"- Official Train frontend: **{train_frontend['status']}**. A Val cache, Test output, OVTR output, or the historical pilot cache cannot substitute for it."
+        f"- Official Train frontend: **{train_frontend['status']}**; optimizer source allowed: **{train_frontend['optimizer_source_allowed']}**. A Val cache, Test output, OVTR output, or the historical pilot cache cannot substitute for it."
     )
     val_frontend = audit["frontend_sources"]["official_val_covtrack_native"]
     lines.append(
@@ -401,7 +514,10 @@ def markdown(audit: Mapping[str, Any]) -> str:
     lines.append(
         "- QDIC feature construction remains bound to the existing `qdic_features.py` and V9.1 event-cache builder; no second feature definition is introduced by this audit."
     )
-    lines += ["", "## Gate", "", "Do not build the Official-Train cache or start DSSL training until an audited Train frontend output/manifest is bound to the exact `train` annotation and recorded in a new receipt.", ""]
+    if audit["optimizer_ready"]:
+        lines += ["", "## Gate", "", "Official Train COV frontend, event cache, and QDIC feature cache are now bound to the exact `train` annotation and pass the optimizer-source contract.", ""]
+    else:
+        lines += ["", "## Gate", "", "Do not start DSSL training until an audited Train frontend output/manifest is bound to the exact `train` annotation and recorded in a new receipt.", ""]
     return "\n".join(lines)
 
 

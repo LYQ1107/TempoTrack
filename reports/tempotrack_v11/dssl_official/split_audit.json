@@ -3,7 +3,7 @@
   "artifact": "v11_dssl_official_split_audit",
   "generated_by": "tools/v11_dssl_split_audit.py",
   "repository": "/data1/LWR/vranlee/SERVER_ONLY/avis/tempotrack_v11_distributional_arch",
-  "repository_commit": "18e12ea6af33df70fe5212c19355776c9efa1ed9",
+  "repository_commit": "4906ed8c5413621f66bc2e81b17c4474ec1af7b2",
   "roles": {
     "OFFICIAL_TRAIN": {
       "role": "OFFICIAL_TRAIN",
@@ -3086,6 +3086,19 @@
       "source": "current_v11_test_contract"
     }
   },
+  "artifact_allowlist": {
+    "OFFICIAL_TRAIN_COV_FRONTEND": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_cov_frontend",
+      "manifest": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_cov_frontend/cache_manifest.json",
+      "manifest_sha256": "5398450d71850de036e733879b89e131b3ca424d0e746584cac2a2c7668dd2d2"
+    },
+    "OFFICIAL_TRAIN_QDIC_EVENTS": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_qdic_events",
+      "manifest": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_qdic_events/cache_manifest.json",
+      "manifest_sha256": "a1b9cc62e3a77b49c6e8d1032526eec82300b3f42658bbf01867b543cd9f2fdb",
+      "optimizer_source_allowed": true
+    }
+  },
   "category_protocol": {
     "status": "SPLIT_SPECIFIC_METADATA_RECORDED",
     "official_train_category_space": "raw TAO 1230-category annotation metadata",
@@ -3094,7 +3107,80 @@
   },
   "frontend_sources": {
     "official_train_covtrack_native": {
-      "status": "MISSING_AUDITED_OUTPUT",
+      "artifact_root": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full",
+      "frontend_cache": {
+        "kind": "Official Train COV frontend",
+        "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_cov_frontend",
+        "exists": true,
+        "is_file": false,
+        "is_dir": true,
+        "size_bytes": null
+      },
+      "frontend_manifest": {
+        "kind": "Official Train frontend manifest",
+        "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_cov_frontend/cache_manifest.json",
+        "exists": true,
+        "is_file": true,
+        "is_dir": false,
+        "size_bytes": 849201,
+        "sha256": "5398450d71850de036e733879b89e131b3ca424d0e746584cac2a2c7668dd2d2"
+      },
+      "event_cache": {
+        "kind": "Official Train QDIC event cache",
+        "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_qdic_events",
+        "exists": true,
+        "is_file": false,
+        "is_dir": true,
+        "size_bytes": null
+      },
+      "event_manifest": {
+        "kind": "Official Train event manifest",
+        "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_qdic_events/cache_manifest.json",
+        "exists": true,
+        "is_file": true,
+        "is_dir": false,
+        "size_bytes": 2113,
+        "sha256": "a1b9cc62e3a77b49c6e8d1032526eec82300b3f42658bbf01867b543cd9f2fdb"
+      },
+      "qdic_features": {
+        "kind": "Official Train QDIC features",
+        "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_qdic_events/qdic_features",
+        "exists": true,
+        "is_file": false,
+        "is_dir": true,
+        "size_bytes": null
+      },
+      "qdic_feature_metadata": {
+        "kind": "Official Train QDIC feature metadata",
+        "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/official_train_qdic_events/qdic_features/features.json",
+        "exists": true,
+        "is_file": true,
+        "is_dir": false,
+        "size_bytes": 5785,
+        "sha256": "2eaf2e6236fe21d289f45bcdf437e4e38994087759c830e0b6f008dd3e9525be"
+      },
+      "optimizer_source_allowed": true,
+      "status": "AVAILABLE_AUDITED_COVTRACK_FRONTEND_AND_QDIC_EVENTS",
+      "frontend_manifest_sha256": "5398450d71850de036e733879b89e131b3ca424d0e746584cac2a2c7668dd2d2",
+      "event_manifest_sha256": "a1b9cc62e3a77b49c6e8d1032526eec82300b3f42658bbf01867b543cd9f2fdb",
+      "qdic_features_sha256": "2eaf2e6236fe21d289f45bcdf437e4e38994087759c830e0b6f008dd3e9525be",
+      "frame_count": 18274,
+      "video_count": 500,
+      "feature_rows": 212361,
+      "feature_dim": 33,
+      "feature_config": {
+        "query_observations": 1,
+        "recent_k": 8,
+        "alpha_fast": 0.7,
+        "alpha_slow": 0.15,
+        "memory_capacity": 64,
+        "memory_dedup_cos": 0.95,
+        "context_candidate_top_k": 64,
+        "decision_candidate_top_k": 8,
+        "top_r": 3,
+        "max_gap": 360,
+        "min_gap": 0
+      },
       "source": "COVTrack-native frontend output bound to OFFICIAL_TRAIN",
       "required_before_train_cache": true,
       "substitutions_forbidden": [
@@ -3209,8 +3295,8 @@
       "exists": true,
       "is_file": true,
       "is_dir": false,
-      "size_bytes": 158718,
-      "sha256": "e390a99e0982b753c5eb8379629eae8264564461e297ee60ff68358f5939eaa8"
+      "size_bytes": 160404,
+      "sha256": "90cce0e85c0c7f6737f42cb851a3e58dbb06ebed9b0a5b837b40b78228dbb446"
     },
     "qdic_feature_builder": {
       "kind": "qdic_feature_builder",
@@ -3218,8 +3304,8 @@
       "exists": true,
       "is_file": true,
       "is_dir": false,
-      "size_bytes": 30067,
-      "sha256": "a632e9b320d65f84ea3b11bf52ad23f69cc5e9e6375feba24b5178ba2e2d268c"
+      "size_bytes": 31160,
+      "sha256": "39cd5c99295b890631aad4cc232d6df50b198f97dcc598319733e044ccd10bef"
     },
     "partial_support_source": {
       "kind": "partial_support_source",
@@ -3238,6 +3324,15 @@
       "is_dir": false,
       "size_bytes": 4567,
       "sha256": "e09cb99cbd600c742fb0175f81775159bc4254f2bc1cad151d26686eb425a628"
+    },
+    "dssl_cache_contract": {
+      "kind": "Official Train cache contract",
+      "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/tempotrack_v11_distributional_arch/tempotrack_v10/dssl_cache_contract.py",
+      "exists": true,
+      "is_file": true,
+      "is_dir": false,
+      "size_bytes": 1501,
+      "sha256": "2a021277ee93643888a2972ece69652f5a314184b257edb8822f1c70bf8ff81a"
     }
   },
   "pilot_guard": {
@@ -3246,6 +3341,7 @@
     "allowed_role": "historical comparison only",
     "optimizer_source_allowed": false
   },
-  "optimizer_ready": false,
-  "status": "PASS_SPLIT_DISJOINT_FRONTEND_TRAIN_PENDING"
+  "optimizer_ready": true,
+  "status": "PASS_SPLIT_DISJOINT_AND_TRAIN_FRONTEND_BOUND",
+  "generated_at_unix": 1789634599.894961
 }
