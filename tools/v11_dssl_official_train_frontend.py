@@ -343,6 +343,50 @@ def run_one(command: list[str], env: Mapping[str, str], root: Path) -> int:
     return int(process.returncode)
 
 
+def run_parallel(jobs: list[tuple[list[str], Mapping[str, str], Path]]) -> list[int]:
+    """Launch disjoint complete-video shards concurrently, one per GPU."""
+
+    processes: list[tuple[subprocess.Popen[Any], Any, Path, str | None]] = []
+    try:
+        for command, env, root in jobs:
+            log_path = root / "frontend.log"
+            log = log_path.open("w", encoding="utf-8")
+            process = subprocess.Popen(
+                command,
+                cwd=str(COV_SOURCE),
+                env=dict(env),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+            write_json(root / "process.json", {
+                "pid": int(process.pid),
+                "gpu": env.get("CUDA_VISIBLE_DEVICES"),
+                "argv": command,
+                "status": "RUNNING",
+            })
+            processes.append((process, log, root, env.get("CUDA_VISIBLE_DEVICES")))
+    except Exception:
+        for process, log, _root, _gpu in processes:
+            if process.poll() is None:
+                process.terminate()
+            log.close()
+        raise
+
+    returncodes: list[int] = []
+    for process, log, root, gpu in processes:
+        returncode = int(process.wait())
+        log.flush()
+        log.close()
+        returncodes.append(returncode)
+        write_json(root / "process.json", {
+            "pid": int(process.pid),
+            "gpu": gpu,
+            "returncode": returncode,
+            "status": "PASS" if returncode == 0 else "FAILED",
+        })
+    return returncodes
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", type=Path, required=True)
@@ -383,10 +427,16 @@ def main() -> int:
     })
     if args.no_launch:
         return 0
+    jobs = [
+        command_for(audit=audit, run_root=run_root, shard=shard, gpu=gpu)
+        for shard, gpu in zip(shards, gpus)
+    ]
+    if args.mode == "full":
+        returncodes = run_parallel(jobs)
+    else:
+        returncodes = [run_one(*job) for job in jobs]
     results: list[dict[str, Any]] = []
-    for shard, gpu in zip(shards, gpus):
-        command, env, root = command_for(audit=audit, run_root=run_root, shard=shard, gpu=gpu)
-        returncode = run_one(command, env, root)
+    for (command, env, root), shard, gpu, returncode in zip(jobs, shards, gpus, returncodes):
         if returncode != 0:
             raise RuntimeError(f"Official Train frontend failed on GPU {gpu}, shard {root}; see {root / 'frontend.log'}")
         results.append(validate_shard(root, shard))
