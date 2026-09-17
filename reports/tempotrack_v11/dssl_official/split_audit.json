@@ -3,7 +3,7 @@
   "artifact": "v11_dssl_official_split_audit",
   "generated_by": "tools/v11_dssl_split_audit.py",
   "repository": "/data1/LWR/vranlee/SERVER_ONLY/avis/tempotrack_v11_distributional_arch",
-  "repository_commit": "423753a4df83ecb60c58d450d3388fabe000fa9c",
+  "repository_commit": "c4f1babfaca88cc20f6e8d269fbcb6f25685c00d",
   "roles": {
     "OFFICIAL_TRAIN": {
       "role": "OFFICIAL_TRAIN",
@@ -3295,8 +3295,8 @@
       "exists": true,
       "is_file": true,
       "is_dir": false,
-      "size_bytes": 160404,
-      "sha256": "90cce0e85c0c7f6737f42cb851a3e58dbb06ebed9b0a5b837b40b78228dbb446"
+      "size_bytes": 160517,
+      "sha256": "0c8b98d4769a618f0738c7f4336ba16847cc838fe4629259ee1c39c7fed7149c"
     },
     "qdic_feature_builder": {
       "kind": "qdic_feature_builder",
@@ -3304,8 +3304,8 @@
       "exists": true,
       "is_file": true,
       "is_dir": false,
-      "size_bytes": 31160,
-      "sha256": "39cd5c99295b890631aad4cc232d6df50b198f97dcc598319733e044ccd10bef"
+      "size_bytes": 31385,
+      "sha256": "93ae6af544e761b408a094311602a1f56ab83f893efeb73f7e5d45d06849144d"
     },
     "partial_support_source": {
       "kind": "partial_support_source",
@@ -3331,8 +3331,8 @@
       "exists": true,
       "is_file": true,
       "is_dir": false,
-      "size_bytes": 1501,
-      "sha256": "2a021277ee93643888a2972ece69652f5a314184b257edb8822f1c70bf8ff81a"
+      "size_bytes": 2520,
+      "sha256": "6097e43c346c9747218f090fde594f615d4f854824cd9fa6e61bafa881b4c0be"
     }
   },
   "pilot_guard": {
@@ -3343,5 +3343,5 @@
   },
   "optimizer_ready": true,
   "status": "PASS_SPLIT_DISJOINT_AND_TRAIN_FRONTEND_BOUND",
-  "generated_at_unix": 1789634628.4693246
+  "generated_at_unix": 1789654074.3287356
 }
