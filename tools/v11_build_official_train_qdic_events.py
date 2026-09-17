@@ -26,20 +26,17 @@ import numpy as np
 from tempotrack_research.data.native_observation_recorder import NativeObservationRecorder
 from tempotrack_v10.qdic_features import build_qdic_features
 from tempotrack_v10.replay_cache import FrontendReplayCacheReader, sha256_file
+from tempotrack_v10.dssl_cache_contract import (
+    OFFICIAL_TRAIN_COV_CONTRACT,
+    validate_official_train_cov_contract,
+)
 from tempotrack_research.config import object_hash
 from tempotrack_research.v6_cli import _cache_shards, _frames_for_shard, _rows_from_frame
 from tempotrack_research.orchestration.v9_parameter_search import build_event_cache
 from tempotrack_v10.cov_category_ontology import build_category_mapping
 
 
-EXPECTED_CONTRACT = {
-    "input_source": "COVTRACK_FRONTEND",
-    "supervision_source": "OFFICIAL_TRAIN_GT",
-    "oracle_features_used": False,
-    "gt_boxes_used_as_model_input": False,
-    "gt_tracks_used_as_memory": False,
-    "gt_used_only_for_supervision": True,
-}
+EXPECTED_CONTRACT = dict(OFFICIAL_TRAIN_COV_CONTRACT)
 
 
 def _read(path: Path) -> Any:
@@ -66,15 +63,33 @@ def _validate_contract(frontend_root: Path, annotation: Path) -> dict[str, Any]:
     if not manifest_path.is_file():
         raise FileNotFoundError(f"frontend cache contract missing: {frontend_root}")
     manifest = _read(manifest_path)
-    actual = {key: manifest.get(key) for key in EXPECTED_CONTRACT}
-    if actual != EXPECTED_CONTRACT:
-        raise RuntimeError(f"FAIL_CLOSED_FRONTEND_SUPERVISION_CONTRACT: {actual} != {EXPECTED_CONTRACT}")
+    validate_official_train_cov_contract(
+        manifest, context=f"frontend cache {frontend_root}"
+    )
     if manifest.get("status") not in {"PASS", "COMPLETED"}:
         raise RuntimeError("FAIL_CLOSED_FRONTEND_CACHE_INCOMPLETE")
-    if manifest.get("source_annotation_sha256") not in (None, _sha256(annotation)):
+    provenance = manifest.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise RuntimeError("FAIL_CLOSED_FRONTEND_PROVENANCE_MISSING")
+    if provenance.get("source_annotation_sha256") != _sha256(annotation):
         raise RuntimeError("FAIL_CLOSED_FRONTEND_ANNOTATION_HASH_MISMATCH")
-    if str(manifest.get("provenance", {}).get("source_role", "OFFICIAL_TRAIN")) != "OFFICIAL_TRAIN":
+    if provenance.get("source_role") != "OFFICIAL_TRAIN":
         raise RuntimeError("FAIL_CLOSED_FRONTEND_SOURCE_ROLE_MISMATCH")
+    if provenance.get("exact_split_name") != "train":
+        raise RuntimeError("FAIL_CLOSED_FRONTEND_SPLIT_MISMATCH")
+    return manifest
+
+
+def _validate_replay_manifest(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise RuntimeError(f"FAIL_CLOSED_REPLAY_MANIFEST_MISSING: {path}")
+    manifest = _read(path)
+    if manifest.get("gt_loaded_during_replay") is not False:
+        raise RuntimeError("FAIL_CLOSED_REPLAY_USED_GT")
+    if int(manifest.get("detector_forward_calls", -1)) != 0:
+        raise RuntimeError("FAIL_CLOSED_REPLAY_USED_DETECTOR")
+    if int(manifest.get("native_tracker_match_calls", 0)) <= 0:
+        raise RuntimeError("FAIL_CLOSED_REPLAY_DID_NOT_RUN_NATIVE_TRACKER")
     return manifest
 
 
@@ -100,6 +115,7 @@ def _run_replay(
 ) -> Path:
     prediction = output / "cov_native_prediction.json"
     if prediction.is_file() and (output / "cov_native_prediction.manifest.json").is_file():
+        _validate_replay_manifest(output / "cov_native_prediction.manifest.json")
         return prediction
     capture_doc = _read(capture)
     if capture_doc.get("capture_source") != "observed_live_proc_environ":
@@ -133,9 +149,7 @@ def _run_replay(
     if process.returncode != 0:
         raise RuntimeError(f"COV causal replay failed; see {log_path}")
     manifest = prediction.with_name(prediction.stem + ".manifest.json")
-    replay_doc = _read(manifest)
-    if replay_doc.get("gt_loaded_during_replay") is not False or int(replay_doc.get("detector_forward_calls", -1)) != 0:
-        raise RuntimeError("FAIL_CLOSED_REPLAY_USED_GT_OR_DETECTOR")
+    _validate_replay_manifest(manifest)
     return prediction
 
 
@@ -162,6 +176,16 @@ def _build_native_cache(
     manifest_path = native_root / "manifest.json"
     prediction_path = native_root / "prediction.json"
     if manifest_path.is_file() and prediction_path.is_file():
+        cached_manifest = _read(manifest_path)
+        validate_official_train_cov_contract(
+            cached_manifest, context=f"reused native cache {native_root}"
+        )
+        if cached_manifest.get("annotation_hash") != _sha256(annotation):
+            raise RuntimeError("FAIL_CLOSED_REUSED_NATIVE_ANNOTATION_HASH_MISMATCH")
+        if cached_manifest.get("frontend_cache") != str(frontend_root):
+            raise RuntimeError("FAIL_CLOSED_REUSED_NATIVE_FRONTEND_MISMATCH")
+        if cached_manifest.get("gt_loaded_during_native_adapter") is not False:
+            raise RuntimeError("FAIL_CLOSED_REUSED_NATIVE_USED_GT")
         return manifest_path, prediction_path
     native_root.mkdir(parents=True, exist_ok=True)
     reader = FrontendReplayCacheReader(frontend_root)
@@ -303,6 +327,42 @@ def _build_native_cache(
     return manifest_path, prediction_path
 
 
+def _validate_event_metadata(
+    path: Path, *, frontend: Path, annotation: Path
+) -> dict[str, Any]:
+    if not path.is_file():
+        raise RuntimeError(f"FAIL_CLOSED_EVENT_METADATA_MISSING: {path}")
+    metadata = _read(path)
+    validate_official_train_cov_contract(metadata, context=f"event cache {path}")
+    if metadata.get("source_role") != "OFFICIAL_TRAIN" or metadata.get("exact_split_name") != "train":
+        raise RuntimeError("FAIL_CLOSED_EVENT_SOURCE_SPLIT_MISMATCH")
+    if metadata.get("official_train_annotation_sha256") != _sha256(annotation):
+        raise RuntimeError("FAIL_CLOSED_EVENT_ANNOTATION_HASH_MISMATCH")
+    if Path(str(metadata.get("source_frontend_cache", ""))).resolve() != frontend.resolve():
+        raise RuntimeError("FAIL_CLOSED_EVENT_FRONTEND_MISMATCH")
+    return metadata
+
+
+def _validate_qdic_features(
+    path: Path, *, frontend: Path, annotation: Path
+) -> dict[str, Any]:
+    if not path.is_file():
+        raise RuntimeError(f"FAIL_CLOSED_QDIC_FEATURE_METADATA_MISSING: {path}")
+    metadata = _read(path)
+    validate_official_train_cov_contract(metadata, context=f"QDIC feature cache {path}")
+    if metadata.get("artifact") != "qdic_v11_feature_cache":
+        raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_ARTIFACT")
+    if metadata.get("source_role") != "OFFICIAL_TRAIN" or metadata.get("exact_split_name") != "train":
+        raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_SOURCE_SPLIT_MISMATCH")
+    if metadata.get("official_train_annotation_sha256") != _sha256(annotation):
+        raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_ANNOTATION_HASH_MISMATCH")
+    if Path(str(metadata.get("source_frontend_cache", ""))).resolve() != frontend.resolve():
+        raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_FRONTEND_MISMATCH")
+    if metadata.get("optimizer_source_allowed") is not True:
+        raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_NOT_OPTIMIZER_ALLOWED")
+    return metadata
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--frontend-cache", type=Path, required=True)
@@ -318,11 +378,12 @@ def main() -> int:
     frontend = args.frontend_cache.resolve()
     annotation = args.annotation.resolve()
     output = args.output.resolve()
+    frontend_manifest = _validate_contract(frontend, annotation)
     if output.exists() and (output / "features.json").is_file():
+        _validate_qdic_features(output / "features.json", frontend=frontend, annotation=annotation)
         print(json.dumps({"status": "REUSED", "features": str(output / "features.json")}))
         return 0
     output.mkdir(parents=True, exist_ok=True)
-    frontend_manifest = _validate_contract(frontend, annotation)
     replay_prediction = _run_replay(
         frontend_root=frontend,
         output=output / "official_train_cov_frontend_replay",
@@ -358,6 +419,7 @@ def main() -> int:
             output=events_root,
         )
     event_metadata = _read(events_root / "metadata.json")
+    _validate_event_metadata(events_root / "metadata.json", frontend=frontend, annotation=annotation)
     qdic_features_root = output / "qdic_features"
     if not (qdic_features_root / "features.json").is_file():
         sidecar_root = events_root / "qdic_sidecar"
@@ -365,6 +427,7 @@ def main() -> int:
         precompute_qdic_sidecar(events_root, sidecar_root, recent_k=8, memory_capacity=64, memory_dedup_cos=0.95)
         build_qdic_features(events_root, qdic_features_root, sidecar=sidecar_root, recent_k=8, memory_capacity=64, memory_dedup_cos=0.95, context_candidate_top_k=64, decision_candidate_top_k=8)
     features = _read(qdic_features_root / "features.json")
+    _validate_qdic_features(qdic_features_root / "features.json", frontend=frontend, annotation=annotation)
     contract = {key: features.get(key) for key in EXPECTED_CONTRACT}
     if contract != EXPECTED_CONTRACT:
         raise RuntimeError(f"FAIL_CLOSED_QDIC_FEATURE_CONTRACT: {contract} != {EXPECTED_CONTRACT}")

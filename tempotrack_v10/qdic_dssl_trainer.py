@@ -21,6 +21,7 @@ import numpy as np
 import torch
 
 from .distributional_losses import total_dssl_loss
+from .dssl_cache_contract import validate_official_train_cov_contract
 from .qdic_features import QDIC_FEATURE_NAMES, QDIC_RAW_DIM
 from .qdic_loader import QDIC_STATUS, validate_qdic_feature_config
 from .qdic_trainer import sha256
@@ -59,6 +60,7 @@ def _memory_guard(spare_gib: int = 12) -> None:
 
 def _official_train_guard(metadata: Mapping[str, Any]) -> None:
     """Reject any cache that is not the newly generated Official Train cache."""
+    validate_official_train_cov_contract(metadata, context="DSSL optimizer feature cache")
     if str(metadata.get("source_role", "")) != "OFFICIAL_TRAIN":
         raise ValueError("DSSL optimizer source_role must be OFFICIAL_TRAIN")
     if str(metadata.get("artifact")) != "qdic_v11_feature_cache":

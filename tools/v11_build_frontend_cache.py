@@ -16,6 +16,10 @@ from tempotrack_v10.replay_cache import (
     REPLAY_CACHE_SCHEMA_VERSION,
     sha256_file,
 )
+from tempotrack_v10.dssl_cache_contract import (
+    OFFICIAL_TRAIN_COV_CONTRACT,
+    validate_official_train_cov_contract,
+)
 
 
 def _read(path: Path) -> Any:
@@ -72,36 +76,23 @@ def main() -> None:
         reader = FrontendReplayCacheReader(shard_root)
         manifest = reader.manifest
         provenance = dict(manifest.get("provenance", {}))
-        shard_contract = {
-            key: manifest.get(key, provenance.get(key))
-            for key in (
-                "input_source",
-                "supervision_source",
-                "oracle_features_used",
-                "gt_boxes_used_as_model_input",
-                "gt_tracks_used_as_memory",
-                "gt_used_only_for_supervision",
-            )
-        }
-        expected_contract = {
-            "input_source": "COVTRACK_FRONTEND",
-            "supervision_source": "OFFICIAL_TRAIN_GT",
-            "oracle_features_used": False,
-            "gt_boxes_used_as_model_input": False,
-            "gt_tracks_used_as_memory": False,
-            "gt_used_only_for_supervision": True,
-        }
-        if shard_contract != expected_contract:
-            raise RuntimeError(
-                f"Official-Train frontend supervision contract mismatch: "
-                f"{shard_root}: {shard_contract} != {expected_contract}"
-            )
+        # The cache manifest itself must carry the complete contract.  Do not
+        # fall back to nested provenance: that would allow an incomplete or
+        # hand-edited cache boundary to pass validation.
+        validate_official_train_cov_contract(
+            manifest, context=f"frontend shard {shard_root}"
+        )
+        if provenance.get("source_annotation_sha256") != annotation_hash:
+            raise RuntimeError(f"annotation hash mismatch in cache shard: {shard_root}")
+        if provenance.get("source_role") != "OFFICIAL_TRAIN":
+            raise RuntimeError(f"source role mismatch in cache shard: {shard_root}")
+        if provenance.get("exact_split_name") != "train":
+            raise RuntimeError(f"split mismatch in cache shard: {shard_root}")
+        shard_contract = dict(OFFICIAL_TRAIN_COV_CONTRACT)
         if contract is None:
             contract = shard_contract
         elif contract != shard_contract:
             raise RuntimeError(f"frontend data contract mismatch: {shard_root}")
-        if provenance.get("source_annotation_sha256") not in (None, annotation_hash):
-            raise RuntimeError(f"annotation hash mismatch in cache shard: {shard_root}")
         if common_provenance is None:
             common_provenance = provenance
         else:
