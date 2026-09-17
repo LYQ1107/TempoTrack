@@ -268,6 +268,12 @@ class FrontendReplayCacheWriter:
             "frame_count": sum(int(item["frame_count"]) for item in videos),
             "video_count": len(videos),
             "ordered_video_ids": [item["video_id"] for item in videos],
+            "ordered_image_ids": [
+                int(image_id)
+                for item in videos
+                for image_id in item.get("image_ids", ())
+                if image_id is not None
+            ],
             "videos": videos,
             "provenance": _jsonable(self.provenance),
             **data_contract,
