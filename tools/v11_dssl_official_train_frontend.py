@@ -46,6 +46,14 @@ REFERENCE_RECEIPT = Path(
 TEMPO_CONFIG = REPO_ROOT / "configs/research/v11/covtrack_dssl_official_frontend_disabled.yaml"
 STREAM_PYTHON = Path("/home/lwr/anaconda3/envs/ovtr/bin/python")
 
+# The launcher remains Train-compatible by default, but the exact split and
+# supervision source are explicit runtime parameters for the audited Val
+# frontend.  A Val run cannot silently inherit Train provenance.
+ANNOTATION = TRAIN_ANNOTATION
+SOURCE_ROLE = "OFFICIAL_TRAIN"
+SUPERVISION_SOURCE = "OFFICIAL_TRAIN_GT"
+EXACT_SPLIT_NAME = "train"
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -77,10 +85,10 @@ def write_json(path: Path, value: Any) -> None:
 
 
 def validate_inputs() -> dict[str, Any]:
-    required = (TRAIN_ANNOTATION, FRAMES_ROOT, COV_SOURCE, COV_CONFIG, COV_CHECKPOINT, CAPTURE, REFERENCE_RECEIPT, TEMPO_CONFIG, STREAM_PYTHON)
+    required = (ANNOTATION, FRAMES_ROOT, COV_SOURCE, COV_CONFIG, COV_CHECKPOINT, CAPTURE, REFERENCE_RECEIPT, TEMPO_CONFIG, STREAM_PYTHON)
     missing = [str(path) for path in required if not path.exists()]
     if missing:
-        raise FileNotFoundError("Official Train frontend inputs missing: " + ", ".join(missing))
+        raise FileNotFoundError("audited COV frontend inputs missing: " + ", ".join(missing))
     capture = read_json(CAPTURE)
     if capture.get("capture_source") != "observed_live_proc_environ":
         raise RuntimeError("FAIL_CLOSED_CAPTURE_PROVENANCE: capture was not observed live /proc")
@@ -111,7 +119,7 @@ def validate_inputs() -> dict[str, Any]:
 
 
 def load_train() -> dict[str, Any]:
-    data = read_json(TRAIN_ANNOTATION)
+    data = read_json(ANNOTATION)
     if not isinstance(data, dict) or not isinstance(data.get("videos"), list):
         raise ValueError("Official Train annotation is not a COCO/TAO mapping")
     return data
@@ -181,15 +189,15 @@ def provenance(
     return {
         "artifact": "v11_dssl_official_train_frontend_provenance",
         "input_source": "COVTRACK_FRONTEND",
-        "supervision_source": "OFFICIAL_TRAIN_GT",
+        "supervision_source": SUPERVISION_SOURCE,
         "oracle_features_used": False,
         "gt_boxes_used_as_model_input": False,
         "gt_tracks_used_as_memory": False,
         "gt_used_only_for_supervision": True,
-        "source_role": "OFFICIAL_TRAIN",
-        "exact_split_name": "train",
-        "source_annotation": str(TRAIN_ANNOTATION),
-        "source_annotation_sha256": sha256(TRAIN_ANNOTATION),
+        "source_role": SOURCE_ROLE,
+        "exact_split_name": EXACT_SPLIT_NAME,
+        "source_annotation": str(ANNOTATION),
+        "source_annotation_sha256": sha256(ANNOTATION),
         "shard_annotation": str(annotation_path),
         "shard_annotation_sha256": sha256(annotation_path),
         "shard_index": int(shard_index),
@@ -318,6 +326,29 @@ def validate_shard(shard_root: Path, expected: Mapping[str, Any]) -> dict[str, A
         raise RuntimeError(f"frontend video count mismatch in {shard_root}")
     if int(stream.get("frames", -1)) != int(expected["image_count"]):
         raise RuntimeError(f"stream frame count mismatch in {shard_root}")
+    expected_contract = {
+        "input_source": "COVTRACK_FRONTEND",
+        "supervision_source": SUPERVISION_SOURCE,
+        "oracle_features_used": False,
+        "gt_boxes_used_as_model_input": False,
+        "gt_tracks_used_as_memory": False,
+        "gt_used_only_for_supervision": True,
+    }
+    actual_contract = {key: manifest.get(key) for key in expected_contract}
+    if actual_contract != expected_contract:
+        raise RuntimeError(
+            f"frontend contract mismatch in {shard_root}: "
+            f"{actual_contract} != {expected_contract}"
+        )
+    provenance_doc = manifest.get("provenance")
+    if not isinstance(provenance_doc, Mapping):
+        raise RuntimeError(f"frontend provenance missing in {shard_root}")
+    if provenance_doc.get("source_role") != SOURCE_ROLE:
+        raise RuntimeError(f"frontend source role mismatch in {shard_root}")
+    if provenance_doc.get("exact_split_name") != EXACT_SPLIT_NAME:
+        raise RuntimeError(f"frontend exact split mismatch in {shard_root}")
+    if provenance_doc.get("source_annotation_sha256") != sha256(ANNOTATION):
+        raise RuntimeError(f"frontend annotation hash mismatch in {shard_root}")
     return {
         "root": str(shard_root),
         "cache_manifest": str(manifest_path),
@@ -388,13 +419,26 @@ def run_parallel(jobs: list[tuple[list[str], Mapping[str, str], Path]]) -> list[
 
 
 def main() -> int:
+    global ANNOTATION, FRAMES_ROOT, SOURCE_ROLE, SUPERVISION_SOURCE, EXACT_SPLIT_NAME
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-root", type=Path, required=True)
     parser.add_argument("--mode", choices=("smoke", "full"), required=True)
     parser.add_argument("--gpus", default="1")
     parser.add_argument("--shards", type=int, default=None)
     parser.add_argument("--no-launch", action="store_true")
+    parser.add_argument("--annotation", type=Path, default=TRAIN_ANNOTATION)
+    parser.add_argument("--frames-root", type=Path, default=FRAMES_ROOT)
+    parser.add_argument("--source-role", default="OFFICIAL_TRAIN")
+    parser.add_argument("--supervision-source", default="OFFICIAL_TRAIN_GT")
+    parser.add_argument("--exact-split-name", default="train")
     args = parser.parse_args()
+    ANNOTATION = args.annotation.resolve()
+    FRAMES_ROOT = args.frames_root.resolve()
+    SOURCE_ROLE = str(args.source_role)
+    SUPERVISION_SOURCE = str(args.supervision_source)
+    EXACT_SPLIT_NAME = str(args.exact_split_name)
+    if not SOURCE_ROLE or not SUPERVISION_SOURCE or not EXACT_SPLIT_NAME:
+        raise ValueError("source role, supervision source and exact split name are required")
     run_root = args.run_root.resolve()
     run_root.mkdir(parents=True, exist_ok=True)
     audit = validate_inputs()
@@ -415,8 +459,11 @@ def main() -> int:
     write_json(run_root / f"{args.mode}_plan.json", {
         "mode": args.mode,
         "created_at_unix": time.time(),
-        "train_annotation": str(TRAIN_ANNOTATION),
-        "train_annotation_sha256": sha256(TRAIN_ANNOTATION),
+        "annotation": str(ANNOTATION),
+        "annotation_sha256": sha256(ANNOTATION),
+        "source_role": SOURCE_ROLE,
+        "supervision_source": SUPERVISION_SOURCE,
+        "exact_split_name": EXACT_SPLIT_NAME,
         "audit_capture": str(CAPTURE),
         "audit_capture_sha256": sha256(CAPTURE),
         "external_cov_commit": audit["external_cov_commit"],

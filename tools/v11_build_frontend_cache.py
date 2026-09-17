@@ -17,8 +17,7 @@ from tempotrack_v10.replay_cache import (
     sha256_file,
 )
 from tempotrack_v10.dssl_cache_contract import (
-    OFFICIAL_TRAIN_COV_CONTRACT,
-    validate_official_train_cov_contract,
+    validate_cov_frontend_contract,
 )
 
 
@@ -40,6 +39,9 @@ def main() -> None:
     parser.add_argument("--annotation", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--shard", type=Path, action="append", required=True)
+    parser.add_argument("--source-role", default="OFFICIAL_TRAIN")
+    parser.add_argument("--supervision-source", default="OFFICIAL_TRAIN_GT")
+    parser.add_argument("--exact-split-name", default="train")
     args = parser.parse_args()
     annotation = args.annotation.resolve()
     output = args.output.resolve()
@@ -61,6 +63,14 @@ def main() -> None:
             source_video_seen.add(video_id)
             source_video_order.append(video_id)
     annotation_hash = sha256_file(annotation)
+    expected_contract = {
+        "input_source": "COVTRACK_FRONTEND",
+        "supervision_source": str(args.supervision_source),
+        "oracle_features_used": False,
+        "gt_boxes_used_as_model_input": False,
+        "gt_tracks_used_as_memory": False,
+        "gt_used_only_for_supervision": True,
+    }
 
     common_provenance: dict[str, Any] | None = None
     ordered_videos: list[int | str] = []
@@ -79,16 +89,18 @@ def main() -> None:
         # The cache manifest itself must carry the complete contract.  Do not
         # fall back to nested provenance: that would allow an incomplete or
         # hand-edited cache boundary to pass validation.
-        validate_official_train_cov_contract(
-            manifest, context=f"frontend shard {shard_root}"
+        validate_cov_frontend_contract(
+            manifest,
+            supervision_source=str(args.supervision_source),
+            context=f"frontend shard {shard_root}",
         )
         if provenance.get("source_annotation_sha256") != annotation_hash:
             raise RuntimeError(f"annotation hash mismatch in cache shard: {shard_root}")
-        if provenance.get("source_role") != "OFFICIAL_TRAIN":
+        if provenance.get("source_role") != str(args.source_role):
             raise RuntimeError(f"source role mismatch in cache shard: {shard_root}")
-        if provenance.get("exact_split_name") != "train":
+        if provenance.get("exact_split_name") != str(args.exact_split_name):
             raise RuntimeError(f"split mismatch in cache shard: {shard_root}")
-        shard_contract = dict(OFFICIAL_TRAIN_COV_CONTRACT)
+        shard_contract = dict(expected_contract)
         if contract is None:
             contract = shard_contract
         elif contract != shard_contract:

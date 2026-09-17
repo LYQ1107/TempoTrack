@@ -799,6 +799,8 @@ def build_event_cache(
         "video_disjoint_split": True,
         "normalization_fit": "internal_train_base_only_after_video_split" if str(split).lower() == "train" else None,
         "official_train_annotation_sha256": _sha256(annotation_path) if str(split).lower() == "train" else None,
+        "source_annotation": str(annotation_path),
+        "source_annotation_sha256": _sha256(annotation_path),
         "source_event_cache": str(output_path),
         "source_frontend_cache": frontend_manifest_doc.get("frontend_cache", frontend_manifest_doc.get("repo")),
         "test_gt_used_for_optimizer": False,

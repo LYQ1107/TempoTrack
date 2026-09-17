@@ -28,6 +28,7 @@ from tempotrack_v10.qdic_features import build_qdic_features
 from tempotrack_v10.replay_cache import FrontendReplayCacheReader, sha256_file
 from tempotrack_v10.dssl_cache_contract import (
     OFFICIAL_TRAIN_COV_CONTRACT,
+    validate_cov_frontend_contract,
     validate_official_train_cov_contract,
 )
 from tempotrack_research.config import object_hash
@@ -37,6 +38,11 @@ from tempotrack_v10.cov_category_ontology import build_category_mapping
 
 
 EXPECTED_CONTRACT = dict(OFFICIAL_TRAIN_COV_CONTRACT)
+ACTIVE_CONTRACT = dict(EXPECTED_CONTRACT)
+ACTIVE_SOURCE_ROLE = "OFFICIAL_TRAIN"
+ACTIVE_SUPERVISION_SOURCE = "OFFICIAL_TRAIN_GT"
+ACTIVE_SPLIT_NAME = "train"
+ACTIVE_OPTIMIZER_SOURCE_ALLOWED = True
 
 
 def _read(path: Path) -> Any:
@@ -63,8 +69,10 @@ def _validate_contract(frontend_root: Path, annotation: Path) -> dict[str, Any]:
     if not manifest_path.is_file():
         raise FileNotFoundError(f"frontend cache contract missing: {frontend_root}")
     manifest = _read(manifest_path)
-    validate_official_train_cov_contract(
-        manifest, context=f"frontend cache {frontend_root}"
+    validate_cov_frontend_contract(
+        manifest,
+        supervision_source=ACTIVE_SUPERVISION_SOURCE,
+        context=f"frontend cache {frontend_root}",
     )
     if manifest.get("status") not in {"PASS", "COMPLETED"}:
         raise RuntimeError("FAIL_CLOSED_FRONTEND_CACHE_INCOMPLETE")
@@ -73,9 +81,9 @@ def _validate_contract(frontend_root: Path, annotation: Path) -> dict[str, Any]:
         raise RuntimeError("FAIL_CLOSED_FRONTEND_PROVENANCE_MISSING")
     if provenance.get("source_annotation_sha256") != _sha256(annotation):
         raise RuntimeError("FAIL_CLOSED_FRONTEND_ANNOTATION_HASH_MISMATCH")
-    if provenance.get("source_role") != "OFFICIAL_TRAIN":
+    if provenance.get("source_role") != ACTIVE_SOURCE_ROLE:
         raise RuntimeError("FAIL_CLOSED_FRONTEND_SOURCE_ROLE_MISMATCH")
-    if provenance.get("exact_split_name") != "train":
+    if provenance.get("exact_split_name") != ACTIVE_SPLIT_NAME:
         raise RuntimeError("FAIL_CLOSED_FRONTEND_SPLIT_MISMATCH")
     return manifest
 
@@ -177,8 +185,10 @@ def _build_native_cache(
     prediction_path = native_root / "prediction.json"
     if manifest_path.is_file() and prediction_path.is_file():
         cached_manifest = _read(manifest_path)
-        validate_official_train_cov_contract(
-            cached_manifest, context=f"reused native cache {native_root}"
+        validate_cov_frontend_contract(
+            cached_manifest,
+            supervision_source=ACTIVE_SUPERVISION_SOURCE,
+            context=f"reused native cache {native_root}",
         )
         if cached_manifest.get("annotation_hash") != _sha256(annotation):
             raise RuntimeError("FAIL_CLOSED_REUSED_NATIVE_ANNOTATION_HASH_MISMATCH")
@@ -215,12 +225,7 @@ def _build_native_cache(
         native_root / "shards",
         rank=0,
         metadata={
-            "input_source": "COVTRACK_FRONTEND",
-            "supervision_source": "OFFICIAL_TRAIN_GT",
-            "oracle_features_used": False,
-            "gt_boxes_used_as_model_input": False,
-            "gt_tracks_used_as_memory": False,
-            "gt_used_only_for_supervision": True,
+            **ACTIVE_CONTRACT,
             "source_frontend_cache": str(frontend_root),
             "source_frontend_cache_sha256": _sha256(frontend_root / "cache_manifest.json" if (frontend_root / "cache_manifest.json").is_file() else frontend_root / "manifest.json"),
             "annotation_hash": _sha256(annotation),
@@ -307,9 +312,9 @@ def _build_native_cache(
         "content_hash": object_hash(shard_records),
         "frontend_cache": str(frontend_root),
         "frontend_cache_manifest_sha256": _sha256(frontend_root / "cache_manifest.json" if (frontend_root / "cache_manifest.json").is_file() else frontend_root / "manifest.json"),
-        **EXPECTED_CONTRACT,
-        "source_role": "OFFICIAL_TRAIN",
-        "exact_split_name": "train",
+        **ACTIVE_CONTRACT,
+        "source_role": ACTIVE_SOURCE_ROLE,
+        "exact_split_name": ACTIVE_SPLIT_NAME,
         "gt_loaded_during_native_adapter": False,
         "synthetic_unmatched_rows": int(synthetic_unmatched),
         "category_id_by_index": {str(index): int(category_id) for index, category_id in enumerate(extended_category_ids)},
@@ -333,10 +338,14 @@ def _validate_event_metadata(
     if not path.is_file():
         raise RuntimeError(f"FAIL_CLOSED_EVENT_METADATA_MISSING: {path}")
     metadata = _read(path)
-    validate_official_train_cov_contract(metadata, context=f"event cache {path}")
-    if metadata.get("source_role") != "OFFICIAL_TRAIN" or metadata.get("exact_split_name") != "train":
+    validate_cov_frontend_contract(
+        metadata,
+        supervision_source=ACTIVE_SUPERVISION_SOURCE,
+        context=f"event cache {path}",
+    )
+    if metadata.get("source_role") != ACTIVE_SOURCE_ROLE or metadata.get("exact_split_name") != ACTIVE_SPLIT_NAME:
         raise RuntimeError("FAIL_CLOSED_EVENT_SOURCE_SPLIT_MISMATCH")
-    if metadata.get("official_train_annotation_sha256") != _sha256(annotation):
+    if metadata.get("annotation_hash") != _sha256(annotation):
         raise RuntimeError("FAIL_CLOSED_EVENT_ANNOTATION_HASH_MISMATCH")
     if Path(str(metadata.get("source_frontend_cache", ""))).resolve() != frontend.resolve():
         raise RuntimeError("FAIL_CLOSED_EVENT_FRONTEND_MISMATCH")
@@ -349,21 +358,30 @@ def _validate_qdic_features(
     if not path.is_file():
         raise RuntimeError(f"FAIL_CLOSED_QDIC_FEATURE_METADATA_MISSING: {path}")
     metadata = _read(path)
-    validate_official_train_cov_contract(metadata, context=f"QDIC feature cache {path}")
+    validate_cov_frontend_contract(
+        metadata,
+        supervision_source=ACTIVE_SUPERVISION_SOURCE,
+        context=f"QDIC feature cache {path}",
+    )
     if metadata.get("artifact") != "qdic_v11_feature_cache":
         raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_ARTIFACT")
-    if metadata.get("source_role") != "OFFICIAL_TRAIN" or metadata.get("exact_split_name") != "train":
+    if metadata.get("source_role") != ACTIVE_SOURCE_ROLE or metadata.get("exact_split_name") != ACTIVE_SPLIT_NAME:
         raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_SOURCE_SPLIT_MISMATCH")
-    if metadata.get("official_train_annotation_sha256") != _sha256(annotation):
+    annotation_hash = metadata.get("source_annotation_sha256")
+    if annotation_hash is None and ACTIVE_SPLIT_NAME == "train":
+        annotation_hash = metadata.get("official_train_annotation_sha256")
+    if annotation_hash != _sha256(annotation):
         raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_ANNOTATION_HASH_MISMATCH")
     if Path(str(metadata.get("source_frontend_cache", ""))).resolve() != frontend.resolve():
         raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_FRONTEND_MISMATCH")
-    if metadata.get("optimizer_source_allowed") is not True:
+    if metadata.get("optimizer_source_allowed") is not ACTIVE_OPTIMIZER_SOURCE_ALLOWED:
         raise RuntimeError("FAIL_CLOSED_QDIC_FEATURE_NOT_OPTIMIZER_ALLOWED")
     return metadata
 
 
 def main() -> int:
+    global ACTIVE_CONTRACT, ACTIVE_SOURCE_ROLE, ACTIVE_SUPERVISION_SOURCE
+    global ACTIVE_SPLIT_NAME, ACTIVE_OPTIMIZER_SOURCE_ALLOWED
     parser = argparse.ArgumentParser()
     parser.add_argument("--frontend-cache", type=Path, required=True)
     parser.add_argument("--annotation", type=Path, required=True)
@@ -374,7 +392,27 @@ def main() -> int:
     parser.add_argument("--cov-config", type=Path, required=True)
     parser.add_argument("--cov-checkpoint", type=Path, required=True)
     parser.add_argument("--device", default="cuda:1")
+    parser.add_argument("--source-role", default="OFFICIAL_TRAIN")
+    parser.add_argument("--supervision-source", default="OFFICIAL_TRAIN_GT")
+    parser.add_argument("--exact-split-name", default="train")
+    parser.add_argument(
+        "--optimizer-source-allowed",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     args = parser.parse_args()
+    ACTIVE_SOURCE_ROLE = str(args.source_role)
+    ACTIVE_SUPERVISION_SOURCE = str(args.supervision_source)
+    ACTIVE_SPLIT_NAME = str(args.exact_split_name)
+    ACTIVE_OPTIMIZER_SOURCE_ALLOWED = bool(args.optimizer_source_allowed)
+    ACTIVE_CONTRACT = {
+        "input_source": "COVTRACK_FRONTEND",
+        "supervision_source": ACTIVE_SUPERVISION_SOURCE,
+        "oracle_features_used": False,
+        "gt_boxes_used_as_model_input": False,
+        "gt_tracks_used_as_memory": False,
+        "gt_used_only_for_supervision": True,
+    }
     frontend = args.frontend_cache.resolve()
     annotation = args.annotation.resolve()
     output = args.output.resolve()
@@ -402,11 +440,15 @@ def main() -> int:
         manifest=frontend_manifest,
         cov_source=args.cov_source.resolve(),
     )
-    events_root = output / "official_train_qdic_events"
+    events_root = output / (
+        "official_train_qdic_events"
+        if ACTIVE_SPLIT_NAME == "train"
+        else f"{ACTIVE_SPLIT_NAME}_qdic_events"
+    )
     if not (events_root / "metadata.json").is_file():
         build_event_cache(
             frontend="covtrack",
-            split="train",
+            split=ACTIVE_SPLIT_NAME,
             manifest=native_manifest,
             frontend_prediction=native_prediction,
             annotation=annotation,
@@ -428,24 +470,25 @@ def main() -> int:
         build_qdic_features(events_root, qdic_features_root, sidecar=sidecar_root, recent_k=8, memory_capacity=64, memory_dedup_cos=0.95, context_candidate_top_k=64, decision_candidate_top_k=8)
     features = _read(qdic_features_root / "features.json")
     _validate_qdic_features(qdic_features_root / "features.json", frontend=frontend, annotation=annotation)
-    contract = {key: features.get(key) for key in EXPECTED_CONTRACT}
-    if contract != EXPECTED_CONTRACT:
-        raise RuntimeError(f"FAIL_CLOSED_QDIC_FEATURE_CONTRACT: {contract} != {EXPECTED_CONTRACT}")
+    contract = {key: features.get(key) for key in ACTIVE_CONTRACT}
+    if contract != ACTIVE_CONTRACT:
+        raise RuntimeError(f"FAIL_CLOSED_QDIC_FEATURE_CONTRACT: {contract} != {ACTIVE_CONTRACT}")
     cache_manifest = {
-        **EXPECTED_CONTRACT,
-        "artifact": "official_train_qdic_events_and_features",
-        "source_role": "OFFICIAL_TRAIN",
-        "exact_split_name": "train",
-        "official_train_annotation_sha256": _sha256(annotation),
+        **ACTIVE_CONTRACT,
+        "artifact": f"{ACTIVE_SOURCE_ROLE.lower()}_qdic_events_and_features",
+        "source_role": ACTIVE_SOURCE_ROLE,
+        "exact_split_name": ACTIVE_SPLIT_NAME,
+        "annotation_sha256": _sha256(annotation),
+        "official_train_annotation_sha256": _sha256(annotation) if ACTIVE_SPLIT_NAME == "train" else None,
         "source_frontend_cache": str(frontend),
         "source_frontend_cache_manifest_sha256": _sha256(frontend / "cache_manifest.json" if (frontend / "cache_manifest.json").is_file() else frontend / "manifest.json"),
         "source_event_cache": str(events_root),
         "event_metadata_sha256": _sha256(events_root / "metadata.json"),
         "qdic_features": str(qdic_features_root),
         "qdic_features_metadata_sha256": _sha256(qdic_features_root / "features.json"),
-        "optimizer_source_allowed": True,
+        "optimizer_source_allowed": ACTIVE_OPTIMIZER_SOURCE_ALLOWED,
         "video_disjoint_split": True,
-        "normalization_fit": "internal_train_base_only_after_video_split",
+        "normalization_fit": "internal_train_base_only_after_video_split" if ACTIVE_SPLIT_NAME == "train" else "not_fitted_for_optimizer",
         "novel_gt_used_for_optimizer": False,
         "test_gt_used_for_optimizer": False,
         "native_manifest": str(native_manifest),

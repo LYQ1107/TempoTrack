@@ -666,6 +666,10 @@ def build_qdic_features(
         "video_disjoint_split": metadata.get("video_disjoint_split"),
         "normalization_fit": metadata.get("normalization_fit"),
         "official_train_annotation_sha256": metadata.get("official_train_annotation_sha256"),
+        "source_annotation": metadata.get("source_annotation", metadata.get("annotation")),
+        "source_annotation_sha256": metadata.get(
+            "source_annotation_sha256", metadata.get("annotation_hash")
+        ),
         "source_event_cache": metadata.get("source_event_cache"),
         "source_frontend_cache": metadata.get("source_frontend_cache"),
         "supervision_source": metadata.get("supervision_source"),
