@@ -118,7 +118,16 @@ def load_train() -> dict[str, Any]:
 def subset_annotation(data: Mapping[str, Any], video_ids: set[int], output: Path) -> dict[str, Any]:
     selected = copy.deepcopy(dict(data))
     selected["videos"] = [item for item in data.get("videos", []) if int(item["id"]) in video_ids]
-    selected_images = [item for item in data.get("images", []) if int(item["video_id"]) in video_ids]
+    selected_images = []
+    for item in data.get("images", []):
+        if int(item["video_id"]) not in video_ids:
+            continue
+        image = dict(item)
+        # Official TAO Train uses frame_index while the audited COV TAO parser
+        # requires its normalized frame_id field.  This is an experiment-owned
+        # annotation adapter, not a GT/model-input substitution.
+        image.setdefault("frame_id", int(image["frame_index"]))
+        selected_images.append(image)
     selected["images"] = selected_images
     image_ids = {int(item["id"]) for item in selected_images}
     selected["annotations"] = [item for item in data.get("annotations", []) if int(item.get("image_id", -1)) in image_ids]
@@ -132,6 +141,7 @@ def subset_annotation(data: Mapping[str, Any], video_ids: set[int], output: Path
         "video_count": len(selected["videos"]),
         "image_count": len(selected_images),
         "annotation_count": len(selected["annotations"]),
+        "annotation_adapter": "added_image.frame_id=frame_index for audited COV TAO parser",
     }
 
 
@@ -173,6 +183,7 @@ def provenance(
         "shard_annotation": str(annotation_path),
         "shard_annotation_sha256": sha256(annotation_path),
         "shard_index": int(shard_index),
+        "annotation_adapter": "added_image.frame_id=frame_index for audited COV TAO parser",
         "frontend": "COVTrack_native_official_stream",
         "cache_boundary": "before_pinned_covtrack_tracker_match",
         "repo_branch": git_branch(),
