@@ -282,6 +282,10 @@ def _candidate_training_receipt(final: Mapping[str, Any]) -> dict[str, Any]:
         "parent_frozen": value.get("parent_frozen"),
         "train_video_count": len(value.get("train_video_ids", [])),
         "holdout_video_count": len(value.get("holdout_video_ids", [])),
+        "video_split_disjoint": not (
+            set(value.get("train_video_ids", []))
+            & set(value.get("holdout_video_ids", []))
+        ),
         "architecture_config": value.get("architecture_config"),
     }
 
@@ -671,9 +675,12 @@ def _write_markdown(path: Path, report: Mapping[str, Any]) -> None:
             f"- Winner-only loss search: `{report['loss_search']['path']}` (SHA256 `{report['loss_search']['sha256']}`)",
             f"- Parent V11 checkpoint: `{final.get('parent_v11_checkpoint')}` (SHA256 `{final.get('parent_v11_checkpoint_hash')}`)",
             f"- Candidate training receipt: `{final.get('training_receipt', {}).get('path')}` (status `{final.get('training_receipt', {}).get('status')}`)",
+            f"- Training validity: `{final.get('training_receipt', {}).get('paper_status')}`; `paper_valid={final.get('training_receipt', {}).get('paper_valid')}`.",
+            f"- Training contract audit: Base-only=`{final.get('training_receipt', {}).get('base_only_supervision')}`, Novel GT used=`{final.get('training_receipt', {}).get('novel_gt_used')}`, Test weights used=`{final.get('training_receipt', {}).get('test_weights_used')}`, parent frozen=`{final.get('training_receipt', {}).get('parent_frozen')}`, video split disjoint=`{final.get('training_receipt', {}).get('video_split_disjoint')}`.",
             f"- Final preflight: `{final.get('preflight')}` (SHA256 `{final.get('preflight_sha256')}`)",
             f"- Runtime environment source: `{final.get('runtime_environment', {}).get('source', 'embedded in final preflight')}`",
             "- Training contract: Base-only supervision, video-disjoint train/holdout, Novel GT unused, Test GT unused for optimizer, parent V11 frozen.",
+            "- Because the available feature cache is tagged `VAL_BASE_PILOT`, this report does not claim a paper-valid official-train result.",
             "",
             "## Reproducibility index",
             "",
