@@ -245,7 +245,6 @@ def main() -> int:
     if len(args.gpus) != SHARD_COUNT:
         raise ValueError("exactly ten GPU assignments are required")
     for path in (
-        args.b0_report,
         args.cache_root,
         args.events_root,
         args.config_dir,
