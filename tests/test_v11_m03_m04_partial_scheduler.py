@@ -14,6 +14,7 @@ from tools.v11_m03_m04_partial_scheduler import (
     formal_pass,
     all_m04_terminal,
     m04_status,
+    parse_shard,
     shard_name,
 )
 
@@ -65,6 +66,7 @@ def test_gpu_selection_prefers_idle_then_allows_known_project_stacking() -> None
     stacked_m03 = GPUInfo(1, 2880, 40960, 0, (101,), (), ())
     assert choose_gpu([stacked_m03, idle], set()).index == 0
     assert choose_gpu([stacked_m03], set()).index == 1
+    assert parse_shard(["--cache", "/data/annotations/shard_04/frontend_cache"]) == "shard_04"
 
 
 def test_partial_launch_is_not_terminal_and_new_m03_enables_readiness(

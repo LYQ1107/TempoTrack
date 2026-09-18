@@ -132,7 +132,7 @@ def parse_shard(tokens: list[str]) -> str | None:
         if value:
             match = SHARD_RE.search(value)
             if match:
-                return match.group(1)
+                return f"shard_{match.group(1)}"
     return None
 
 

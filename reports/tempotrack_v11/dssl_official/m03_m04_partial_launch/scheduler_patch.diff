@@ -54,10 +54,10 @@ index 0000000..cf7344c
 +tempo config, thresholds, device semantics, and output schema are unchanged.
 diff --git a/tests/test_v11_m03_m04_partial_scheduler.py b/tests/test_v11_m03_m04_partial_scheduler.py
 new file mode 100644
-index 0000000..341372c
+index 0000000..ff9270f
 --- /dev/null
 +++ b/tests/test_v11_m03_m04_partial_scheduler.py
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,89 @@
 +from __future__ import annotations
 +
 +import json
@@ -74,6 +74,7 @@ index 0000000..341372c
 +    formal_pass,
 +    all_m04_terminal,
 +    m04_status,
++    parse_shard,
 +    shard_name,
 +)
 +
@@ -125,6 +126,7 @@ index 0000000..341372c
 +    stacked_m03 = GPUInfo(1, 2880, 40960, 0, (101,), (), ())
 +    assert choose_gpu([stacked_m03, idle], set()).index == 0
 +    assert choose_gpu([stacked_m03], set()).index == 1
++    assert parse_shard(["--cache", "/data/annotations/shard_04/frontend_cache"]) == "shard_04"
 +
 +
 +def test_partial_launch_is_not_terminal_and_new_m03_enables_readiness(
@@ -147,7 +149,7 @@ index 0000000..341372c
 +    assert not all_m04_terminal(tmp_path, [])
 diff --git a/tools/v11_m03_m04_partial_scheduler.py b/tools/v11_m03_m04_partial_scheduler.py
 new file mode 100644
-index 0000000..3cfcdf9
+index 0000000..9b08edd
 --- /dev/null
 +++ b/tools/v11_m03_m04_partial_scheduler.py
 @@ -0,0 +1,764 @@
@@ -285,7 +287,7 @@ index 0000000..3cfcdf9
 +        if value:
 +            match = SHARD_RE.search(value)
 +            if match:
-+                return match.group(1)
++                return f"shard_{match.group(1)}"
 +    return None
 +
 +
