@@ -68,18 +68,36 @@ def _internal_receipt(train_root: Path, card_id: str) -> dict[str, Any]:
     value = read_json(path)
     if value.get("card_id") not in (None, card_id):
         raise ValueError(f"training receipt card mismatch: {path}")
-    selected = value.get("selected_checkpoint")
+    selected = None
+    history = value.get("history")
+    best_epoch = value.get("best_epoch")
+    if isinstance(history, list) and best_epoch is not None:
+        selected_rows = [
+            row
+            for row in history
+            if isinstance(row, Mapping) and int(row.get("epoch", -1)) == int(best_epoch)
+        ]
+        if len(selected_rows) == 1:
+            selected = selected_rows[0]
+    if not isinstance(selected, Mapping):
+        selected = value.get("selected_checkpoint")
     if not isinstance(selected, Mapping):
         selected = value.get("best_checkpoint")
     if not isinstance(selected, Mapping):
-        raise ValueError(f"training receipt has no selected checkpoint: {path}")
+        raise ValueError(f"training receipt has no best-epoch metrics: {path}")
     required = ("final_mrr", "net_correction")
     if any(key not in selected for key in required):
         raise ValueError(f"training receipt lacks gate metrics: {path}")
     return {
         "card_id": card_id,
         "receipt": str(path.resolve()),
-        "best_epoch": value.get("best_epoch"),
+        "best_epoch": int(best_epoch) if best_epoch is not None else None,
+        "checkpoint": value.get("checkpoint"),
+        "checkpoint_hash": value.get("checkpoint_hash"),
+        "lambda_struct": value.get("lambda_struct"),
+        "lambda_cons": value.get("lambda_cons"),
+        "lambda_hard": value.get("lambda_hard"),
+        "temporal_conflict": value.get("temporal_conflict"),
         "final_mrr": float(selected["final_mrr"]),
         "final_top1": float(selected.get("final_top1", float("nan"))),
         "net_correction": float(selected["net_correction"]),
@@ -193,7 +211,12 @@ def write_gate_reports(gate: Mapping[str, Any], output_root: Path, report_root: 
             "The DSSL gate failed; C1–C3, H1, and Current Test must not be launched.",
             "This is a negative result under the frozen protocol, not an invitation to continue threshold search.",
         ]
-    (report_root / "DSSL_NEGATIVE_RESULT_REPORT.md").write_text(
+    report_name = (
+        "DSSL_NEGATIVE_RESULT_REPORT.md"
+        if gate["status"] == "DSSL_NEGATIVE_GATE"
+        else "DSSL_VAL_GATE_REPORT.md"
+    )
+    (report_root / report_name).write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
 

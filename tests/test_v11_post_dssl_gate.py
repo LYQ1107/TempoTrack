@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from tools.v11_post_dssl_gate import build_gate, write_gate_reports
+from tools.v11_post_dssl_gate import _internal_receipt, build_gate, write_gate_reports
 
 
 def _metrics(base_assoc, base_teta, overall_teta):
@@ -43,7 +43,7 @@ def test_gate_fails_closed_when_base_assoc_does_not_improve(tmp_path: Path):
     assert (tmp_path / "reports" / "DSSL_NEGATIVE_RESULT_REPORT.md").is_file()
 
 
-def test_gate_pass_requires_all_conditions():
+def test_gate_pass_requires_all_conditions(tmp_path: Path):
     b0 = _report(_metrics(41.00, 39.00, 38.00))
     d = {card: _report(_metrics(41.50, 39.10, 38.10)) for card in ("D1_LS010", "D2_LS025", "D3_LS050", "D4_LS100")}
     receipts = {"B0_OFFICIAL_V11": _internal("B0_OFFICIAL_V11", 0.927, 0.039)}
@@ -53,3 +53,29 @@ def test_gate_pass_requires_all_conditions():
     gate = build_gate(b0_report=b0, d_reports=d, train_receipts=receipts)
     assert gate["status"] == "DSSL_GATE_PASS"
     assert gate["extension"]["allowed"] is True
+    write_gate_reports(gate, tmp_path / "out", tmp_path / "reports")
+    assert (tmp_path / "reports" / "DSSL_VAL_GATE_REPORT.md").is_file()
+
+
+def test_internal_receipt_reads_real_history_best_epoch_schema(tmp_path: Path):
+    card_root = tmp_path / "D1_LS010"
+    card_root.mkdir()
+    (card_root / "training.json").write_text(
+        json.dumps(
+            {
+                "card_id": "D1_LS010",
+                "best_epoch": 2,
+                "checkpoint": "/tmp/best.pt",
+                "checkpoint_hash": "abc",
+                "lambda_struct": 0.1,
+                "history": [
+                    {"epoch": 1, "final_mrr": 0.9, "net_correction": 0.01},
+                    {"epoch": 2, "final_mrr": 0.95, "final_top1": 0.8, "net_correction": 0.05, "final_listwise_loss": 0.2},
+                ],
+            }
+        )
+    )
+    receipt = _internal_receipt(tmp_path, "D1_LS010")
+    assert receipt["best_epoch"] == 2
+    assert receipt["final_mrr"] == 0.95
+    assert receipt["net_correction"] == 0.05
