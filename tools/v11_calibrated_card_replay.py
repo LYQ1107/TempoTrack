@@ -259,6 +259,28 @@ def _repo_head(repo: Path) -> str | None:
         return None
 
 
+def runtime_environment(repo: Path, *, gpu: int | None = None) -> dict[str, str]:
+    """Return the child environment used for a replay worker.
+
+    The search entry point is invoked by absolute path.  Python then puts its
+    ``tools`` directory, rather than the repository root, on ``sys.path``;
+    relying on the caller's inherited ``PYTHONPATH`` therefore made the
+    launcher work only from some shells and fail closed before replay in
+    others.  Keep the repository root first while preserving any caller
+    entries needed by the COV/TempoTrack runtime.
+    """
+
+    environment = os.environ.copy()
+    repo_string = str(repo.resolve())
+    inherited = environment.get("PYTHONPATH", "")
+    environment["PYTHONPATH"] = (
+        repo_string if not inherited else f"{repo_string}{os.pathsep}{inherited}"
+    )
+    if gpu is not None:
+        environment["CUDA_VISIBLE_DEVICES"] = str(gpu)
+    return environment
+
+
 def make_plan(args: argparse.Namespace) -> dict[str, Any]:
     cards = list(dict.fromkeys(args.card or DEFAULT_CARDS))
     if not cards:
@@ -327,8 +349,9 @@ def launch_plan(plan: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
             log_path.parent.mkdir(parents=True, exist_ok=True)
             output_root = Path(item["command"][item["command"].index("--output-root") + 1])
             output_root.mkdir(parents=True, exist_ok=True)
-            environment = os.environ.copy()
-            environment["CUDA_VISIBLE_DEVICES"] = str(item["gpu"])
+            environment = runtime_environment(
+                args.repo, gpu=int(item["gpu"])
+            )
             with log_path.open("a", encoding="utf-8") as log:
                 process = subprocess.Popen(
                     item["command"],

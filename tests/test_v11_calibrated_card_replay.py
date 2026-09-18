@@ -151,3 +151,13 @@ def test_plan_limits_concurrent_full_cards(tmp_path):
     args.max_cards = 2
     with pytest.raises(ValueError, match="at most 2"):
         MODULE.make_plan(args)
+
+
+def test_runtime_environment_exposes_repository_modules(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/existing/runtime")
+    environment = MODULE.runtime_environment(tmp_path / "repo", gpu=7)
+    assert environment["PYTHONPATH"].split(":")[:2] == [
+        str((tmp_path / "repo").resolve()),
+        "/existing/runtime",
+    ]
+    assert environment["CUDA_VISIBLE_DEVICES"] == "7"
