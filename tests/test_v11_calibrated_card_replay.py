@@ -155,9 +155,13 @@ def test_plan_limits_concurrent_full_cards(tmp_path):
 
 def test_runtime_environment_exposes_repository_modules(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", "/existing/runtime")
-    environment = MODULE.runtime_environment(tmp_path / "repo", gpu=7)
+    cov_source = tmp_path / "cov_source"
+    environment = MODULE.runtime_environment(
+        tmp_path / "repo", gpu=7, cov_source=cov_source
+    )
     assert environment["PYTHONPATH"].split(":")[:2] == [
         str((tmp_path / "repo").resolve()),
-        "/existing/runtime",
+        str(cov_source.resolve()),
     ]
+    assert environment["PYTHONPATH"].split(":")[2] == "/existing/runtime"
     assert environment["CUDA_VISIBLE_DEVICES"] == "7"

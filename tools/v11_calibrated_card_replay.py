@@ -259,7 +259,12 @@ def _repo_head(repo: Path) -> str | None:
         return None
 
 
-def runtime_environment(repo: Path, *, gpu: int | None = None) -> dict[str, str]:
+def runtime_environment(
+    repo: Path,
+    *,
+    gpu: int | None = None,
+    cov_source: Path | None = None,
+) -> dict[str, str]:
     """Return the child environment used for a replay worker.
 
     The search entry point is invoked by absolute path.  Python then puts its
@@ -271,11 +276,13 @@ def runtime_environment(repo: Path, *, gpu: int | None = None) -> dict[str, str]
     """
 
     environment = os.environ.copy()
-    repo_string = str(repo.resolve())
+    import_roots = [str(repo.resolve())]
+    if cov_source is not None:
+        import_roots.append(str(cov_source.resolve()))
     inherited = environment.get("PYTHONPATH", "")
-    environment["PYTHONPATH"] = (
-        repo_string if not inherited else f"{repo_string}{os.pathsep}{inherited}"
-    )
+    if inherited:
+        import_roots.append(inherited)
+    environment["PYTHONPATH"] = os.pathsep.join(import_roots)
     if gpu is not None:
         environment["CUDA_VISIBLE_DEVICES"] = str(gpu)
     return environment
@@ -350,7 +357,9 @@ def launch_plan(plan: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
             output_root = Path(item["command"][item["command"].index("--output-root") + 1])
             output_root.mkdir(parents=True, exist_ok=True)
             environment = runtime_environment(
-                args.repo, gpu=int(item["gpu"])
+                args.repo,
+                gpu=int(item["gpu"]),
+                cov_source=args.cov_source,
             )
             with log_path.open("a", encoding="utf-8") as log:
                 process = subprocess.Popen(
