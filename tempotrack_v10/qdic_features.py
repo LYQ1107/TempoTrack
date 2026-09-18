@@ -64,6 +64,40 @@ QDIC_MGF_FEATURE_SCHEMA_VERSION = 12
 assert QDIC_MGF_RAW_DIM == 35
 assert QDIC_MGF_INDEPENDENT_DIM == 30
 
+# Exploration-only beta bank.  These constants are deliberately separate from
+# the formal V12 beta=1 contract above: exploratory checkpoints/caches must not
+# be loadable through the formal loader or be mistaken for paper-valid results.
+QDIC_MGF_EXPLORATION_BETAS = (-2.0, -1.0, -0.5, 0.25, 0.5, 1.0, 2.0, 4.0)
+
+
+def _beta_label(beta: float) -> str:
+    """Return a stable, filename/feature-name-safe beta label."""
+    value = float(beta)
+    if not np.isfinite(value):
+        raise ValueError("MGF beta must be finite")
+    if value.is_integer():
+        return f"{int(value):d}"
+    return str(value).replace("-", "m").replace(".", "p")
+
+
+QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES = tuple(
+    f"projected_fast_log_mgf_beta_{_beta_label(beta)}"
+    for beta in QDIC_MGF_EXPLORATION_BETAS
+) + tuple(
+    f"projected_slow_log_mgf_beta_{_beta_label(beta)}"
+    for beta in QDIC_MGF_EXPLORATION_BETAS
+)
+QDIC_MGF_EXPLORATION_FEATURE_NAMES = (
+    tuple(QDIC_FEATURE_NAMES) + QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES
+)
+QDIC_MGF_EXPLORATION_RAW_DIM = len(QDIC_MGF_EXPLORATION_FEATURE_NAMES)
+QDIC_MGF_EXPLORATION_INDEPENDENT_DIM = (
+    QDIC_INDEPENDENT_DIM + len(QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES)
+)
+QDIC_MGF_EXPLORATION_FEATURE_SCHEMA_VERSION = 13
+assert QDIC_MGF_EXPLORATION_RAW_DIM == 49
+assert QDIC_MGF_EXPLORATION_INDEPENDENT_DIM == 44
+
 
 def _finite_array(value: Any, *, name: str, ndim: int | None = None) -> np.ndarray:
     array = np.asarray(value, dtype=np.float32)
@@ -194,6 +228,33 @@ def projected_log_mgf(
     )
 
 
+def _validate_exploration_beta(beta: float) -> float:
+    value = float(beta)
+    if not np.isfinite(value):
+        raise ValueError("exploration MGF beta must be finite")
+    if not any(np.isclose(value, candidate, rtol=0.0, atol=1e-8) for candidate in QDIC_MGF_EXPLORATION_BETAS):
+        raise ValueError(
+            "exploration MGF beta is not pre-registered: "
+            f"{value}; allowed={QDIC_MGF_EXPLORATION_BETAS}"
+        )
+    return value
+
+
+def _exploration_beta_bank(cosine: np.ndarray, *, recent_k: int) -> np.ndarray:
+    """Return [fast beta-bank, full beta-bank] in the registered order."""
+    values = [
+        projected_log_mgf(cosine, recent_k=recent_k, beta=beta)
+        for beta in QDIC_MGF_EXPLORATION_BETAS
+    ]
+    bank = np.asarray(
+        [item[0] for item in values] + [item[1] for item in values],
+        dtype=np.float32,
+    )
+    if bank.shape != (len(QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES),) or not np.isfinite(bank).all():
+        raise FloatingPointError("exploration MGF beta bank is not finite [16]")
+    return bank
+
+
 def build_qdic_candidate_features(
     cosine: np.ndarray,
     evidence: np.ndarray,
@@ -290,6 +351,49 @@ def build_qdic_mgf_candidate_features(
     return row
 
 
+def build_qdic_mgf_exploration_candidate_features(
+    cosine: np.ndarray,
+    evidence: np.ndarray,
+    gap: int,
+    rank: int,
+    *,
+    query_fast_cosine: float,
+    query_slow_cosine: float,
+    fast_slow_cosine: float,
+    recent_k: int = QDIC_RECENT_K,
+    top_r: int = 3,
+    max_gap: int = 360,
+    mgf_beta: float | None = None,
+) -> np.ndarray:
+    """Build the exploration-only 44-D independent row.
+
+    ``mgf_beta`` is accepted only as a diagnostic convenience: a 49-D
+    exploration row always contains the complete pre-registered bank.  A
+    caller that wants one fixed beta should select its two columns and build a
+    35-D card cache; it must not silently create a new beta outside the bank.
+    """
+    if mgf_beta is not None:
+        _validate_exploration_beta(mgf_beta)
+    original = build_qdic_candidate_features(
+        cosine,
+        evidence,
+        gap,
+        rank,
+        query_fast_cosine=query_fast_cosine,
+        query_slow_cosine=query_slow_cosine,
+        fast_slow_cosine=fast_slow_cosine,
+        recent_k=recent_k,
+        top_r=top_r,
+        max_gap=max_gap,
+    )
+    row = np.concatenate(
+        (original, _exploration_beta_bank(cosine, recent_k=recent_k))
+    ).astype(np.float32, copy=False)
+    if row.shape != (QDIC_MGF_EXPLORATION_INDEPENDENT_DIM,) or not np.isfinite(row).all():
+        raise FloatingPointError("exploration MGF independent row must be finite [44]")
+    return row
+
+
 def build_qdic_event_features(rows: Sequence[Mapping[str, Any]]) -> np.ndarray:
     """Add Q1 event competition context to independent QDIC candidate rows.
 
@@ -334,6 +438,35 @@ def build_qdic_mgf_event_features(rows: Sequence[Mapping[str, Any]]) -> np.ndarr
         output[index] = np.concatenate((context[index], distributional))
     if not np.isfinite(output).all():
         raise FloatingPointError("QDIC MGF event features are non-finite")
+    return output
+
+
+def build_qdic_mgf_exploration_event_features(
+    rows: Sequence[Mapping[str, Any]],
+) -> np.ndarray:
+    """Add event context to 44-D exploration rows, yielding 49-D features."""
+    if not rows:
+        raise ValueError("QDIC exploration event must contain at least one candidate")
+    independent = np.stack(
+        [np.asarray(item["base_features"], dtype=np.float32) for item in rows], axis=0
+    )
+    if independent.ndim != 2 or independent.shape[1] != 19:
+        raise ValueError("QDIC exploration event base_features must be [N,19]")
+    context = add_event_context(independent)
+    output = np.empty((len(rows), QDIC_MGF_EXPLORATION_RAW_DIM), dtype=np.float32)
+    expected_distributional = len(QDIC_DISTRIBUTIONAL_FEATURE_NAMES) + len(
+        QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES
+    )
+    for index, item in enumerate(rows):
+        distributional = np.asarray(item["distributional_features"], dtype=np.float32)
+        if distributional.shape != (expected_distributional,):
+            raise ValueError(
+                "QDIC exploration distributional_features must be "
+                f"[{expected_distributional}]"
+            )
+        output[index] = np.concatenate((context[index], distributional))
+    if not np.isfinite(output).all():
+        raise FloatingPointError("QDIC exploration event features are non-finite")
     return output
 
 
@@ -1120,6 +1253,12 @@ __all__ = [
     "QDIC_MGF_RAW_DIM",
     "QDIC_MGF_INDEPENDENT_DIM",
     "QDIC_MGF_FEATURE_SCHEMA_VERSION",
+    "QDIC_MGF_EXPLORATION_BETAS",
+    "QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES",
+    "QDIC_MGF_EXPLORATION_FEATURE_NAMES",
+    "QDIC_MGF_EXPLORATION_RAW_DIM",
+    "QDIC_MGF_EXPLORATION_INDEPENDENT_DIM",
+    "QDIC_MGF_EXPLORATION_FEATURE_SCHEMA_VERSION",
     "QDIC_MEMORY_CAPACITY",
     "QDIC_MEMORY_DEDUP_COS",
     "QDIC_QUERY_OBSERVATIONS",
@@ -1129,6 +1268,8 @@ __all__ = [
     "build_qdic_features",
     "build_qdic_mgf_candidate_features",
     "build_qdic_mgf_event_features",
+    "build_qdic_mgf_exploration_candidate_features",
+    "build_qdic_mgf_exploration_event_features",
     "build_qdic_mgf_features",
     "empirical_log_mgf",
     "projected_distribution_moments",

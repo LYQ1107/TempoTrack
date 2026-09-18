@@ -36,6 +36,11 @@ from .qdic_features import (
 )
 from .qdic_loader import load_qdic_checkpoint
 from .qdic_mgf_loader import QDIC_MGF_STATUS, load_qdic_mgf_checkpoint
+from .qdic_mgf_exploration_loader import (
+    EXPLORATION_PROTOCOL,
+    EXPLORATION_STATUS,
+    load_qdic_mgf_exploration_checkpoint,
+)
 from .candidate_aware_qdic_loader import (
     CANDIDATE_AWARE_STATUS,
     load_candidate_aware_checkpoint,
@@ -243,6 +248,12 @@ class TempoTrackOverlay:
                     device=self.config.qdic_device,
                 )
                 self._qdic_variant = "mgf"
+            elif receipt_artifact == "qdic_v12_mgf_exploration_training":
+                qdic = load_qdic_mgf_exploration_checkpoint(
+                    checkpoint_path,
+                    device=self.config.qdic_device,
+                )
+                self._qdic_variant = "mgf_exploration"
             elif receipt_artifact == "candidate_aware_qdic_training":
                 qdic = load_candidate_aware_checkpoint(
                     checkpoint_path,
@@ -272,6 +283,7 @@ class TempoTrackOverlay:
                 raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: exact provenance")
             status = provenance.get("status")
             is_mgf = status == QDIC_MGF_STATUS
+            is_mgf_exploration = status == EXPLORATION_STATUS
             if is_mgf:
                 self._qdic_variant = "mgf"
                 expected_dim = QDIC_MGF_RAW_DIM
@@ -287,6 +299,18 @@ class TempoTrackOverlay:
                     raise SnapshotContractError("BLOCKED_QDIC_MGF_BETA_NOT_FROZEN_TO_ONE")
                 if provenance.get("training_protocol") != "QDIC_V12_MGF_BASE_ONLY_TRAINING":
                     raise SnapshotContractError("BLOCKED_QDIC_MGF_TRAINING_PROTOCOL_INVALID")
+            elif is_mgf_exploration:
+                self._qdic_variant = "mgf_exploration"
+                expected_dim = int(provenance.get("feature_dim", -1))
+                expected_names = tuple(provenance.get("feature_names", ()))
+                if expected_dim not in {QDIC_MGF_RAW_DIM, 49} or not expected_names:
+                    raise SnapshotContractError("BLOCKED_QDIC_MGF_EXPLORATION_SCHEMA_MISMATCH")
+                if int(provenance.get("schema_version", -1)) not in {12, 13}:
+                    raise SnapshotContractError("BLOCKED_QDIC_MGF_EXPLORATION_SCHEMA_VERSION_MISMATCH")
+                if provenance.get("training_protocol") != EXPLORATION_PROTOCOL:
+                    raise SnapshotContractError("BLOCKED_QDIC_MGF_EXPLORATION_PROTOCOL_INVALID")
+                if provenance.get("paper_status") != "TEST_TUNED_EXPLORATION" or provenance.get("paper_valid") is not False:
+                    raise SnapshotContractError("BLOCKED_QDIC_MGF_EXPLORATION_PAPER_STATUS_INVALID")
             elif status in {"QDIC_V11_MODEL_CODE_AND_WEIGHTS", CANDIDATE_AWARE_STATUS}:
                 self._qdic_variant = "v11"
                 expected_dim = QDIC_RAW_DIM
@@ -300,7 +324,7 @@ class TempoTrackOverlay:
             valid_protocols = (
                 {"QDIC_V12_MGF_BASE_ONLY_TRAINING"}
                 if is_mgf
-                else {"QDIC_V11_BASE_ONLY_TRAINING", "QDIC_V11_BASE_ONLY_CANDIDATE_AWARE_TRAINING"}
+                else ({EXPLORATION_PROTOCOL} if is_mgf_exploration else {"QDIC_V11_BASE_ONLY_TRAINING", "QDIC_V11_BASE_ONLY_CANDIDATE_AWARE_TRAINING"})
             )
             if (
                 provenance.get("training_protocol") not in valid_protocols
@@ -1218,16 +1242,22 @@ class TempoTrackOverlay:
                 "qdic_feature_schema_version": (
                     QDIC_MGF_FEATURE_SCHEMA_VERSION
                     if self._qdic_variant == "mgf"
-                    else (11 if self._qdic_variant == "v11" else None)
+                    else (
+                        int(self._qdic.provenance.get("schema_version", 13))
+                        if self._qdic_variant == "mgf_exploration" and self._qdic is not None
+                        else (11 if self._qdic_variant == "v11" else None)
+                    )
                 ),
                 "qdic_mgf_beta": (
-                    float(self._qdic_feature_config.get("mgf_beta", QDIC_MGF_BETA))
-                    if self._qdic_variant == "mgf"
+                    self._qdic.provenance.get("mgf_beta")
+                    if self._qdic_variant == "mgf_exploration" and self._qdic is not None
+                    else float(self._qdic_feature_config.get("mgf_beta", QDIC_MGF_BETA))
+                    if self._qdic_variant in {"mgf", "mgf_exploration"}
                     else None
                 ),
                 "qdic_mgf_mode": (
                     self._qdic.provenance.get("mgf_mode")
-                    if self._qdic_variant == "mgf" and self._qdic is not None
+                    if self._qdic_variant in {"mgf", "mgf_exploration"} and self._qdic is not None
                     else None
                 ),
                 "qdic_expected_query_observations": int(

@@ -2,6 +2,10 @@ import numpy as np
 import pytest
 
 from tempotrack_v10.qdic_features import (
+    QDIC_MGF_EXPLORATION_BETAS,
+    QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES,
+    QDIC_MGF_EXPLORATION_RAW_DIM,
+    build_qdic_mgf_exploration_candidate_features,
     empirical_log_mgf,
     projected_log_mgf,
 )
@@ -53,6 +57,39 @@ def test_finite_cosine_range_is_supported():
     values = np.linspace(-1.0, 1.0, 17, dtype=np.float32)
     result = empirical_log_mgf(values, beta=1.0)
     assert np.isfinite(result)
+
+
+def test_negative_beta_is_finite_and_differs_from_positive_tail_emphasis():
+    samples = np.asarray([-0.9, -0.2, 0.1, 0.8], dtype=np.float64)
+    negative = empirical_log_mgf(samples, beta=-1.0)
+    positive = empirical_log_mgf(samples, beta=1.0)
+    assert np.isfinite(negative)
+    assert np.isfinite(positive)
+    assert negative < positive
+
+
+def test_exploration_candidate_contains_registered_fast_then_slow_bank():
+    cosine = np.asarray([[0.1, 0.2, 0.7, -0.4]], dtype=np.float32)
+    evidence = np.ones((4, 7), dtype=np.float32)
+    row = build_qdic_mgf_exploration_candidate_features(
+        cosine,
+        evidence,
+        gap=3,
+        rank=1,
+        query_fast_cosine=0.5,
+        query_slow_cosine=0.4,
+        fast_slow_cosine=0.9,
+    )
+    assert row.shape == (44,)
+    assert len(QDIC_MGF_EXPLORATION_BETAS) == 8
+    assert len(QDIC_MGF_EXPLORATION_EXTRA_FEATURE_NAMES) == 16
+    assert QDIC_MGF_EXPLORATION_RAW_DIM == 49
+    fast_bank = row[-16:-8]
+    slow_bank = row[-8:]
+    for index, beta in enumerate(QDIC_MGF_EXPLORATION_BETAS):
+        fast, slow = projected_log_mgf(cosine, beta=beta)
+        assert fast_bank[index] == pytest.approx(fast, abs=1e-6)
+        assert slow_bank[index] == pytest.approx(slow, abs=1e-6)
 
 
 @pytest.mark.parametrize("sample", [[], [np.nan], [np.inf], [-np.inf]])

@@ -44,14 +44,22 @@ def main() -> None:
         if not manifest_path.is_file():
             raise RuntimeError(f"missing V12 replay shard manifest: {manifest_path}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest.get("status") != "PASS" or manifest.get("artifact") != "v12_qdic_mgf_causal_replay":
+        if manifest.get("status") != "PASS" or manifest.get("artifact") not in {
+            "v12_qdic_mgf_causal_replay",
+            "v12_qdic_mgf_test_tuned_exploration_replay",
+        }:
             raise RuntimeError(f"invalid V12 replay manifest: {manifest_path}")
         if int(manifest.get("detector_forward_calls", -1)) != 0 or manifest.get("gt_loaded_during_replay") is not False:
             raise RuntimeError(f"V12 replay causal guard failed: {manifest_path}")
         if reference is None:
             reference = manifest
-        elif manifest.get("thresholds") != reference.get("thresholds"):
-            raise RuntimeError("V12 replay threshold mismatch across shards")
+        else:
+            if manifest.get("thresholds") != reference.get("thresholds"):
+                raise RuntimeError("V12 replay threshold mismatch across shards")
+            if manifest.get("artifact") != reference.get("artifact"):
+                raise RuntimeError("V12 replay artifact mismatch across shards")
+            if manifest.get("mgf_provenance", {}).get("checkpoint_sha256") != reference.get("mgf_provenance", {}).get("checkpoint_sha256"):
+                raise RuntimeError("V12 replay checkpoint mismatch across shards")
         prediction = Path(str(manifest["prediction"])).resolve()
         if not prediction.is_file() or sha256_file(prediction) != manifest.get("prediction_sha256"):
             raise RuntimeError(f"V12 prediction hash mismatch: {prediction}")
@@ -89,7 +97,11 @@ def main() -> None:
     prediction.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     manifest = {
         "status": "PASS",
-        "artifact": "v12_qdic_mgf_causal_replay_merged",
+        "artifact": (
+            "v12_qdic_mgf_test_tuned_exploration_replay_merged"
+            if reference and reference.get("artifact") == "v12_qdic_mgf_test_tuned_exploration_replay"
+            else "v12_qdic_mgf_causal_replay_merged"
+        ),
         "trial_id": str(args.trial_id),
         "full_cache": str(args.full_cache.resolve()),
         "full_cache_manifest_sha256": sha256_file(full_manifest_path),

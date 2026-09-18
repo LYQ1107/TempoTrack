@@ -27,6 +27,7 @@ from tools.v11_covtrack_replay_cache import (
     _offset_scope,
     _prediction_sort_key,
 )
+from tempotrack_v10.qdic_mgf_exploration_loader import EXPLORATION_STATUS
 from tempotrack_v10.qdic_mgf_loader import QDIC_MGF_STATUS
 from tempotrack_v10.replay_cache import FrontendReplayCacheReader, sha256_file
 
@@ -48,14 +49,26 @@ def _read_provenance(model: Any) -> dict[str, Any]:
     overlay = getattr(adapter, "overlay", None)
     qdic = getattr(overlay, "_qdic", None)
     provenance = getattr(qdic, "provenance", None)
-    if not isinstance(provenance, dict) or provenance.get("status") != QDIC_MGF_STATUS:
-        raise RuntimeError("V12 replay did not load the exact MGF checkpoint branch")
-    if int(provenance.get("feature_dim", -1)) != 35:
-        raise RuntimeError("V12 replay MGF feature dimension is not 35")
-    if float(provenance.get("mgf_beta", float("nan"))) != 1.0:
-        raise RuntimeError("V12 replay MGF beta is not frozen to 1.0")
+    if not isinstance(provenance, dict):
+        raise RuntimeError("V12 replay did not expose checkpoint provenance")
+    status = provenance.get("status")
+    if status == QDIC_MGF_STATUS:
+        if int(provenance.get("feature_dim", -1)) != 35:
+            raise RuntimeError("formal V12 replay MGF feature dimension is not 35")
+        if float(provenance.get("mgf_beta", float("nan"))) != 1.0:
+            raise RuntimeError("formal V12 replay MGF beta is not frozen to 1.0")
+    elif status == EXPLORATION_STATUS:
+        feature_dim = int(provenance.get("feature_dim", -1))
+        if feature_dim not in {35, 49}:
+            raise RuntimeError("exploration replay feature dimension must be 35 or 49")
+        if provenance.get("paper_status") != "TEST_TUNED_EXPLORATION":
+            raise RuntimeError("exploration replay is missing TEST_TUNED_EXPLORATION status")
+        if provenance.get("paper_valid") is not False or provenance.get("diagnostic_only") is not True:
+            raise RuntimeError("exploration replay must remain diagnostic-only")
+    else:
+        raise RuntimeError("V12 replay did not load a registered MGF checkpoint branch")
     return {
-        "status": provenance.get("status"),
+        "status": status,
         "checkpoint": provenance.get("checkpoint"),
         "checkpoint_sha256": provenance.get("checkpoint_sha256"),
         "feature_dim": provenance.get("feature_dim"),
@@ -64,6 +77,11 @@ def _read_provenance(model: Any) -> dict[str, Any]:
         "mgf_mode": provenance.get("mgf_mode"),
         "training_protocol": provenance.get("training_protocol"),
         "paper_status": provenance.get("paper_status"),
+        "paper_valid": provenance.get("paper_valid"),
+        "diagnostic_only": provenance.get("diagnostic_only"),
+        "card_id": provenance.get("card_id"),
+        "card_type": provenance.get("card_type"),
+        "mgf_betas": provenance.get("mgf_betas"),
     }
 
 
@@ -150,9 +168,14 @@ def main() -> None:
     rows.sort(key=lambda row: _prediction_sort_key(row, image_order))
     prediction = output_root / "tao_track.json"
     prediction.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    is_exploration = model_provenance["status"] == EXPLORATION_STATUS
     manifest = {
         "status": "PASS",
-        "artifact": "v12_qdic_mgf_causal_replay",
+        "artifact": (
+            "v12_qdic_mgf_test_tuned_exploration_replay"
+            if is_exploration
+            else "v12_qdic_mgf_causal_replay"
+        ),
         "trial_id": str(args.trial_id),
         "cache": str(cache),
         "cache_manifest_sha256": sha256_file(cache / "manifest.json"),
