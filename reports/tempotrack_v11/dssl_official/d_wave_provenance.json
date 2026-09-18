@@ -2,11 +2,17 @@
   "artifact": "tempotrack_v11_dssl_official_d_wave_provenance",
   "status": "DSSL_NEGATIVE_GATE",
   "protocol_scope": "OFFICIAL_TRAIN_BASE_ONLY_OFFICIAL_VAL_BASE_SELECTION",
-  "calibration_status": "NOT_COMPLETED_BEFORE_OP00_D_WAVE",
+  "calibration_status": "COMPLETED_B0_REDUCED_MARGIN_BEFORE_CALIBRATED_D_WAVE",
+  "calibrated_operating_point": {
+    "trial_id": "s00_m03",
+    "score_threshold": 0.0,
+    "margin_threshold": 0.5881726026535032,
+    "selection_metric": "Official Val Base AssocA, then Base TETA, then Base AssocPr"
+  },
   "current_test_status": "NOT_RUN_GATE_FAILED",
   "expansion_status": "STOPPED_FAIL_CLOSED",
-  "replay_repo_head": "c4f1babfaca88cc20f6e8d269fbcb6f25685c00d",
-  "selection_artifact_repo_head": "7ae2145b95814777eb6a2879776689d41f946106",
+  "b0_calibration_repository_head": "696faf8503d610ea4a5503e074a435640f80a756",
+  "calibrated_d_wave_repository_head": "427913c6a84e19c97456b3ad7253f97c76298b21",
   "external_artifacts": {
     "train_annotation": {
       "path": "/data1/LWR/vranlee/SERVER_ONLY/avis/TAO/TAO-download/TAO-Amodal/annotations/train.json",
@@ -24,23 +30,34 @@
       "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/official_val_cache_audit.json",
       "sha256": "fe54da2e0fefe9c648f2cfe04abe624ca53c141a33a737ee5ddd9b5a6eb566d4"
     },
-    "d_wave_selection": {
-      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/05_selection/d_wave_selection.json",
-      "sha256": "b8e7455beda7f4ddfaa4cf6b01fe8d70215899a2c56d32d85fd8b59e0a75c580"
+    "b0_calibration_report": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2/b0_calibration_report/b0_calibration_metrics.json",
+      "sha256": "44e5c5d132a5cae1128ea4f4e61959fbcda35bb857ceb752fa615fabd8104e9a"
     },
-    "negative_gate_report": {
-      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/05_selection/DSSL_NEGATIVE_RESULT_REPORT.md",
-      "sha256": "a0aee47a2fa8a8ef0f3b305cb94c3aeab62db4ae89d3a83ff5ed50dfe400f127"
+    "d_wave_runtime_manifest": {
+      "path": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/07_calibrated_cards/post_b0_d_wave_runtime_manifest.json",
+      "sha256": "686ccf90da523db38ddd56cf572202b5b639f59d830d60d9198d368c298ba276"
+    },
+    "d_wave_calibrated_metrics": {
+      "path": "reports/tempotrack_v11/dssl_official/d_wave_calibrated_metrics.csv"
+    },
+    "dssl_gate": {
+      "path": "reports/tempotrack_v11/dssl_official/dssl_gate.json"
     }
   },
   "gate": {
-    "selected_card": "D4_LS100",
-    "val_base_assocA": 41.5711969348659,
-    "b0_val_base_assocA": 41.762096,
+    "selected_card": "D1_LS010",
+    "val_base_assocA": 42.475307662835235,
+    "b0_val_base_assocA": 42.50632222222223,
     "val_base_assocA_gt_b0": false,
     "net_correction_gt_b0": true,
     "repeated_internal_final_mrr_improvement": true,
     "overall_teta_not_obvious_collapse": true
   },
-  "source_of_compact_metrics": "d_wave_metrics.csv"
+  "legacy_op00_artifacts_retained": {
+    "metrics": "d_wave_metrics.csv",
+    "report": "d_wave_negative_result.md",
+    "note": "Earlier OP00-only D-wave; not used for the calibrated gate"
+  },
+  "source_of_calibrated_metrics": "d_wave_calibrated_metrics.csv"
 }
