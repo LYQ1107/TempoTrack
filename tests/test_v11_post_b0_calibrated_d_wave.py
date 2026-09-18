@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 
 
@@ -43,3 +44,16 @@ def test_merge_and_evaluation_commands_are_single_frozen_trial(tmp_path):
     assert "--wait-for-complete" not in merge
     assert evaluate[evaluate.index("--trial-id") + 1] == "s00_m03"
     assert "--wait-for-aggregate" not in evaluate
+
+
+def test_child_environment_injects_repo_for_detached_evaluation(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/audited/existing/path")
+    args = type("Args", (), {"repo": tmp_path})()
+
+    environment = MODULE.child_environment(args, disable_cuda=True)
+
+    assert environment["PYTHONPATH"].split(os.pathsep)[:2] == [
+        str(tmp_path.resolve()),
+        "/audited/existing/path",
+    ]
+    assert environment["CUDA_VISIBLE_DEVICES"] == ""

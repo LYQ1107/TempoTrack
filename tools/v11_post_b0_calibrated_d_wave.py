@@ -93,6 +93,28 @@ def run_logged(command: list[str], *, cwd: Path, log: Path, env: dict[str, str] 
         raise RuntimeError(f"command failed with {result.returncode}; see {log}")
 
 
+def child_environment(args: argparse.Namespace, *, disable_cuda: bool = False) -> dict[str, str]:
+    """Build a detached-child environment with the repository importable.
+
+    The supervisor is commonly launched by ``nohup``/``setsid`` without the
+    interactive shell's ``PYTHONPATH``.  The replay workers can still start
+    because their entry points are absolute paths, but the post-replay
+    evaluator imports ``tempotrack_research`` as a package.  Injecting the
+    audited repository root here keeps planner, merge, and evaluation children
+    consistent without changing any scientific runtime argument.
+    """
+
+    environment = dict(os.environ)
+    repo_path = str(args.repo.resolve())
+    existing = environment.get("PYTHONPATH", "")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        value for value in (repo_path, existing) if value
+    )
+    if disable_cuda:
+        environment["CUDA_VISIBLE_DEVICES"] = ""
+    return environment
+
+
 def planner_command(args: argparse.Namespace, cards: Iterable[str], batch_root: Path, plan_path: Path) -> list[str]:
     command = [
         str(args.python.resolve()),
@@ -183,6 +205,7 @@ def run_batch(args: argparse.Namespace, cards: list[str], trial_id: str, runtime
         planner_command(args, cards, batch_root, plan_path),
         cwd=args.repo.resolve(),
         log=launch_log,
+        env=child_environment(args),
     )
     runtime.setdefault("batches", []).append(
         {"batch": batch_name, "cards": cards, "trial_id": trial_id, "plan": str(plan_path)}
@@ -196,13 +219,13 @@ def run_batch(args: argparse.Namespace, cards: list[str], trial_id: str, runtime
             merge_command(args, card_root, aggregate_root, trial_id),
             cwd=args.repo.resolve(),
             log=card_root / "merge.log",
-            env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+            env=child_environment(args, disable_cuda=True),
         )
         run_logged(
             evaluate_command(args, aggregate_root, trial_id),
             cwd=args.repo.resolve(),
             log=card_root / "evaluation.log",
-            env={**os.environ, "CUDA_VISIBLE_DEVICES": ""},
+            env=child_environment(args, disable_cuda=True),
         )
         runtime.setdefault("completed_cards", []).append(
             {
