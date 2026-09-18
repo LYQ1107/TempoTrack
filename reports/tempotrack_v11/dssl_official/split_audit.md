@@ -3,7 +3,7 @@
 - Status: **PASS_SPLIT_DISJOINT_AND_TRAIN_FRONTEND_BOUND**
 - Split disjointness: **True**
 - Optimizer source ready: **True**
-- Repository commit: `c4f1babfaca88cc20f6e8d269fbcb6f25685c00d`
+- Repository commit: `84e07f606fb8c2fa04278e87bbee973d7aa38560`
 
 ## Exact annotation contract
 
