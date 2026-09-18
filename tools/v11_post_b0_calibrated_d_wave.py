@@ -195,47 +195,97 @@ def evaluate_command(args: argparse.Namespace, aggregate_root: Path, trial_id: s
     ]
 
 
+def _status_pass(path: Path) -> bool:
+    try:
+        return read_json(path).get("status") == "PASS"
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _card_replay_complete(batch_root: Path, card: str, trial_id: str) -> bool:
+    return all(
+        formal_pass(
+            batch_root / card / f"shard_{shard:02d}" / trial_id / "manifest.json",
+            trial_id,
+        )
+        for shard in range(SHARD_COUNT)
+    )
+
+
+def _completed_card_ids(runtime: dict[str, Any]) -> set[str]:
+    return {
+        str(record.get("card_id"))
+        for record in runtime.get("completed_cards", [])
+        if isinstance(record, dict) and record.get("card_id")
+    }
+
+
 def run_batch(args: argparse.Namespace, cards: list[str], trial_id: str, runtime: dict[str, Any]) -> None:
     batch_name = "_".join(cards)
     batch_root = args.output_root.resolve() / batch_name
     batch_root.mkdir(parents=True, exist_ok=True)
     plan_path = batch_root / "launch_plan.json"
     launch_log = batch_root / "supervisor.log"
-    run_logged(
-        planner_command(args, cards, batch_root, plan_path),
-        cwd=args.repo.resolve(),
-        log=launch_log,
-        env=child_environment(args),
-    )
-    runtime.setdefault("batches", []).append(
-        {"batch": batch_name, "cards": cards, "trial_id": trial_id, "plan": str(plan_path)}
-    )
-    atomic_write_json(args.runtime_manifest.resolve(), runtime)
+    completed = _completed_card_ids(runtime)
+    cards_to_launch = [
+        card
+        for card in cards
+        if card not in completed and not _card_replay_complete(batch_root, card, trial_id)
+    ]
+    if cards_to_launch:
+        run_logged(
+            planner_command(args, cards_to_launch, batch_root, plan_path),
+            cwd=args.repo.resolve(),
+            log=launch_log,
+            env=child_environment(args),
+        )
+        batches = runtime.setdefault("batches", [])
+        if not any(
+            isinstance(record, dict) and record.get("batch") == batch_name
+            for record in batches
+        ):
+            batches.append(
+                {
+                    "batch": batch_name,
+                    "cards": cards,
+                    "launched_cards": cards_to_launch,
+                    "trial_id": trial_id,
+                    "plan": str(plan_path),
+                }
+            )
+        atomic_write_json(args.runtime_manifest.resolve(), runtime)
     for card in cards:
+        if card in completed:
+            continue
         wait_for_card(batch_root, card, trial_id, args.poll_seconds)
         card_root = args.output_root.resolve() / batch_name / card
         aggregate_root = card_root / "aggregated"
-        run_logged(
-            merge_command(args, card_root, aggregate_root, trial_id),
-            cwd=args.repo.resolve(),
-            log=card_root / "merge.log",
-            env=child_environment(args, disable_cuda=True),
-        )
-        run_logged(
-            evaluate_command(args, aggregate_root, trial_id),
-            cwd=args.repo.resolve(),
-            log=card_root / "evaluation.log",
-            env=child_environment(args, disable_cuda=True),
-        )
+        if not _status_pass(aggregate_root / "search_manifest.json"):
+            run_logged(
+                merge_command(args, card_root, aggregate_root, trial_id),
+                cwd=args.repo.resolve(),
+                log=card_root / "merge.log",
+                env=child_environment(args, disable_cuda=True),
+            )
+        evaluation_manifest = card_root / "b0_calibration_evaluation_runtime_manifest.json"
+        report = card_root / "b0_calibration_report" / "b0_calibration_metrics.json"
+        if not (_status_pass(evaluation_manifest) and report.is_file()):
+            run_logged(
+                evaluate_command(args, aggregate_root, trial_id),
+                cwd=args.repo.resolve(),
+                log=card_root / "evaluation.log",
+                env=child_environment(args, disable_cuda=True),
+            )
         runtime.setdefault("completed_cards", []).append(
             {
                 "card_id": card,
                 "batch": batch_name,
                 "trial_id": trial_id,
-                "report": str(card_root / "b0_calibration_report" / "b0_calibration_metrics.json"),
+                "report": str(report),
             }
         )
         atomic_write_json(args.runtime_manifest.resolve(), runtime)
+        completed.add(card)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -260,6 +310,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--evaluation-cores", type=int, default=8)
     parser.add_argument("--runtime-manifest", type=Path, required=True)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume an existing D-wave runtime without replaying PASS shards",
+    )
     return parser
 
 
@@ -286,26 +341,45 @@ def main() -> int:
         if not path.exists():
             raise FileNotFoundError(path)
     args.output_root.resolve().mkdir(parents=True, exist_ok=True)
-    runtime: dict[str, Any] = {
-        "status": "WAITING_FOR_B0",
-        "artifact": "v11_post_b0_calibrated_d_wave_supervisor",
-        "b0_report": str(args.b0_report.resolve()),
-        "output_root": str(args.output_root.resolve()),
-        "cards": list(DEFAULT_CARDS),
-        "test_started": False,
-        "created_at_unix": time.time(),
-    }
-    atomic_write_json(args.runtime_manifest.resolve(), runtime)
+    runtime_path = args.runtime_manifest.resolve()
+    if args.resume:
+        if not runtime_path.is_file():
+            raise FileNotFoundError(f"cannot resume missing runtime manifest: {runtime_path}")
+        runtime = read_json(runtime_path)
+        if runtime.get("test_started") is True:
+            raise ValueError("refusing to resume after Current Test has started")
+        if runtime.get("status") in {
+            "D_WAVE_COMPLETE",
+            "DSSL_GATE_PASS",
+            "DSSL_NEGATIVE_GATE",
+        }:
+            return 0
+    else:
+        runtime = {
+            "status": "WAITING_FOR_B0",
+            "artifact": "v11_post_b0_calibrated_d_wave_supervisor",
+            "b0_report": str(args.b0_report.resolve()),
+            "output_root": str(args.output_root.resolve()),
+            "cards": list(DEFAULT_CARDS),
+            "test_started": False,
+            "created_at_unix": time.time(),
+        }
+        atomic_write_json(runtime_path, runtime)
     b0 = wait_for_b0(args.b0_report.resolve(), args.poll_seconds)
     trial_id = str(b0["selection"]["selected_trial_id"])
+    previous_trial_id = runtime.get("selected_trial_id")
+    if previous_trial_id is not None and str(previous_trial_id) != trial_id:
+        raise ValueError(
+            f"resume trial mismatch: runtime={previous_trial_id!r}, B0={trial_id!r}"
+        )
     runtime.update({"status": "B0_PASS", "selected_trial_id": trial_id, "b0_selection": b0["selection"]})
-    atomic_write_json(args.runtime_manifest.resolve(), runtime)
+    atomic_write_json(runtime_path, runtime)
     for cards in (list(DEFAULT_CARDS[:2]), list(DEFAULT_CARDS[2:])):
         runtime["status"] = "RUNNING_D_WAVE"
-        atomic_write_json(args.runtime_manifest.resolve(), runtime)
+        atomic_write_json(runtime_path, runtime)
         run_batch(args, cards, trial_id, runtime)
     runtime.update({"status": "D_WAVE_COMPLETE", "ended_at_unix": time.time()})
-    atomic_write_json(args.runtime_manifest.resolve(), runtime)
+    atomic_write_json(runtime_path, runtime)
     return 0
 
 

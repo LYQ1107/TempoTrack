@@ -57,3 +57,18 @@ def test_child_environment_injects_repo_for_detached_evaluation(tmp_path, monkey
         "/audited/existing/path",
     ]
     assert environment["CUDA_VISIBLE_DEVICES"] == ""
+
+
+def test_card_replay_complete_requires_all_causal_manifests(tmp_path):
+    card_root = tmp_path / "D1_LS010"
+    for shard in range(10):
+        path = card_root / f"shard_{shard:02d}" / "s00_m03" / "manifest.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            '{"status":"PASS","trial_id":"s00_m03",'
+            '"detector_forward_calls":0,"gt_loaded_during_replay":false}\n',
+            encoding="utf-8",
+        )
+    assert MODULE._card_replay_complete(tmp_path, "D1_LS010", "s00_m03")
+    (card_root / "shard_09" / "s00_m03" / "manifest.json").unlink()
+    assert not MODULE._card_replay_complete(tmp_path, "D1_LS010", "s00_m03")
