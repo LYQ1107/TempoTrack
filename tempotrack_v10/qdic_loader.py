@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 from typing import Any, Mapping
 
 import numpy as np
@@ -65,6 +66,35 @@ def _receipt_hash_for(hashes: Mapping[str, Any], basename: str) -> str | None:
         (str(value) for key, value in hashes.items() if Path(str(key)).name == basename),
         None,
     )
+
+
+def _source_hash_matches_receipt(
+    *,
+    basename: str,
+    expected: str | None,
+    current_hashes: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+) -> tuple[bool, str]:
+    """Accept current code or the exact source recorded by receipt repo_head."""
+    current = _receipt_hash_for(current_hashes, basename)
+    if expected is not None and current == expected:
+        return True, "CURRENT"
+    repo_head = str(receipt.get("repo_head", ""))
+    if not repo_head or expected is None:
+        return False, "MISSING"
+    repo_root = Path(__file__).resolve().parents[1]
+    relative = Path("tempotrack_v10") / basename
+    try:
+        content = subprocess.check_output(
+            ["git", "show", f"{repo_head}:{relative}"],
+            cwd=repo_root,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False, "HISTORICAL_SOURCE_UNAVAILABLE"
+    historical = hashlib.sha256(content).hexdigest()
+    if historical == str(expected):
+        return True, f"RECEIPT_REPO_HEAD:{repo_head}"
+    return False, "HISTORICAL_HASH_MISMATCH"
 
 
 def validate_qdic_feature_config(value: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -134,6 +164,7 @@ class QDICV11Artifact:
     receipt: dict[str, Any]
     source_hashes: dict[str, str]
     receipt_source_hashes: dict[str, str]
+    source_hash_resolution: dict[str, str]
     feature_config: dict[str, Any]
     device: str
 
@@ -157,14 +188,15 @@ class QDICV11Artifact:
             "structured_branch_mode": self.model.structured_branch_mode,
             "source_hashes": dict(self.source_hashes),
             "receipt_source_hashes": dict(self.receipt_source_hashes),
-            "model_source_hash_match": _receipt_hash_for(
-                self.receipt_source_hashes, "query_distributional_calibrator.py"
+            "source_hash_resolution": dict(self.source_hash_resolution),
+            "model_source_hash_match": self.source_hash_resolution.get(
+                "query_distributional_calibrator.py"
             )
-            == _receipt_hash_for(self.source_hashes, "query_distributional_calibrator.py"),
-            "feature_source_hash_match": _receipt_hash_for(
-                self.receipt_source_hashes, "qdic_features.py"
+            is not None,
+            "feature_source_hash_match": self.source_hash_resolution.get(
+                "qdic_features.py"
             )
-            == _receipt_hash_for(self.source_hashes, "qdic_features.py"),
+            is not None,
             "trainer_source_hash_match": _receipt_hash_for(
                 self.receipt_source_hashes, "qdic_trainer.py"
             )
@@ -271,11 +303,18 @@ def load_qdic_checkpoint(
     if not isinstance(raw_receipt_hashes, Mapping):
         raise SnapshotContractError("BLOCKED_QDIC_SOURCE_HASHES_MISSING")
     receipt_hashes = {str(key): str(value) for key, value in raw_receipt_hashes.items()}
+    source_hash_resolution: dict[str, str] = {}
     for name in source_basenames:
         expected = _receipt_hash_for(receipt_hashes, name)
-        current = _receipt_hash_for(current_hashes, name)
-        if expected is None or current != expected:
+        matched, resolution = _source_hash_matches_receipt(
+            basename=name,
+            expected=expected,
+            current_hashes=current_hashes,
+            receipt=receipt,
+        )
+        if not matched:
             raise SnapshotContractError(f"BLOCKED_QDIC_{Path(name).stem.upper()}_SOURCE_HASH_MISMATCH")
+        source_hash_resolution[name] = resolution
 
     try:
         state = torch.load(checkpoint_path, map_location=device)
@@ -337,6 +376,7 @@ def load_qdic_checkpoint(
         receipt_source_hashes=receipt_hashes,
         feature_config=feature_config,
         device=str(device),
+        source_hash_resolution=source_hash_resolution,
     )
     provenance = artifact.provenance
     if not all(

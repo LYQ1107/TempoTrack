@@ -16,7 +16,9 @@ from .overlay import (
 )
 from .qdic_features import QDIC_FEATURE_NAMES, QDIC_RAW_DIM, QDIC_RECENT_K
 from .qdic_loader import QDIC_STATUS, QDICV11Artifact, load_qdic_checkpoint
+from .qdic_mgf_loader import QDIC_MGF_STATUS, QDICMGFArtifact, load_qdic_mgf_checkpoint
 from .query_distributional_calibrator import QueryDistributionalCalibrator
+from .query_mgf_calibrator import QueryMomentGeneratingCalibrator
 from .candidate_aware_qdic import DistributionalAuxiliaryQDIC
 from .deepset_qdic import DeepSetQDIC
 from .dgsa_qdic import DistributionGuidedSetAttentionQDIC
@@ -58,7 +60,10 @@ __all__ = [
     "QDIC_RECENT_K",
     "QDIC_STATUS",
     "QDICV11Artifact",
+    "QDIC_MGF_STATUS",
+    "QDICMGFArtifact",
     "QueryDistributionalCalibrator",
+    "QueryMomentGeneratingCalibrator",
     "DistributionEvidenceEncoder",
     "DistributionIdentityHead",
     "DistributionalAuxiliaryQDIC",
@@ -71,6 +76,7 @@ __all__ = [
     "hard_negative_margin_loss",
     "listwise_group_loss",
     "load_qdic_checkpoint",
+    "load_qdic_mgf_checkpoint",
     "COVTrackAssociationDecision",
     "COVTrackTempoAdapter",
     "MasaPreAssociationDecision",

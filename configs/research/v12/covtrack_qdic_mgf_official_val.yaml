@@ -1,0 +1,30 @@
+frontend: covtrack
+protocol:
+  name: OFFICIAL_VAL_V12_MGF_REPLAY
+  source_role: OFFICIAL_VAL
+  exact_split_name: validation_ours_v1
+  optimizer_source_allowed: false
+  unbiased_test: false
+  card_id: M1_MGF_CORE
+  train_checkpoint: /data2/usr_for_deadline/tempotrack_v12_mgf_beta1_20260918/03_train/M1_MGF_CORE/best.pt
+  train_checkpoint_sha256: 340c65fdeefb5d73527700a159d87291bcbf9d7ddb0bc0ee1903c8ec1a49cd55
+  repo_head: 696faf8503d610ea4a5503e074a435640f80a756
+tempo:
+  enabled: true
+  alpha_fast: 0.7
+  alpha_slow: 0.15
+  min_gap: 0
+  max_gap: 360
+  candidate_top_k: 8
+  qdic_context_top_k: 64
+  top_r: 3
+  memory_capacity: 64
+  qdic_weight: 1.0
+  qdic_recent_k: 8
+  qdic_checkpoint: /data2/usr_for_deadline/tempotrack_v12_mgf_beta1_20260918/03_train/M1_MGF_CORE/best.pt
+  qdic_device: cpu
+  score_threshold: 0.0
+  margin_threshold: 0.0
+search_fields:
+- score_threshold
+- margin_threshold

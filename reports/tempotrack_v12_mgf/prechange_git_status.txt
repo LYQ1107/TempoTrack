@@ -1,0 +1,5 @@
+worktree: /data1/LWR/vranlee/SERVER_ONLY/avis/masa_mgf
+branch: codex/v12-exact-log-mgf
+base_branch: codex/v11-dssl-official-train
+base_head: 696faf8503d610ea4a5503e074a435640f80a756
+prechange_status: clean

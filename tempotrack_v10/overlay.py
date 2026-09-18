@@ -25,12 +25,17 @@ from tempotrack_research.streaming.partial_support import replay_fixed_dual_prot
 
 from .contract import FrameCollisionError, PreAssociationSnapshot, SnapshotContractError
 from .qdic_features import (
+    QDIC_MGF_BETA,
+    QDIC_MGF_FEATURE_NAMES,
+    QDIC_MGF_FEATURE_SCHEMA_VERSION,
+    QDIC_MGF_RAW_DIM,
     QDIC_FEATURE_NAMES,
     QDIC_QUERY_OBSERVATIONS,
     QDIC_RAW_DIM,
     QDIC_RECENT_K,
 )
 from .qdic_loader import load_qdic_checkpoint
+from .qdic_mgf_loader import QDIC_MGF_STATUS, load_qdic_mgf_checkpoint
 from .candidate_aware_qdic_loader import (
     CANDIDATE_AWARE_STATUS,
     load_candidate_aware_checkpoint,
@@ -98,7 +103,8 @@ class TempoTrackConfig:
     reranker_device: str = "cpu"
     # QDIC-MO is an alternative learned association path, not a blend with
     # the older Q1 reranker.  A positive weight requires a verified V11
-    # checkpoint; tests may inject a provenance-checked scorer explicitly.
+    # checkpoint or the separate artifact-driven V12 MGF loader branch;
+    # tests may inject a provenance-checked scorer explicitly.
     qdic_weight: float = 0.0
     qdic_checkpoint: str | None = None
     qdic_device: str = "cpu"
@@ -219,6 +225,7 @@ class TempoTrackOverlay:
         else:
             self._reranker_feature_config = {}
         self._reranker = reranker
+        self._qdic_variant = "disabled"
         if self.config.qdic_weight > 0.0 and qdic is None:
             if not self.config.qdic_checkpoint:
                 raise SnapshotContractError("BLOCKED_QDIC_CHECKPOINT_MISSING")
@@ -230,7 +237,13 @@ class TempoTrackOverlay:
                 receipt_artifact = json.loads(receipt_path.read_text(encoding="utf-8")).get("artifact")
             except (OSError, json.JSONDecodeError) as exc:
                 raise SnapshotContractError("BLOCKED_QDIC_TRAINING_RECEIPT_INVALID") from exc
-            if receipt_artifact == "candidate_aware_qdic_training":
+            if receipt_artifact == "qdic_v12_mgf_official_training":
+                qdic = load_qdic_mgf_checkpoint(
+                    checkpoint_path,
+                    device=self.config.qdic_device,
+                )
+                self._qdic_variant = "mgf"
+            elif receipt_artifact == "candidate_aware_qdic_training":
                 qdic = load_candidate_aware_checkpoint(
                     checkpoint_path,
                     device=self.config.qdic_device,
@@ -255,20 +268,42 @@ class TempoTrackOverlay:
             if not callable(getattr(qdic, "score_event", None)):
                 raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: score_event")
             provenance = getattr(qdic, "provenance", None)
-            if not isinstance(provenance, Mapping) or provenance.get("status") not in {
-                "QDIC_V11_MODEL_CODE_AND_WEIGHTS",
-                CANDIDATE_AWARE_STATUS,
-            }:
+            if not isinstance(provenance, Mapping):
                 raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: exact provenance")
-            if int(provenance.get("feature_dim", -1)) != QDIC_RAW_DIM or tuple(
+            status = provenance.get("status")
+            is_mgf = status == QDIC_MGF_STATUS
+            if is_mgf:
+                self._qdic_variant = "mgf"
+                expected_dim = QDIC_MGF_RAW_DIM
+                expected_names = QDIC_MGF_FEATURE_NAMES
+                if int(provenance.get("schema_version", -1)) != QDIC_MGF_FEATURE_SCHEMA_VERSION:
+                    raise SnapshotContractError("BLOCKED_QDIC_MGF_SCHEMA_VERSION_MISMATCH")
+                if not np.isclose(
+                    float(provenance.get("mgf_beta", float("nan"))),
+                    QDIC_MGF_BETA,
+                    rtol=0.0,
+                    atol=1e-8,
+                ):
+                    raise SnapshotContractError("BLOCKED_QDIC_MGF_BETA_NOT_FROZEN_TO_ONE")
+                if provenance.get("training_protocol") != "QDIC_V12_MGF_BASE_ONLY_TRAINING":
+                    raise SnapshotContractError("BLOCKED_QDIC_MGF_TRAINING_PROTOCOL_INVALID")
+            elif status in {"QDIC_V11_MODEL_CODE_AND_WEIGHTS", CANDIDATE_AWARE_STATUS}:
+                self._qdic_variant = "v11"
+                expected_dim = QDIC_RAW_DIM
+                expected_names = QDIC_FEATURE_NAMES
+            else:
+                raise SnapshotContractError("BLOCKED_QDIC_SOURCE_MISSING: exact provenance")
+            if int(provenance.get("feature_dim", -1)) != expected_dim or tuple(
                 provenance.get("feature_names", ())
-            ) != tuple(QDIC_FEATURE_NAMES):
+            ) != tuple(expected_names):
                 raise SnapshotContractError("BLOCKED_QDIC_FEATURE_SCHEMA_MISMATCH")
+            valid_protocols = (
+                {"QDIC_V12_MGF_BASE_ONLY_TRAINING"}
+                if is_mgf
+                else {"QDIC_V11_BASE_ONLY_TRAINING", "QDIC_V11_BASE_ONLY_CANDIDATE_AWARE_TRAINING"}
+            )
             if (
-                provenance.get("training_protocol") not in {
-                    "QDIC_V11_BASE_ONLY_TRAINING",
-                    "QDIC_V11_BASE_ONLY_CANDIDATE_AWARE_TRAINING",
-                }
+                provenance.get("training_protocol") not in valid_protocols
                 or not bool(provenance.get("base_only_supervision"))
                 or bool(provenance.get("novel_gt_used"))
                 or bool(provenance.get("test_weights_used"))
@@ -1047,6 +1082,14 @@ class TempoTrackOverlay:
                     "qdic_slow_branch": [
                         detail_value("slow_branch", memory_id) for memory_id in context_ids
                     ],
+                    "qdic_projected_fast_log_mgf": [
+                        detail_value("projected_fast_log_mgf", memory_id)
+                        for memory_id in context_ids
+                    ],
+                    "qdic_projected_slow_log_mgf": [
+                        detail_value("projected_slow_log_mgf", memory_id)
+                        for memory_id in context_ids
+                    ],
                     "qdic_variance_penalty": [
                         detail_value("variance_penalty", memory_id) for memory_id in context_ids
                     ],
@@ -1171,6 +1214,22 @@ class TempoTrackOverlay:
                     if self._qdic is not None and self.config.qdic_weight > 0.0
                     else "DISABLED_NOT_FULL"
                 ),
+                "qdic_variant": self._qdic_variant,
+                "qdic_feature_schema_version": (
+                    QDIC_MGF_FEATURE_SCHEMA_VERSION
+                    if self._qdic_variant == "mgf"
+                    else (11 if self._qdic_variant == "v11" else None)
+                ),
+                "qdic_mgf_beta": (
+                    float(self._qdic_feature_config.get("mgf_beta", QDIC_MGF_BETA))
+                    if self._qdic_variant == "mgf"
+                    else None
+                ),
+                "qdic_mgf_mode": (
+                    self._qdic.provenance.get("mgf_mode")
+                    if self._qdic_variant == "mgf" and self._qdic is not None
+                    else None
+                ),
                 "qdic_expected_query_observations": int(
                     self._qdic_feature_config.get("query_observations", 1)
                 ),
@@ -1203,7 +1262,11 @@ class TempoTrackOverlay:
                 "reranker_status": self._reranker.provenance if self._reranker is not None else "DISABLED_NOT_FULL",
                 "reranker_missing_evidence": int(reranker_missing_total),
                 "full_capability_status": (
-                    "FULL_QDIC_MO_RUNTIME_ACTIVE"
+                    (
+                        "FULL_QDIC_MGF_RUNTIME_ACTIVE"
+                        if self._qdic_variant == "mgf"
+                        else "FULL_QDIC_MO_RUNTIME_ACTIVE"
+                    )
                     if self._qdic is not None and self.config.qdic_weight > 0
                     else (
                     "FULL_Q1_RERANKER_RUNTIME_ACTIVE"

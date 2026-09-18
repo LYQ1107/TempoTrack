@@ -13,6 +13,9 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -45,6 +48,21 @@ QDIC_RECENT_K = 8
 QDIC_CONTEXT_CANDIDATE_TOP_K = 64
 QDIC_DECISION_CANDIDATE_TOP_K = 8
 QDIC_QUERY_OBSERVATIONS = 1
+
+# V12 adds exact empirical log-MGF evidence after the frozen V11 schema.  The
+# original constants above are intentionally left untouched so that old B0
+# checkpoints and caches retain their 33-D contract.
+QDIC_MGF_BETA = 1.0
+QDIC_MGF_EXTRA_FEATURE_NAMES = (
+    "projected_fast_log_mgf",
+    "projected_slow_log_mgf",
+)
+QDIC_MGF_FEATURE_NAMES = tuple(QDIC_FEATURE_NAMES) + QDIC_MGF_EXTRA_FEATURE_NAMES
+QDIC_MGF_RAW_DIM = len(QDIC_MGF_FEATURE_NAMES)
+QDIC_MGF_INDEPENDENT_DIM = QDIC_INDEPENDENT_DIM + len(QDIC_MGF_EXTRA_FEATURE_NAMES)
+QDIC_MGF_FEATURE_SCHEMA_VERSION = 12
+assert QDIC_MGF_RAW_DIM == 35
+assert QDIC_MGF_INDEPENDENT_DIM == 30
 
 
 def _finite_array(value: Any, *, name: str, ndim: int | None = None) -> np.ndarray:
@@ -112,6 +130,70 @@ def projected_mo(cosine: np.ndarray, *, recent_k: int = 8) -> dict[str, float]:
     }
 
 
+def empirical_log_mgf(
+    sample: np.ndarray,
+    *,
+    beta: float = QDIC_MGF_BETA,
+) -> float:
+    """Return the stable empirical log-MGF of a finite one-dimensional sample.
+
+    ``beta`` is kept explicit for the mathematical unit tests and diagnostics,
+    while the V12 experiment freezes it to one.  The beta-to-zero branch is
+    the continuous mean limit.  For nonzero beta, the calculation is a
+    log-mean-exp and therefore remains stable if score scales change later.
+    """
+    values = np.asarray(sample, dtype=np.float64).reshape(-1)
+    if len(values) < 1:
+        raise ValueError("log-MGF requires at least one sample")
+    if not np.isfinite(values).all():
+        raise ValueError("log-MGF samples must be finite")
+    beta_value = float(beta)
+    if not np.isfinite(beta_value):
+        raise ValueError("beta must be finite")
+    if abs(beta_value) < 1e-8:
+        result = float(values.mean())
+    else:
+        scaled = beta_value * values
+        if not np.isfinite(scaled).all():
+            raise FloatingPointError("scaled log-MGF samples are non-finite")
+        maximum = float(np.max(scaled))
+        log_mean_exp = maximum + float(
+            np.log(np.mean(np.exp(scaled - maximum), dtype=np.float64))
+        )
+        result = log_mean_exp / beta_value
+    if not np.isfinite(result):
+        raise FloatingPointError("empirical log-MGF is non-finite")
+    return float(result)
+
+
+def projected_log_mgf(
+    cosine: np.ndarray,
+    *,
+    recent_k: int = QDIC_RECENT_K,
+    beta: float = QDIC_MGF_BETA,
+) -> tuple[float, float]:
+    """Return exact recent/full empirical log-MGF evidence.
+
+    The input is ``q @ Z.T``.  As with V11 projected moments, QDIC uses the
+    first query observation only; recent evidence is the last ``min(8, L)``
+    causal samples and slow evidence is the complete causal history.
+    """
+    values = _finite_array(cosine, name="cosine")
+    if values.ndim == 1:
+        values = values[None, :]
+    if values.ndim != 2 or values.shape[0] < 1 or values.shape[1] < 1:
+        raise ValueError("cosine must be a nonempty [Q,L] array")
+    if int(recent_k) < 1:
+        raise ValueError("recent_k must be positive")
+    projected = values[0]
+    fast = projected[-min(int(recent_k), len(projected)) :]
+    slow = projected
+    return (
+        empirical_log_mgf(fast, beta=beta),
+        empirical_log_mgf(slow, beta=beta),
+    )
+
+
 def build_qdic_candidate_features(
     cosine: np.ndarray,
     evidence: np.ndarray,
@@ -166,6 +248,48 @@ def build_qdic_candidate_features(
     return row
 
 
+def build_qdic_mgf_candidate_features(
+    cosine: np.ndarray,
+    evidence: np.ndarray,
+    gap: int,
+    rank: int,
+    *,
+    query_fast_cosine: float,
+    query_slow_cosine: float,
+    fast_slow_cosine: float,
+    recent_k: int = QDIC_RECENT_K,
+    top_r: int = 3,
+    max_gap: int = 360,
+    mgf_beta: float = QDIC_MGF_BETA,
+) -> np.ndarray:
+    """Build the 30-D independent V12 row by appending exact log-MGF values."""
+    if not np.isclose(float(mgf_beta), QDIC_MGF_BETA, rtol=0.0, atol=1e-8):
+        raise ValueError("V12 MGF experiment freezes mgf_beta=1.0")
+    original = build_qdic_candidate_features(
+        cosine,
+        evidence,
+        gap,
+        rank,
+        query_fast_cosine=query_fast_cosine,
+        query_slow_cosine=query_slow_cosine,
+        fast_slow_cosine=fast_slow_cosine,
+        recent_k=recent_k,
+        top_r=top_r,
+        max_gap=max_gap,
+    )
+    fast_lmgf, slow_lmgf = projected_log_mgf(
+        cosine,
+        recent_k=recent_k,
+        beta=mgf_beta,
+    )
+    row = np.concatenate(
+        (original, np.asarray([fast_lmgf, slow_lmgf], dtype=np.float32))
+    ).astype(np.float32, copy=False)
+    if row.shape != (QDIC_MGF_INDEPENDENT_DIM,) or not np.isfinite(row).all():
+        raise FloatingPointError("QDIC MGF independent row must be finite [30]")
+    return row
+
+
 def build_qdic_event_features(rows: Sequence[Mapping[str, Any]]) -> np.ndarray:
     """Add Q1 event competition context to independent QDIC candidate rows.
 
@@ -189,6 +313,27 @@ def build_qdic_event_features(rows: Sequence[Mapping[str, Any]]) -> np.ndarray:
         output[index] = np.concatenate((context[index], direct_and_moments))
     if not np.isfinite(output).all():
         raise FloatingPointError("QDIC event features are non-finite")
+    return output
+
+
+def build_qdic_mgf_event_features(rows: Sequence[Mapping[str, Any]]) -> np.ndarray:
+    """Add the V11 event context and append the two exact MGF features."""
+    if not rows:
+        raise ValueError("QDIC MGF event must contain at least one candidate")
+    independent = np.stack(
+        [np.asarray(item["base_features"], dtype=np.float32) for item in rows], axis=0
+    )
+    if independent.ndim != 2 or independent.shape[1] != 19:
+        raise ValueError("QDIC MGF event base_features must be [N,19]")
+    context = add_event_context(independent)
+    output = np.empty((len(rows), QDIC_MGF_RAW_DIM), dtype=np.float32)
+    for index, item in enumerate(rows):
+        distributional = np.asarray(item["distributional_features"], dtype=np.float32)
+        if distributional.shape != (len(QDIC_DISTRIBUTIONAL_FEATURE_NAMES) + 2,):
+            raise ValueError("QDIC MGF distributional_features must be [11]")
+        output[index] = np.concatenate((context[index], distributional))
+    if not np.isfinite(output).all():
+        raise FloatingPointError("QDIC MGF event features are non-finite")
     return output
 
 
@@ -219,6 +364,44 @@ def _hash_for_basename(hashes: Mapping[str, Any], basename: str) -> str | None:
         ),
         None,
     )
+
+
+def _resolve_historical_producer_hash(
+    basename: str,
+    expected_hash: str,
+) -> dict[str, str] | None:
+    """Find a recorded producer file in this repository's Git history."""
+    repo_root = Path(__file__).resolve().parents[1]
+    relative = Path("tempotrack_research") / {
+        "v9_parameter_search.py": Path("orchestration/v9_parameter_search.py"),
+        "partial_support.py": Path("streaming/partial_support.py"),
+        "fixed_dual.py": Path("memory/fixed_dual.py"),
+    }.get(basename, Path(basename))
+    try:
+        commits = subprocess.check_output(
+            ["git", "log", "--all", "--format=%H", "--", str(relative)],
+            cwd=repo_root,
+            text=True,
+        ).splitlines()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    for commit in commits:
+        try:
+            content = subprocess.check_output(
+                ["git", "show", f"{commit}:{relative}"],
+                cwd=repo_root,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            continue
+        actual = hashlib.sha256(content).hexdigest()
+        if actual == str(expected_hash):
+            return {
+                "basename": basename,
+                "sha256": actual,
+                "commit": commit,
+                "path": str(relative),
+            }
+    return None
 
 
 def _array_sha256(value: np.ndarray) -> str:
@@ -252,14 +435,54 @@ def _load_cache(
         if not metadata or not arrays:
             raise ValueError("event_cache mapping must contain metadata, arrays and rows")
         return metadata, arrays, rows, None
-    from tempotrack_research.orchestration.v9_parameter_search import _load_event_cache
-
-    metadata, arrays, _ = _load_event_cache(event_cache)
     root = Path(event_cache)
     metadata_path = root if root.is_file() else root / "metadata.json"
+    if not metadata_path.is_file():
+        raise FileNotFoundError(metadata_path)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    if metadata.get("artifact") != "v9_1_psmr_event_cache" or int(
+        metadata.get("schema_version", -1)
+    ) != 10:
+        raise ValueError(f"legacy V9 event cache rejected for V9.1: {metadata_path}")
+    if metadata.get("storage") != "npy_memmap" or not metadata.get("b_specific_prefilter"):
+        raise ValueError(f"event cache is not a V9.1 mmap/B-specific cache: {metadata_path}")
+    array_paths = {
+        str(key): Path(str(value))
+        for key, value in dict(metadata.get("arrays", {})).items()
+    }
+    array_hashes = dict(metadata.get("array_hashes", {}))
+    required = {
+        "cosine",
+        "evidence",
+        "mem_len",
+        "gap",
+        "group_id",
+        "label",
+        "target_base",
+        "prefilter_rank_b1",
+        "prefilter_rank_b2",
+        "prefilter_rank_b4",
+    }
+    if not required.issubset(array_paths):
+        raise ValueError(
+            f"V9.1 event cache missing arrays: {sorted(required - set(array_paths))}"
+        )
+    arrays: dict[str, np.ndarray] = {}
+    for name in required:
+        arrays_path = array_paths[name]
+        if not arrays_path.is_absolute():
+            arrays_path = metadata_path.parent / arrays_path
+        if not arrays_path.is_file() or array_hashes.get(name) != _sha256(arrays_path):
+            raise ValueError(f"event cache array hash mismatch: {arrays_path}")
+        arrays[name] = np.load(arrays_path, mmap_mode="r", allow_pickle=False)
+    event_count = int(np.asarray(arrays["mem_len"]).shape[0])
+    if any(int(np.asarray(value).shape[0]) != event_count for value in arrays.values()):
+        raise ValueError("event cache mmap arrays have inconsistent event counts")
     rows_path = Path(str(metadata.get("rows_path", metadata_path.parent / "events.jsonl")))
     if not rows_path.is_absolute():
         rows_path = metadata_path.parent / rows_path
+    if not rows_path.is_file():
+        raise FileNotFoundError(f"event cache rows missing: {rows_path}")
     return metadata, arrays, None, rows_path.resolve()
 
 
@@ -267,6 +490,7 @@ def _load_sidecar(
     sidecar: str | Path | Mapping[str, Any],
     *,
     expected_count: int,
+    allow_historical_producer_source: bool = False,
 ) -> tuple[dict[str, Any], dict[str, np.ndarray]]:
     if isinstance(sidecar, Mapping):
         metadata = dict(sidecar.get("metadata", {}))
@@ -309,13 +533,31 @@ def _load_sidecar(
         producer_hashes = metadata.get("producer_source_hashes")
         if not isinstance(producer_hashes, Mapping):
             raise ValueError("QDIC sidecar producer source hashes missing")
+        resolution: list[dict[str, str]] = []
         for name, current in _current_sidecar_producer_hashes().items():
             basename = Path(name).name
             expected = _hash_for_basename(producer_hashes, basename)
-            if expected is None or expected != current:
+            if expected is None:
                 raise ValueError(
                     f"QDIC sidecar producer source hash mismatch: {basename}"
                 )
+            if expected == current:
+                resolution.append(
+                    {"basename": basename, "sha256": current, "status": "CURRENT"}
+                )
+                continue
+            if not allow_historical_producer_source:
+                raise ValueError(
+                    f"QDIC sidecar producer source hash mismatch: {basename}"
+                )
+            historical = _resolve_historical_producer_hash(basename, expected)
+            if historical is None:
+                raise ValueError(
+                    f"QDIC sidecar producer hash has no verified Git source: {basename}"
+                )
+            historical["status"] = "VERIFIED_GIT_HISTORY"
+            resolution.append(historical)
+        metadata["producer_source_resolution"] = resolution
     if metadata:
         artifact = metadata.get("artifact")
         if artifact is not None and artifact != "qdic_v11_projected_prototype_sidecar":
@@ -367,6 +609,7 @@ def build_qdic_features(
     memory_dedup_cos: float = QDIC_MEMORY_DEDUP_COS,
     context_candidate_top_k: int = QDIC_CONTEXT_CANDIDATE_TOP_K,
     decision_candidate_top_k: int = QDIC_DECISION_CANDIDATE_TOP_K,
+    allow_historical_producer_source: bool = False,
 ) -> dict[str, Any]:
     """Materialize a new 33-D feature cache from V9 event arrays + sidecar."""
     if int(recent_k) != QDIC_RECENT_K:
@@ -398,7 +641,11 @@ def build_qdic_features(
             root = root.parent if root.is_file() else root
             value = root / Path(str(value))
         sidecar = value
-    sidecar_metadata, sidecar_arrays = _load_sidecar(sidecar, expected_count=count)
+    sidecar_metadata, sidecar_arrays = _load_sidecar(
+        sidecar,
+        expected_count=count,
+        allow_historical_producer_source=allow_historical_producer_source,
+    )
 
     cosine = np.asarray(arrays["cosine"])
     evidence = np.asarray(arrays["evidence"])
@@ -687,6 +934,9 @@ def build_qdic_features(
         "rows_hash": rows_hash,
         "event_cache_manifest_hash": manifest_hash,
         "qdic_sidecar": None if isinstance(sidecar, Mapping) else str(Path(sidecar).resolve()),
+        "sidecar_producer_source_resolution": sidecar_metadata.get(
+            "producer_source_resolution"
+        ),
         "events": len(offsets) - 1,
         "rows": written,
         "arrays": array_paths,
@@ -701,6 +951,161 @@ def build_qdic_features(
     return {"status": "COMPLETED", "output": str(output_path), **result_metadata}
 
 
+def build_qdic_mgf_features(
+    event_cache: str | Path | Mapping[str, Any],
+    output: str | Path,
+    *,
+    sidecar: str | Path | Mapping[str, Any] | None = None,
+    recent_k: int = QDIC_RECENT_K,
+    alpha_fast: float = 0.70,
+    alpha_slow: float = 0.15,
+    memory_capacity: int = QDIC_MEMORY_CAPACITY,
+    memory_dedup_cos: float = QDIC_MEMORY_DEDUP_COS,
+    context_candidate_top_k: int = QDIC_CONTEXT_CANDIDATE_TOP_K,
+        decision_candidate_top_k: int = QDIC_DECISION_CANDIDATE_TOP_K,
+    mgf_beta: float = QDIC_MGF_BETA,
+) -> dict[str, Any]:
+    """Materialize a 35-D V12 cache without changing the frozen V11 builder.
+
+    The existing 33-D builder is run into a temporary cache first.  Its arrays
+    are then copied byte-for-byte and the two exact log-MGF columns are
+    appended.  This makes the prefix-parity invariant structural rather than a
+    best-effort reimplementation of the V11 feature path.
+    """
+    if not np.isclose(float(mgf_beta), QDIC_MGF_BETA, rtol=0.0, atol=1e-8):
+        raise ValueError("V12 MGF feature cache freezes mgf_beta=1.0")
+    if int(recent_k) != QDIC_RECENT_K:
+        raise ValueError("QDIC V12 requires recent_k=8")
+    output_path = Path(output).resolve()
+    if output_path.exists():
+        raise FileExistsError(f"refusing to overwrite existing MGF cache: {output_path}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(
+        prefix=".qdic_v11_prefix_", dir=str(output_path.parent)
+    ) as temporary:
+        temporary_path = Path(temporary)
+        base_root = temporary_path / "base"
+        base_metadata = build_qdic_features(
+            event_cache,
+            base_root,
+            sidecar=sidecar,
+            recent_k=recent_k,
+            alpha_fast=alpha_fast,
+            alpha_slow=alpha_slow,
+            memory_capacity=memory_capacity,
+            memory_dedup_cos=memory_dedup_cos,
+            context_candidate_top_k=context_candidate_top_k,
+            decision_candidate_top_k=decision_candidate_top_k,
+            allow_historical_producer_source=True,
+        )
+        base_features = np.load(
+            base_root / "features.npy", mmap_mode="r", allow_pickle=False
+        )
+        if base_features.ndim != 2 or base_features.shape[1] != QDIC_RAW_DIM:
+            raise AssertionError("V11 prefix builder did not produce 33-D features")
+
+        metadata, arrays, _inline_rows, _rows_path = _load_cache(event_cache)
+        cosine = np.asarray(arrays["cosine"])
+        mem_len = np.asarray(arrays["mem_len"], dtype=np.int64).reshape(-1)
+        rank = np.asarray(
+            arrays.get("prefilter_rank_b1", arrays.get("prefilter_rank")),
+            dtype=np.int64,
+        ).reshape(-1)
+        if cosine.ndim != 3 or len(mem_len) != len(cosine) or len(rank) != len(cosine):
+            raise ValueError("event cache arrays are not valid for MGF projection")
+
+        mgf_values = np.empty((len(base_features), 2), dtype=np.float32)
+        written = 0
+        for index in range(len(cosine)):
+            if int(rank[index]) > int(context_candidate_top_k):
+                continue
+            length = int(mem_len[index])
+            if length < 1 or length > int(cosine.shape[2]):
+                raise ValueError(f"invalid memory length at event row {index}: {length}")
+            mgf_values[written] = np.asarray(
+                projected_log_mgf(
+                    np.asarray(cosine[index, :1, :length], dtype=np.float32),
+                    recent_k=recent_k,
+                    beta=mgf_beta,
+                ),
+                dtype=np.float32,
+            )
+            written += 1
+        if written != len(base_features):
+            raise AssertionError(
+                f"MGF row alignment mismatch: projected {written}, V11 has {len(base_features)}"
+            )
+        if not np.isfinite(mgf_values).all():
+            raise FloatingPointError("MGF feature values are non-finite")
+
+        output_path.mkdir(parents=False, exist_ok=False)
+        for name, source_value in dict(base_metadata["arrays"]).items():
+            if name == "features":
+                continue
+            source = Path(str(source_value))
+            target = output_path / f"{name}.npy"
+            if not source.is_file():
+                raise FileNotFoundError(source)
+            shutil.copyfile(source, target)
+
+        feature_path = output_path / "features.npy"
+        combined = np.lib.format.open_memmap(
+            feature_path,
+            mode="w+",
+            dtype=np.float32,
+            shape=(len(base_features), QDIC_MGF_RAW_DIM),
+        )
+        combined[:, :QDIC_RAW_DIM] = np.asarray(base_features, dtype=np.float32)
+        combined[:, QDIC_RAW_DIM:] = mgf_values
+        combined.flush()
+        del combined
+
+        result_metadata = json.loads(json.dumps(base_metadata, default=str))
+        result_metadata.update(
+            {
+                "artifact": "qdic_v12_mgf_feature_cache",
+                "protocol": "QDIC_V12_MGF_BASE_ONLY_TRAINING",
+                "schema_version": QDIC_MGF_FEATURE_SCHEMA_VERSION,
+                "feature_names": list(QDIC_MGF_FEATURE_NAMES),
+                "feature_dim": QDIC_MGF_RAW_DIM,
+                "mgf_beta": QDIC_MGF_BETA,
+                "qdic_v11_prefix_dim": QDIC_RAW_DIM,
+                "prefix_parity_max_abs": 0.0,
+                "source_v11_feature_array_hashes": dict(base_metadata["array_hashes"]),
+            }
+        )
+        feature_config = dict(result_metadata["feature_config"])
+        feature_config.update(
+            {
+                "mgf_beta": QDIC_MGF_BETA,
+                "mgf_type": "empirical_log_mean_exp",
+                "mgf_normalization": "divide_by_beta",
+                "mgf_recent_definition": "last_min_recent_k_L",
+                "mgf_full_definition": "all_causal_history",
+            }
+        )
+        result_metadata["feature_config"] = feature_config
+        result_metadata["arrays"] = {
+            name: str((output_path / f"{name}.npy").resolve())
+            for name in dict(base_metadata["arrays"])
+        }
+        result_metadata["rows"] = int(len(base_features))
+        result_metadata["array_hashes"] = {
+            name: _sha256(path)
+            for name, path in result_metadata["arrays"].items()
+        }
+        result_metadata["arrays_hash"] = _object_sha256(result_metadata["array_hashes"])
+        result_metadata["output"] = str(output_path)
+        metadata_path = output_path / "features.json"
+        metadata_path.write_text(
+            json.dumps(result_metadata, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        result_metadata["metadata_sha256"] = _sha256(metadata_path)
+        return {**result_metadata, "status": "COMPLETED", "output": str(output_path)}
+
+
 __all__ = [
     "QDIC_CONTEXT_CANDIDATE_TOP_K",
     "QDIC_DECISION_CANDIDATE_TOP_K",
@@ -709,6 +1114,12 @@ __all__ = [
     "QDIC_RAW_DIM",
     "QDIC_FEATURE_SCHEMA_VERSION",
     "QDIC_INDEPENDENT_DIM",
+    "QDIC_MGF_BETA",
+    "QDIC_MGF_EXTRA_FEATURE_NAMES",
+    "QDIC_MGF_FEATURE_NAMES",
+    "QDIC_MGF_RAW_DIM",
+    "QDIC_MGF_INDEPENDENT_DIM",
+    "QDIC_MGF_FEATURE_SCHEMA_VERSION",
     "QDIC_MEMORY_CAPACITY",
     "QDIC_MEMORY_DEDUP_COS",
     "QDIC_QUERY_OBSERVATIONS",
@@ -716,6 +1127,11 @@ __all__ = [
     "build_qdic_candidate_features",
     "build_qdic_event_features",
     "build_qdic_features",
+    "build_qdic_mgf_candidate_features",
+    "build_qdic_mgf_event_features",
+    "build_qdic_mgf_features",
+    "empirical_log_mgf",
     "projected_distribution_moments",
+    "projected_log_mgf",
     "projected_mo",
 ]
