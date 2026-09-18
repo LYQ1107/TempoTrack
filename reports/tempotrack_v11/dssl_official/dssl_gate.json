@@ -1,0 +1,354 @@
+{
+  "artifact": "v11_post_dssl_val_gate",
+  "cards": [
+    {
+      "base": {
+        "AssocA": 42.475307662835235,
+        "AssocPr": 65.77222222222224,
+        "AssocRe": 48.12601264367817,
+        "ClsA": 18.60447478927203,
+        "ClsPr": 26.410730727969348,
+        "ClsRe": 26.45995593869732,
+        "LocA": 56.88120919540226,
+        "LocPr": 79.33476628352489,
+        "LocRe": 59.38222260536397,
+        "TETA": 39.32034674329501
+      },
+      "base_class_count": 261,
+      "card_id": "D1_LS010",
+      "internal": {
+        "best_epoch": 6,
+        "card_id": "D1_LS010",
+        "checkpoint": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D1_LS010/best.pt",
+        "checkpoint_hash": "b736fd3106890520c2b1fdd6466c212f4274002129c696558572b7a0bf73d517",
+        "final_listwise_loss": 0.38720003196171354,
+        "final_mrr": 0.9284832451499118,
+        "final_top1": 0.8809523809523809,
+        "lambda_cons": 0.0,
+        "lambda_hard": 0.2,
+        "lambda_struct": 0.1,
+        "net_correction": 0.04365079365079361,
+        "receipt": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D1_LS010/training.json",
+        "temporal_conflict": false
+      },
+      "novel": {
+        "AssocA": 38.37513714285715,
+        "AssocPr": 61.1429142857143,
+        "AssocRe": 43.82545714285714,
+        "ClsA": 2.3225342857142857,
+        "ClsPr": 5.928628571428572,
+        "ClsRe": 2.4454142857142855,
+        "LocA": 54.84045714285715,
+        "LocPr": 75.62582857142858,
+        "LocRe": 56.97417142857143,
+        "TETA": 31.84610285714285
+      },
+      "novel_class_count": 35,
+      "overall": {
+        "AssocA": 41.99,
+        "AssocPr": 65.225,
+        "AssocRe": 47.617,
+        "ClsA": 16.679,
+        "ClsPr": 23.989,
+        "ClsRe": 23.62,
+        "LocA": 56.64,
+        "LocPr": 78.896,
+        "LocRe": 59.097,
+        "TETA": 38.437
+      },
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/07_calibrated_cards/D1_LS010_D2_LS025/D1_LS010/aggregated/s00_m03/merged/tao_track.json",
+      "prediction_sha256": "527e28e4dc669b491e821dfada965eebd1ee0c127456fa5a45f9ef40c05e322e",
+      "thresholds": {
+        "margin_index": 3,
+        "margin_threshold": 0.5881726026535032,
+        "score_index": 0,
+        "score_threshold": 0.0
+      },
+      "trial_id": "s00_m03"
+    },
+    {
+      "base": {
+        "AssocA": 42.47180574712642,
+        "AssocPr": 65.76843678160921,
+        "AssocRe": 48.12642643678162,
+        "ClsA": 18.60607747126437,
+        "ClsPr": 26.41374720306513,
+        "ClsRe": 26.459446360153265,
+        "LocA": 56.88134712643675,
+        "LocPr": 79.33516858237546,
+        "LocRe": 59.382345210727955,
+        "TETA": 39.31975670498084
+      },
+      "base_class_count": 261,
+      "card_id": "D3_LS050",
+      "internal": {
+        "best_epoch": 6,
+        "card_id": "D3_LS050",
+        "checkpoint": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D3_LS050/best.pt",
+        "checkpoint_hash": "c1fcedab6ce4df2ec405315c48f21bb7d861fbeab16802eae65b69453cc37ba6",
+        "final_listwise_loss": 0.38724751711364774,
+        "final_mrr": 0.9284832451499118,
+        "final_top1": 0.8809523809523809,
+        "lambda_cons": 0.0,
+        "lambda_hard": 0.2,
+        "lambda_struct": 0.5,
+        "net_correction": 0.04365079365079361,
+        "receipt": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D3_LS050/training.json",
+        "temporal_conflict": false
+      },
+      "novel": {
+        "AssocA": 38.37541142857143,
+        "AssocPr": 61.143914285714295,
+        "AssocRe": 43.82551428571428,
+        "ClsA": 2.3225342857142857,
+        "ClsPr": 5.928628571428572,
+        "ClsRe": 2.4454142857142855,
+        "LocA": 54.83994285714286,
+        "LocPr": 75.62582857142858,
+        "LocRe": 56.973685714285715,
+        "TETA": 31.846017142857143
+      },
+      "novel_class_count": 35,
+      "overall": {
+        "AssocA": 41.987,
+        "AssocPr": 65.222,
+        "AssocRe": 47.618,
+        "ClsA": 16.681,
+        "ClsPr": 23.992,
+        "ClsRe": 23.62,
+        "LocA": 56.64,
+        "LocPr": 78.897,
+        "LocRe": 59.098,
+        "TETA": 38.436
+      },
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/07_calibrated_cards/D3_LS050_D4_LS100/D3_LS050/aggregated/s00_m03/merged/tao_track.json",
+      "prediction_sha256": "6bfa9ef87a42fc37ab527ba46365e4c38007f3fa2ae22252bce4e5893c404f15",
+      "thresholds": {
+        "margin_index": 3,
+        "margin_threshold": 0.5881726026535032,
+        "score_index": 0,
+        "score_threshold": 0.0
+      },
+      "trial_id": "s00_m03"
+    },
+    {
+      "base": {
+        "AssocA": 42.46504329501914,
+        "AssocPr": 65.7696206896552,
+        "AssocRe": 48.118503065134114,
+        "ClsA": 18.597742605363983,
+        "ClsPr": 26.41066904214559,
+        "ClsRe": 26.453024904214562,
+        "LocA": 56.88196781609192,
+        "LocPr": 79.33556321839079,
+        "LocRe": 59.38253295019155,
+        "TETA": 39.314925287356324
+      },
+      "base_class_count": 261,
+      "card_id": "D2_LS025",
+      "internal": {
+        "best_epoch": 6,
+        "card_id": "D2_LS025",
+        "checkpoint": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D2_LS025/best.pt",
+        "checkpoint_hash": "97afbfcd746c051a415c4494a38c82130cfb71db57e319361d344c18f9fe0733",
+        "final_listwise_loss": 0.3871955672899882,
+        "final_mrr": 0.9284832451499118,
+        "final_top1": 0.8809523809523809,
+        "lambda_cons": 0.0,
+        "lambda_hard": 0.2,
+        "lambda_struct": 0.25,
+        "net_correction": 0.04365079365079361,
+        "receipt": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D2_LS025/training.json",
+        "temporal_conflict": false
+      },
+      "novel": {
+        "AssocA": 38.37541142857143,
+        "AssocPr": 61.143914285714295,
+        "AssocRe": 43.82551428571428,
+        "ClsA": 2.3225342857142857,
+        "ClsPr": 5.928628571428572,
+        "ClsRe": 2.4454142857142855,
+        "LocA": 54.83994285714286,
+        "LocPr": 75.62582857142858,
+        "LocRe": 56.973685714285715,
+        "TETA": 31.846017142857143
+      },
+      "novel_class_count": 35,
+      "overall": {
+        "AssocA": 41.981,
+        "AssocPr": 65.223,
+        "AssocRe": 47.611,
+        "ClsA": 16.673,
+        "ClsPr": 23.989,
+        "ClsRe": 23.614,
+        "LocA": 56.641,
+        "LocPr": 78.897,
+        "LocRe": 59.098,
+        "TETA": 38.432
+      },
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/07_calibrated_cards/D1_LS010_D2_LS025/D2_LS025/aggregated/s00_m03/merged/tao_track.json",
+      "prediction_sha256": "a9cc3adefba43cdbb80e835f03f32d432fe9c568b656b7e515d21606f43f8559",
+      "thresholds": {
+        "margin_index": 3,
+        "margin_threshold": 0.5881726026535032,
+        "score_index": 0,
+        "score_threshold": 0.0
+      },
+      "trial_id": "s00_m03"
+    },
+    {
+      "base": {
+        "AssocA": 42.45200727969347,
+        "AssocPr": 65.77284674329502,
+        "AssocRe": 48.112384291187745,
+        "ClsA": 18.628027969348654,
+        "ClsPr": 26.434447662835247,
+        "ClsRe": 26.458645593869736,
+        "LocA": 56.87232413793101,
+        "LocPr": 79.33426053639846,
+        "LocRe": 59.37531455938696,
+        "TETA": 39.317434865900374
+      },
+      "base_class_count": 261,
+      "card_id": "D4_LS100",
+      "internal": {
+        "best_epoch": 6,
+        "card_id": "D4_LS100",
+        "checkpoint": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D4_LS100/best.pt",
+        "checkpoint_hash": "42a9405b636bad646c67b273d6f097c503aa92afca573eb639c5c708ba2423b7",
+        "final_listwise_loss": 0.38715781803642,
+        "final_mrr": 0.9284832451499118,
+        "final_top1": 0.8809523809523809,
+        "lambda_cons": 0.0,
+        "lambda_hard": 0.2,
+        "lambda_struct": 1.0,
+        "net_correction": 0.04365079365079361,
+        "receipt": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/D4_LS100/training.json",
+        "temporal_conflict": false
+      },
+      "novel": {
+        "AssocA": 37.983402857142856,
+        "AssocPr": 60.724571428571444,
+        "AssocRe": 43.82551428571428,
+        "ClsA": 2.3225342857142857,
+        "ClsPr": 5.928628571428572,
+        "ClsRe": 2.4454142857142855,
+        "LocA": 54.83994285714286,
+        "LocPr": 75.62582857142858,
+        "LocRe": 56.973685714285715,
+        "TETA": 31.715331428571425
+      },
+      "novel_class_count": 35,
+      "overall": {
+        "AssocA": 41.924,
+        "AssocPr": 65.176,
+        "AssocRe": 47.605,
+        "ClsA": 16.7,
+        "ClsPr": 24.01,
+        "ClsRe": 23.619,
+        "LocA": 56.632,
+        "LocPr": 78.896,
+        "LocRe": 59.091,
+        "TETA": 38.419
+      },
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/07_calibrated_cards/D3_LS050_D4_LS100/D4_LS100/aggregated/s00_m03/merged/tao_track.json",
+      "prediction_sha256": "9ac1c3801023ef4a1b2a953cee93c1103c5dcff300181deca799d3792ee42c64",
+      "thresholds": {
+        "margin_index": 3,
+        "margin_threshold": 0.5881726026535032,
+        "score_index": 0,
+        "score_threshold": 0.0
+      },
+      "trial_id": "s00_m03"
+    }
+  ],
+  "control_B0": {
+    "internal": {
+      "best_epoch": 5,
+      "card_id": "B0_OFFICIAL_V11",
+      "checkpoint": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/B0_OFFICIAL_V11/best.pt",
+      "checkpoint_hash": "091e2cc2b9f198d207d59dbe0183c06d72dcccc44981423316af63766254958f",
+      "final_listwise_loss": 0.39077395165250417,
+      "final_mrr": 0.9271164021164022,
+      "final_top1": 0.876984126984127,
+      "lambda_cons": 0.0,
+      "lambda_hard": 0.0,
+      "lambda_struct": 0.0,
+      "net_correction": 0.03968253968253965,
+      "receipt": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/B0_OFFICIAL_V11/training.json",
+      "temporal_conflict": false
+    },
+    "row": {
+      "base": {
+        "AssocA": 42.50632222222223,
+        "AssocPr": 65.1211264367816,
+        "AssocRe": 48.533220306513414,
+        "ClsA": 18.588787471264354,
+        "ClsPr": 26.254912452107284,
+        "ClsRe": 26.422002490421455,
+        "LocA": 56.859325287356306,
+        "LocPr": 79.30338697318011,
+        "LocRe": 59.38733524904215,
+        "TETA": 39.318161302681986
+      },
+      "base_class_count": 261,
+      "novel": {
+        "AssocA": 38.70629142857143,
+        "AssocPr": 60.4116,
+        "AssocRe": 44.79773714285715,
+        "ClsA": 2.070114285714286,
+        "ClsPr": 5.814342857142857,
+        "ClsRe": 2.147914285714286,
+        "LocA": 54.744828571428584,
+        "LocPr": 75.40405714285714,
+        "LocRe": 56.94934285714286,
+        "TETA": 31.840454285714284
+      },
+      "novel_class_count": 35,
+      "overall": {
+        "AssocA": 42.057,
+        "AssocPr": 64.564,
+        "AssocRe": 48.092,
+        "ClsA": 16.636,
+        "ClsPr": 23.838,
+        "ClsRe": 23.552,
+        "LocA": 56.609,
+        "LocPr": 78.842,
+        "LocRe": 59.099,
+        "TETA": 38.434
+      },
+      "prediction": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2/aggregated/s00_m03/merged/tao_track.json",
+      "prediction_sha256": "e9fe5a2c68d1faceea9fb84ea1c3adaa63f122ddf7a714adf8bda9b482a27a4f",
+      "thresholds": {
+        "margin_index": 3,
+        "margin_threshold": 0.5881726026535032,
+        "score_index": 0,
+        "score_threshold": 0.0
+      },
+      "trial_id": "s00_m03"
+    }
+  },
+  "extension": {
+    "allowed": false,
+    "cards": [
+      "C1_LC005",
+      "C2_LC010",
+      "C3_LC025",
+      "H1_TEMPORAL_CONFLICT"
+    ],
+    "current_test": "NOT_RUN_GATE_FAILED"
+  },
+  "gate": {
+    "net_correction_gt_B0": true,
+    "overall_teta_not_obvious_collapse": true,
+    "repeated_internal_final_mrr_improvement": true,
+    "val_base_assocA_gt_B0": false
+  },
+  "gate_rule_note": "Overall TETA collapse is operationalized as selected Overall TETA >= B0 Overall TETA - 1.0.",
+  "lambda_struct_star": 0.1,
+  "novel_used_for_selection": false,
+  "overall_used_for_selection": false,
+  "selected_card": "D1_LS010",
+  "selection_metric": "Official Val Base AssocA, then Base TETA, then Base AssocPr, then internal holdout final_mrr",
+  "status": "DSSL_NEGATIVE_GATE"
+}
