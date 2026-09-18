@@ -1,0 +1,45 @@
+{
+  "status": "RUNNING",
+  "artifact": "v11_s00_m03_stuck_worker_recovery",
+  "reason": "five workers were CPU-spinning at checkpoint initialization with empty pre-existing trial dirs; stale empty dirs quarantined before restart",
+  "created_at_unix": 1789710568.0932071,
+  "trial_id": "s00_m03",
+  "trial_index": 3,
+  "shards": [
+    {
+      "shard": 1,
+      "gpu": 1,
+      "pid": 2352,
+      "trial_index": 3,
+      "log": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2/m03_recovery_20260918/retry_ctx_20260918T134800+0800/shard_01.log"
+    },
+    {
+      "shard": 4,
+      "gpu": 4,
+      "pid": 2604,
+      "trial_index": 3,
+      "log": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2/m03_recovery_20260918/retry_ctx_20260918T134800+0800/shard_04.log"
+    },
+    {
+      "shard": 6,
+      "gpu": 6,
+      "pid": 2877,
+      "trial_index": 3,
+      "log": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2/m03_recovery_20260918/retry_ctx_20260918T134800+0800/shard_06.log"
+    },
+    {
+      "shard": 7,
+      "gpu": 7,
+      "pid": 3129,
+      "trial_index": 3,
+      "log": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2/m03_recovery_20260918/retry_ctx_20260918T134800+0800/shard_07.log"
+    },
+    {
+      "shard": 8,
+      "gpu": 8,
+      "pid": 3390,
+      "trial_index": 3,
+      "log": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2/m03_recovery_20260918/retry_ctx_20260918T134800+0800/shard_08.log"
+    }
+  ]
+}

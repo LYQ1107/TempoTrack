@@ -1,0 +1,11 @@
+{
+  "status": "FAILED",
+  "artifact": "v11_dssl_b0_val_threshold_postprocess_supervisor",
+  "protocol": "OFFICIAL_VAL_BASE_ONLY_THRESHOLD_TRIAL_MERGE_AND_EVAL",
+  "calibration_root": "/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2",
+  "annotation": "/data1/LWR/vranlee/SERVER_ONLY/avis/OCD_OVMOT/data/external_annotations/ovtr/validation_ours_v1.json",
+  "annotation_sha256": "1347fdc4e3eb6880f957e81014fa505080b55d895f27afcc3d6343cff4dc6fe7",
+  "repo_head": "29c97e51e70d55058acb84a09be1c9ab83a203ec",
+  "updated_at_unix": 1789704123.6054704,
+  "reason": "calibration_failed"
+}
