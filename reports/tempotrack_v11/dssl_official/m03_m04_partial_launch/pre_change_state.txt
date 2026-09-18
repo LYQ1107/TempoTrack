@@ -1,0 +1,48 @@
+TempoTrack V11 M03/M04 partial-launch pre-change state
+=====================================================
+
+Captured: 2026-09-18 15:43:13 CST
+Repository: /data1/LWR/vranlee/SERVER_ONLY/avis/tempotrack_v11_distributional_arch
+Branch: codex/v11-dssl-official-train
+HEAD: d9ae4e20dee11967f6545d35c3e9da9f2c9bea34
+Working tree before orchestration patch: clean
+
+Experiment root:
+/data2/usr_for_deadline/tempotrack_v11_dssl_official_val_20260917_full/06_operating_point/b0_threshold_calibration_r2
+
+Formal shard state at capture:
+- s00_m00: 10/10 PASS
+- s00_m01: 10/10 PASS
+- s00_m02: 10/10 PASS
+- s00_m03: 5/10 PASS: shard_00, shard_02, shard_03, shard_05, shard_09
+- s00_m04: 0/10; no manifest present
+
+M03 processes that must remain untouched:
+- PID 27083: shard_01, CUDA_VISIBLE_DEVICES=1, trial-index=3
+- PID 27084: shard_04, CUDA_VISIBLE_DEVICES=4, trial-index=3
+- PID 27085: shard_06, CUDA_VISIBLE_DEVICES=6, trial-index=3
+- PID 27086: shard_07, CUDA_VISIBLE_DEVICES=7, trial-index=3
+- PID 27087: shard_08, CUDA_VISIBLE_DEVICES=8, trial-index=3
+All five were alive and executing the replay script at capture; each had a CUDA
+context of approximately 2.88 GiB and approximately 102--104% CPU.
+
+Old global M04 gate:
+- PID 30466, exact detached bash gate, PPID 1, waiting for m03_pass=10.
+- It owns the existing m04_gate.lock and has not launched an M04 replay.
+- Its all-or-none behavior is the orchestration defect being replaced. It is
+  not an M03 worker.
+
+GPU snapshot:
+- Idle at capture: GPU 0, 2, 3, 5, 9 (0 MiB used).
+- M03 occupied: GPU 1, 4, 6, 7, 8 (approximately 2880 MiB each).
+- Compute PIDs on occupied GPUs were exactly 27083--27087; no M04 compute PID
+  and no s00_m04 manifest existed.
+
+Existing M03 formal completion predicate (preserved):
+manifest.status == PASS
+and manifest.trial_id == s00_m03
+and manifest.detector_forward_calls == 0
+and manifest.gt_loaded_during_replay == false
+
+The patch is orchestration-only. The replay driver, checkpoint, cache, events,
+tempo config, thresholds, device semantics, and output schema are unchanged.
