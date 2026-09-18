@@ -268,7 +268,15 @@ def gpu_snapshot(processes: Iterable[ReplayProcess] | None = None) -> list[GPUIn
                 pids.append(int(compute_row[0]))
             except (ValueError, IndexError):
                 continue
-        owners = tuple(by_pid[pid] for pid in pids if pid in by_pid)
+        # A replay process can spend several minutes in CPU-side event/cache
+        # initialization before it creates its CUDA context.  Use its audited
+        # CUDA_VISIBLE_DEVICES as an owner signal as well as nvidia-smi, or a
+        # newly completed M03 shard could be assigned the same GPU twice.
+        owners = tuple(
+            item
+            for item in project_processes
+            if item.gpu == index
+        )
         unknown = tuple(pid for pid in pids if pid not in by_pid)
         result.append(
             GPUInfo(
@@ -510,7 +518,9 @@ def launch_one(
         "trial_id": M04_TRIAL,
         "pid": None,
         "gpu": gpu.index,
-        "gpu_mode": "idle" if not gpu.compute_pids else "stacked_on_known_project_process",
+        "gpu_mode": "idle"
+        if not gpu.project_processes
+        else "stacked_on_known_project_process",
         "m03_manifest": str(m03_manifest.resolve()),
         "m03_manifest_sha256": sha256_file(m03_manifest),
         "m03_input_cache": str(input_cache),

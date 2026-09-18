@@ -54,10 +54,10 @@ index 0000000..cf7344c
 +tempo config, thresholds, device semantics, and output schema are unchanged.
 diff --git a/tests/test_v11_m03_m04_partial_scheduler.py b/tests/test_v11_m03_m04_partial_scheduler.py
 new file mode 100644
-index 0000000..ff9270f
+index 0000000..79e4741
 --- /dev/null
 +++ b/tests/test_v11_m03_m04_partial_scheduler.py
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,91 @@
 +from __future__ import annotations
 +
 +import json
@@ -70,6 +70,7 @@ index 0000000..ff9270f
 +    GPUInfo,
 +    M03_TRIAL,
 +    M04_TRIAL,
++    ReplayProcess,
 +    choose_gpu,
 +    formal_pass,
 +    all_m04_terminal,
@@ -123,7 +124,8 @@ index 0000000..ff9270f
 +
 +def test_gpu_selection_prefers_idle_then_allows_known_project_stacking() -> None:
 +    idle = GPUInfo(0, 0, 40960, 0, (), (), ())
-+    stacked_m03 = GPUInfo(1, 2880, 40960, 0, (101,), (), ())
++    stacked_process = ReplayProcess(101, 3, "shard_01", 1, "", {})
++    stacked_m03 = GPUInfo(1, 2880, 40960, 0, (), (), (stacked_process,))
 +    assert choose_gpu([stacked_m03, idle], set()).index == 0
 +    assert choose_gpu([stacked_m03], set()).index == 1
 +    assert parse_shard(["--cache", "/data/annotations/shard_04/frontend_cache"]) == "shard_04"
@@ -149,10 +151,10 @@ index 0000000..ff9270f
 +    assert not all_m04_terminal(tmp_path, [])
 diff --git a/tools/v11_m03_m04_partial_scheduler.py b/tools/v11_m03_m04_partial_scheduler.py
 new file mode 100644
-index 0000000..9b08edd
+index 0000000..6453c27
 --- /dev/null
 +++ b/tools/v11_m03_m04_partial_scheduler.py
-@@ -0,0 +1,764 @@
+@@ -0,0 +1,774 @@
 +#!/usr/bin/env python3
 +"""Per-shard M03 -> M04 replenishing gate for the V11 calibration replay.
 +
@@ -423,7 +425,15 @@ index 0000000..9b08edd
 +                pids.append(int(compute_row[0]))
 +            except (ValueError, IndexError):
 +                continue
-+        owners = tuple(by_pid[pid] for pid in pids if pid in by_pid)
++        # A replay process can spend several minutes in CPU-side event/cache
++        # initialization before it creates its CUDA context.  Use its audited
++        # CUDA_VISIBLE_DEVICES as an owner signal as well as nvidia-smi, or a
++        # newly completed M03 shard could be assigned the same GPU twice.
++        owners = tuple(
++            item
++            for item in project_processes
++            if item.gpu == index
++        )
 +        unknown = tuple(pid for pid in pids if pid not in by_pid)
 +        result.append(
 +            GPUInfo(
@@ -665,7 +675,9 @@ index 0000000..9b08edd
 +        "trial_id": M04_TRIAL,
 +        "pid": None,
 +        "gpu": gpu.index,
-+        "gpu_mode": "idle" if not gpu.compute_pids else "stacked_on_known_project_process",
++        "gpu_mode": "idle"
++        if not gpu.project_processes
++        else "stacked_on_known_project_process",
 +        "m03_manifest": str(m03_manifest.resolve()),
 +        "m03_manifest_sha256": sha256_file(m03_manifest),
 +        "m03_input_cache": str(input_cache),
