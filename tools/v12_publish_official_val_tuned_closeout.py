@@ -55,6 +55,9 @@ def _verify_val(plan_path: Path, runtime_path: Path, val_root: Path) -> dict[str
     _require_test_tuned(runtime, "Official-Val runtime")
     if plan.get("split") != "Official-Val" or plan.get("exact_split_name") != "validation_ours_v1":
         raise RuntimeError("Official-Val split provenance is invalid")
+    snapshot = Path(str(plan.get("source_test_final_json", ""))).resolve()
+    if not snapshot.is_file() or plan.get("source_test_final_json_sha256") != sha256_file(snapshot):
+        raise RuntimeError("Test selection snapshot is missing or hash-mismatched")
     candidates = plan.get("candidates")
     if not isinstance(candidates, list) or not candidates:
         raise RuntimeError("Official-Val plan has no candidates")
@@ -170,6 +173,7 @@ def publish(args: argparse.Namespace) -> dict[str, Any]:
         (final_json, "final_20h_test_tuned_leaderboard.json"),
         (final_md, "final_20h_test_tuned_report.md"),
         (args.val_plan.resolve(), "plans/official_val_tuned_plan.json"),
+        (Path(str(read_json(args.val_plan).get("source_test_final_json"))).resolve(), "plans/source_test_final_leaderboard.json"),
         (args.val_runtime.resolve(), "official_val_tuned_runtime.json"),
         (receipt_path, "official_val_complete_closeout_receipt.json"),
     ]
