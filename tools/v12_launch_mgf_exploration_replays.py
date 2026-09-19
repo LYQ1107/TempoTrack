@@ -56,7 +56,10 @@ def _wait_for_ranking(path: Path, poll_seconds: float) -> dict[str, Any]:
     if ranking.get("status") != "PASS" or ranking.get("paper_status") != "TEST_TUNED_EXPLORATION":
         raise RuntimeError("ranking receipt is not a completed Test-tuned exploration result")
     top4 = ranking.get("top4")
-    if not isinstance(top4, list) or len(top4) != 4 or not all(str(card).startswith("E") for card in top4):
+    if not isinstance(top4, list) or len(top4) != 4 or not all(
+        len(str(card)) == 3 and str(card).startswith("E") and str(card)[1:].isdigit()
+        for card in top4
+    ):
         raise RuntimeError(f"ranking top4 must contain four exploratory cards: {top4}")
     return ranking
 
@@ -101,7 +104,11 @@ def _start_card_batch(
             handle = log.open("w", encoding="utf-8")
             process = subprocess.Popen(
                 command,
-                cwd=str(args.repo.resolve()),
+                # The audited COV config contains relative prompt/checkpoint
+                # paths.  Running from the COV root is part of the reference
+                # replay environment; running from the TempoTrack repo makes
+                # prompt-path resolution fall back to a slow/non-parity path.
+                cwd=str(args.cov_source.resolve()),
                 env=child_environment,
                 stdout=handle,
                 stderr=subprocess.STDOUT,
