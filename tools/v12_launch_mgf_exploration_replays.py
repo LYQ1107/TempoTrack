@@ -86,7 +86,11 @@ def _start_card_batch(
             shard = f"{index:02d}"
             cache = args.frontend_root.resolve() / f"shard_{shard}" / "frontend_cache"
             output = args.replay_root.resolve() / card / "s00_m00" / f"shard_{shard}"
-            log = args.replay_root.resolve() / card / "logs" / f"s00_m00_shard_{shard}.log"
+            # Recovery attempts may reuse an empty output root after a
+            # pre-replay failure.  Keep their logs separate so the original
+            # failure remains auditable instead of being overwritten.
+            log_tag = str(getattr(args, "worker_log_tag", "s00_m00"))
+            log = args.replay_root.resolve() / card / "logs" / f"{log_tag}_shard_{shard}.log"
             if output.exists() and any(output.iterdir()):
                 raise RuntimeError(f"refusing to overwrite existing exploration replay: {output}")
             child_environment = dict(environment)
