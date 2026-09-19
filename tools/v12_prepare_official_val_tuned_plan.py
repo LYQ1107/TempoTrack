@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 from typing import Any
 
 try:
@@ -81,6 +82,14 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     final_json = args.final_json.resolve()
     rows = _selected_rows(final_json)
     output_root = args.output_root.resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    # Preserve the exact Test-only selection receipt.  The later Val-aware
+    # finalizer rewrites final_20h_test_tuned_leaderboard.json, so hashing that
+    # mutable path directly would make the plan's provenance stale.
+    test_snapshot = output_root / "source_test_final_leaderboard.json"
+    if test_snapshot.exists():
+        raise RuntimeError(f"refusing to overwrite Test selection snapshot: {test_snapshot}")
+    shutil.copy2(final_json, test_snapshot)
     config_root = output_root / "configs"
     candidates: list[dict[str, Any]] = []
     config_receipts: list[dict[str, Any]] = []
@@ -135,8 +144,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         "split": "Official-Val",
         "exact_split_name": VAL_SPLIT,
         "protocol": "Replay the final Test-selected MGF and B0 operating points on an independent Official-Val COV cache; Val does not select the operating point.",
-        "source_final_json": str(final_json),
-        "source_final_json_sha256": sha256_file(final_json),
+        "source_test_final_json": str(test_snapshot),
+        "source_test_final_json_sha256": sha256_file(test_snapshot),
         "candidates": candidates,
         "config_receipts": config_receipts,
     }
