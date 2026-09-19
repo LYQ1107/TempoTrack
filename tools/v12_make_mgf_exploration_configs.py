@@ -34,7 +34,15 @@ def _quote(value: Any) -> str:
     return f'"{escaped}"'
 
 
-def _write_config(card_dir: Path, output: Path, *, source_role: str, split: str) -> dict[str, Any]:
+def _write_config(
+    card_dir: Path,
+    output: Path,
+    *,
+    source_role: str,
+    split: str,
+    score_threshold: float = 0.0,
+    margin_threshold: float = 0.0,
+) -> dict[str, Any]:
     receipt_path = card_dir / "training.json"
     checkpoint = (card_dir / "best.pt").resolve()
     if not receipt_path.is_file() or not checkpoint.is_file():
@@ -74,8 +82,8 @@ def _write_config(card_dir: Path, output: Path, *, source_role: str, split: str)
             "  qdic_context_top_k: 64",
             f"  qdic_checkpoint: {_quote(str(checkpoint))}",
             "  qdic_device: cpu",
-            "  score_threshold: 0.0",
-            "  margin_threshold: 0.0",
+            f"  score_threshold: {_quote(float(score_threshold))}",
+            f"  margin_threshold: {_quote(float(margin_threshold))}",
             "search_fields:",
             "- score_threshold",
             "- margin_threshold",
@@ -93,8 +101,8 @@ def _write_config(card_dir: Path, output: Path, *, source_role: str, split: str)
         "config_sha256": _sha256(output),
         "paper_status": "TEST_TUNED_EXPLORATION",
         "paper_valid": False,
-        "score_threshold": 0.0,
-        "margin_threshold": 0.0,
+        "score_threshold": float(score_threshold),
+        "margin_threshold": float(margin_threshold),
     }
 
 
@@ -104,6 +112,8 @@ def _write_b0_config(
     *,
     source_role: str,
     split: str,
+    score_threshold: float = 0.0,
+    margin_threshold: float = 0.0,
 ) -> dict[str, Any]:
     """Create the explicitly diagnostic B0 comparator config.
 
@@ -167,8 +177,8 @@ def _write_b0_config(
             "  qdic_context_top_k: 64",
             f"  qdic_checkpoint: {_quote(str(checkpoint))}",
             "  qdic_device: cpu",
-            "  score_threshold: 0.0",
-            "  margin_threshold: 0.0",
+            f"  score_threshold: {_quote(float(score_threshold))}",
+            f"  margin_threshold: {_quote(float(margin_threshold))}",
             "search_fields:",
             "- score_threshold",
             "- margin_threshold",
@@ -189,8 +199,8 @@ def _write_b0_config(
         "paper_status": "TEST_TUNED_EXPLORATION",
         "paper_valid": False,
         "diagnostic_only": True,
-        "score_threshold": 0.0,
-        "margin_threshold": 0.0,
+        "score_threshold": float(score_threshold),
+        "margin_threshold": float(margin_threshold),
     }
 
 
@@ -203,6 +213,8 @@ def main() -> int:
     parser.add_argument("--b0-output-name", default="B0_OFFICIAL_V11")
     parser.add_argument("--source-role", default="CURRENT_TEST")
     parser.add_argument("--split", default="test")
+    parser.add_argument("--score-threshold", type=float, default=0.0)
+    parser.add_argument("--margin-threshold", type=float, default=0.0)
     args = parser.parse_args()
     if not args.cards and args.b0_checkpoint is None:
         parser.error("provide --cards and/or --b0-checkpoint")
@@ -214,6 +226,8 @@ def main() -> int:
                 args.output_root / f"{card}.yaml",
                 source_role=args.source_role,
                 split=args.split,
+                score_threshold=args.score_threshold,
+                margin_threshold=args.margin_threshold,
             )
         )
     if args.b0_checkpoint is not None:
@@ -223,6 +237,8 @@ def main() -> int:
                 args.output_root / f"{args.b0_output_name}.yaml",
                 source_role=args.source_role,
                 split=args.split,
+                score_threshold=args.score_threshold,
+                margin_threshold=args.margin_threshold,
             )
         )
     receipt = {
