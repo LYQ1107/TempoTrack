@@ -333,8 +333,15 @@ def evaluate(
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(ranked)
+    # Exploratory cards are named exactly E01..E18.  Do not use a plain
+    # startswith("E") filter: analytic comparators such as EXACT_LMGF_* also
+    # begin with the letter E and must never consume replay slots.
     exploration_ranked = [
-        row["method"] for row in ranked if row["method"].startswith("E")
+        row["method"]
+        for row in ranked
+        if len(row["method"]) == 3
+        and row["method"].startswith("E")
+        and row["method"][1:].isdigit()
     ]
     result = {
         "status": "PASS",
