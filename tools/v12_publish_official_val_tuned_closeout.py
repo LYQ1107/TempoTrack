@@ -205,6 +205,7 @@ def publish(args: argparse.Namespace) -> dict[str, Any]:
         (args.val_plan.resolve(), "plans/official_val_tuned_plan.json"),
         (Path(str(read_json(args.val_plan).get("source_test_final_json"))).resolve(), "plans/source_test_final_leaderboard.json"),
         (args.val_runtime.resolve(), "official_val_tuned_runtime.json"),
+        (args.recovery_receipt.resolve(), "second_batch_retry_receipt.json"),
         (receipt_path, "official_val_complete_closeout_receipt.json"),
     ]
     controller = args.test_replay_root.resolve().parent / "controller_runtime.json"
@@ -259,6 +260,7 @@ def main() -> int:
     parser.add_argument("--val-plan", type=Path, required=True)
     parser.add_argument("--val-runtime", type=Path, required=True)
     parser.add_argument("--val-replay-root", type=Path, required=True)
+    parser.add_argument("--recovery-receipt", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v12_mgf_explore/05_replay/second_batch_retry_receipt.json"))
     parser.add_argument("--python-post", type=Path, default=Path("/home/lwr/anaconda3/envs/masaenv/bin/python"))
     args = parser.parse_args()
     print(json.dumps(publish(args), ensure_ascii=False, indent=2))
