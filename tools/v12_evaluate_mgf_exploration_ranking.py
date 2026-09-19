@@ -62,7 +62,15 @@ def _load_feature_cache(root: Path) -> tuple[dict[str, Any], dict[str, np.ndarra
         raise ValueError("exploration ranking requires 49-D features")
     paths = dict(metadata.get("arrays", {}))
     hashes = dict(metadata.get("array_hashes", {}))
-    required = {"features", "labels", "target_base", "offsets", "videos", "group_ids"}
+    required = {
+        "features",
+        "labels",
+        "supervision_allowed",
+        "target_base",
+        "offsets",
+        "videos",
+        "group_ids",
+    }
     if not required.issubset(paths):
         raise ValueError(f"exploration cache missing arrays: {sorted(required - set(paths))}")
     arrays: dict[str, np.ndarray] = {}
