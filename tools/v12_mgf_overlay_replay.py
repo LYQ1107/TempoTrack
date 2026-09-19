@@ -124,6 +124,8 @@ def main() -> None:
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--track-offset-scope", choices=("global", "cache-shards"), default="global")
     parser.add_argument("--limit-videos", type=int)
+    parser.add_argument("--video-shard-index", type=int)
+    parser.add_argument("--video-shard-count", type=int)
     parser.add_argument(
         "--progress-log",
         type=Path,
@@ -171,6 +173,15 @@ def main() -> None:
     track_offsets_by_scope: dict[str, int] = {"global": 0}
     video_track_offsets: dict[str, int] = {}
     videos = list(reader.videos())
+    all_video_count = len(videos)
+    if (args.video_shard_index is None) != (args.video_shard_count is None):
+        raise ValueError("--video-shard-index and --video-shard-count must be supplied together")
+    if args.video_shard_count is not None:
+        shard_count = int(args.video_shard_count)
+        shard_index = int(args.video_shard_index)
+        if shard_count <= 0 or shard_index < 0 or shard_index >= shard_count:
+            raise ValueError("invalid video shard index/count")
+        videos = [item for index, item in enumerate(videos) if index % shard_count == shard_index]
     if args.limit_videos is not None:
         videos = videos[: int(args.limit_videos)]
     progress_handle = None
@@ -253,6 +264,13 @@ def main() -> None:
         "events": [] if event_path is None else [str(event_path)],
         "frames": total_frames,
         "videos": len(videos),
+        "video_selection": {
+            "mode": "round_robin" if args.video_shard_count is not None else "all",
+            "video_shard_index": args.video_shard_index,
+            "video_shard_count": args.video_shard_count,
+            "all_video_count": all_video_count,
+            "selected_video_ids": [int(item[0]) for item in videos],
+        },
         "video_track_offsets": video_track_offsets,
         "track_offset_scope": offset_scope,
         "rows": len(rows),

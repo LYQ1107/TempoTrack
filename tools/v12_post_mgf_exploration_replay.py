@@ -173,20 +173,35 @@ def main() -> int:
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--evaluation-cores", type=int, default=8)
     parser.add_argument("--card-id", required=True)
+    parser.add_argument(
+        "--split",
+        choices=("test_tuned", "official_val_tuned"),
+        default="test_tuned",
+        help="evaluation split label; official_val_tuned writes val_metrics.json",
+    )
     args = parser.parse_args()
 
     replay_root = args.replay_root.resolve()
     full_cache = args.full_cache.resolve()
     annotation = args.annotation.resolve()
     repo = args.repo.resolve()
-    runtime_path = replay_root.parent / f"{args.card_id}_test_tuned_runtime_manifest.json"
+    is_val = args.split == "official_val_tuned"
+    runtime_suffix = "official_val_tuned" if is_val else "test_tuned"
+    metric_stem = "val_metrics" if is_val else "test_tuned_metrics"
+    evaluation_name = f"{args.card_id}_OFFICIAL_VAL_TUNED" if is_val else f"{args.card_id}_TEST_TUNED"
+    runtime_path = replay_root.parent / f"{args.card_id}_{runtime_suffix}_runtime_manifest.json"
     runtime: dict[str, Any] = {
         "status": "WAITING_FOR_SHARDS",
-        "artifact": "v12_mgf_test_tuned_exploration_replay_postprocess",
+        "artifact": (
+            "v12_mgf_test_tuned_exploration_official_val_postprocess"
+            if is_val
+            else "v12_mgf_test_tuned_exploration_replay_postprocess"
+        ),
         "paper_status": "TEST_TUNED_EXPLORATION",
         "paper_valid": False,
         "selection_scope": "VAL_TEST_TUNED_EXPLORATION",
         "test_used_for_selection": True,
+        "split": "Official-Val" if is_val else "Current-Test",
         "card_id": args.card_id,
         "replay_root": str(replay_root),
         "full_cache": str(full_cache),
@@ -232,7 +247,6 @@ def main() -> int:
             raise RuntimeError("exploration merge did not produce a complete prediction")
 
         evaluation_root = merge_root / "evaluation"
-        evaluation_name = f"{args.card_id}_TEST_TUNED"
         evaluation_dir = evaluation_root / evaluation_name
         evaluation_manifest = evaluation_dir / "evaluation.json"
         summary = evaluation_dir / "teta_summary_results.pth"
@@ -251,7 +265,11 @@ def main() -> int:
         category_protocol = _load_annotation_protocol(annotation)
         evaluation_receipt = {
             "status": "COMPLETED",
-            "artifact": "v12_mgf_test_tuned_exploration_teta_evaluation",
+            "artifact": (
+                "v12_mgf_test_tuned_exploration_official_val_teta_evaluation"
+                if is_val
+                else "v12_mgf_test_tuned_exploration_teta_evaluation"
+            ),
             "paper_status": "TEST_TUNED_EXPLORATION",
             "paper_valid": False,
             "diagnostic_only": True,
@@ -268,9 +286,9 @@ def main() -> int:
         }
         write_json(evaluation_manifest, evaluation_receipt)
         metrics = _teta_metrics(summary, category_protocol=category_protocol, evaluation_manifest=evaluation_manifest)
-        metrics_path = merge_root / "test_tuned_metrics.json"
+        metrics_path = merge_root / f"{metric_stem}.json"
         write_json(metrics_path, metrics)
-        _write_metrics_csv(merge_root / "test_tuned_metrics.csv", metrics)
+        _write_metrics_csv(merge_root / f"{metric_stem}.csv", metrics)
         runtime.update(
             {
                 "status": "PASS",
