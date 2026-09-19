@@ -119,7 +119,7 @@ def main() -> int:
     parser.add_argument("--capture", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v11_qdic_fulltest_20h_20260914/v10_runtime_env_capture.json"))
     parser.add_argument("--cov-source", type=Path, default=Path("/data2/usr_for_deadline/COVTrack_9b0ced_final_clean"))
     parser.add_argument("--cov-config", type=Path, default=Path("/data2/usr_for_deadline/COVTrack_9b0ced_final_clean/configs/uncertainty-ovtrack-teta/ovtrack_r50_ctao_train.py"))
-    parser.add_argument("--cov-checkpoint", type=Path, default=Path("/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/COVTrack/saved_models/ctao_public.pth"))
+    parser.add_argument("--cov-checkpoint", type=Path, default=Path("/data1/LWR/vranlee/SERVER_ONLY/avis/external_ovmot/COVTrack/saved_models/ctao_public_res/ctao_public.pth"))
     parser.add_argument("--card-root", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v12_mgf_explore/03_train/exploration_cards"))
     parser.add_argument("--b0-checkpoint", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v11_dssl_official_20260917_full/03_train_rerun_c4f1bab/B0_OFFICIAL_V11/best.pt"))
     parser.add_argument("--runtime", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v12_mgf_explore/07_val_tuned/after_test_supervisor_runtime.json"))
