@@ -29,7 +29,11 @@ from tools.v11_covtrack_replay_cache import (
 )
 from tempotrack_v10.qdic_mgf_exploration_loader import EXPLORATION_STATUS
 from tempotrack_v10.qdic_mgf_loader import QDIC_MGF_STATUS
+from tempotrack_v10.qdic_loader import QDIC_STATUS
 from tempotrack_v10.replay_cache import FrontendReplayCacheReader, sha256_file
+
+
+B0_COMPARISON_ARTIFACT = "v12_qdic_b0_test_tuned_comparison_replay"
 
 
 def _git_head(repo: Path) -> str | None:
@@ -65,8 +69,28 @@ def _read_provenance(model: Any) -> dict[str, Any]:
             raise RuntimeError("exploration replay is missing TEST_TUNED_EXPLORATION status")
         if provenance.get("paper_valid") is not False or provenance.get("diagnostic_only") is not True:
             raise RuntimeError("exploration replay must remain diagnostic-only")
+    elif status == QDIC_STATUS:
+        # B0 is a frozen Official-Train V11 checkpoint.  It is permitted here
+        # only as a comparator for the Test-tuned exploration; its source
+        # training provenance must remain BASE_TRAIN and is never relabeled as
+        # an exploration-trained model.
+        if int(provenance.get("feature_dim", -1)) != 33:
+            raise RuntimeError("B0 comparison checkpoint feature dimension is not 33")
+        if provenance.get("paper_status") != "BASE_TRAIN":
+            raise RuntimeError("B0 comparison checkpoint is not BASE_TRAIN")
+        if provenance.get("paper_valid") is not True or provenance.get("diagnostic_only") is not False:
+            raise RuntimeError("B0 comparison checkpoint paper provenance is invalid")
+        if provenance.get("base_only_supervision") is not True:
+            raise RuntimeError("B0 comparison checkpoint is not Base-only supervised")
+        if provenance.get("novel_gt_used") is not False or provenance.get("test_weights_used") is not False:
+            raise RuntimeError("B0 comparison checkpoint has invalid supervision provenance")
     else:
         raise RuntimeError("V12 replay did not load a registered MGF checkpoint branch")
+    comparison_role = (
+        "B0_OFFICIAL_V11_TEST_TUNED_COMPARATOR"
+        if status == QDIC_STATUS
+        else None
+    )
     return {
         "status": status,
         "checkpoint": provenance.get("checkpoint"),
@@ -82,6 +106,7 @@ def _read_provenance(model: Any) -> dict[str, Any]:
         "card_id": provenance.get("card_id"),
         "card_type": provenance.get("card_type"),
         "mgf_betas": provenance.get("mgf_betas"),
+        "comparison_role": comparison_role,
     }
 
 
@@ -202,13 +227,20 @@ def main() -> None:
     prediction = output_root / "tao_track.json"
     prediction.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     is_exploration = model_provenance["status"] == EXPLORATION_STATUS
+    is_b0_comparison = model_provenance["status"] == QDIC_STATUS
     manifest = {
         "status": "PASS",
         "artifact": (
             "v12_qdic_mgf_test_tuned_exploration_replay"
             if is_exploration
+            else B0_COMPARISON_ARTIFACT
+            if is_b0_comparison
             else "v12_qdic_mgf_causal_replay"
         ),
+        "paper_status": "TEST_TUNED_EXPLORATION" if (is_exploration or is_b0_comparison) else None,
+        "paper_valid": False if (is_exploration or is_b0_comparison) else None,
+        "diagnostic_only": True if (is_exploration or is_b0_comparison) else None,
+        "comparison_role": model_provenance.get("comparison_role"),
         "trial_id": str(args.trial_id),
         "cache": str(cache),
         "cache_manifest_sha256": sha256_file(cache / "manifest.json"),

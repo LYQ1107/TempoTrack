@@ -47,6 +47,7 @@ def main() -> None:
         if manifest.get("status") != "PASS" or manifest.get("artifact") not in {
             "v12_qdic_mgf_causal_replay",
             "v12_qdic_mgf_test_tuned_exploration_replay",
+            "v12_qdic_b0_test_tuned_comparison_replay",
         }:
             raise RuntimeError(f"invalid V12 replay manifest: {manifest_path}")
         if int(manifest.get("detector_forward_calls", -1)) != 0 or manifest.get("gt_loaded_during_replay") is not False:
@@ -100,8 +101,14 @@ def main() -> None:
         "artifact": (
             "v12_qdic_mgf_test_tuned_exploration_replay_merged"
             if reference and reference.get("artifact") == "v12_qdic_mgf_test_tuned_exploration_replay"
+            else "v12_qdic_b0_test_tuned_comparison_replay_merged"
+            if reference and reference.get("artifact") == "v12_qdic_b0_test_tuned_comparison_replay"
             else "v12_qdic_mgf_causal_replay_merged"
         ),
+        "paper_status": reference.get("paper_status") if reference else None,
+        "paper_valid": reference.get("paper_valid") if reference else None,
+        "diagnostic_only": reference.get("diagnostic_only") if reference else None,
+        "comparison_role": reference.get("comparison_role") if reference else None,
         "trial_id": str(args.trial_id),
         "full_cache": str(args.full_cache.resolve()),
         "full_cache_manifest_sha256": sha256_file(full_manifest_path),

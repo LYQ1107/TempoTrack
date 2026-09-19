@@ -75,15 +75,33 @@ def _validate_manifests(shard_root: Path, shard_count: int) -> list[dict[str, An
         manifest = read_json(path)
         if manifest.get("status") != "PASS":
             raise RuntimeError(f"exploration replay shard is not PASS: {path}")
-        if manifest.get("artifact") != "v12_qdic_mgf_test_tuned_exploration_replay":
+        artifact = manifest.get("artifact")
+        if artifact not in {
+            "v12_qdic_mgf_test_tuned_exploration_replay",
+            "v12_qdic_b0_test_tuned_comparison_replay",
+        }:
             raise RuntimeError(f"exploration replay artifact mismatch: {path}")
+        if manifest.get("paper_status") != "TEST_TUNED_EXPLORATION":
+            raise RuntimeError(f"Test-tuned comparison paper status missing: {path}")
+        if manifest.get("paper_valid") is not False or manifest.get("diagnostic_only") is not True:
+            raise RuntimeError(f"Test-tuned comparison diagnostic guard failed: {path}")
         if int(manifest.get("detector_forward_calls", -1)) != 0:
             raise RuntimeError(f"detector_forward_calls is nonzero: {path}")
         if manifest.get("gt_loaded_during_replay") is not False:
             raise RuntimeError(f"GT was loaded during replay: {path}")
         provenance = manifest.get("mgf_provenance")
-        if not isinstance(provenance, dict) or provenance.get("paper_status") != "TEST_TUNED_EXPLORATION":
+        if not isinstance(provenance, dict):
             raise RuntimeError(f"exploration provenance guard failed: {path}")
+        if artifact == "v12_qdic_mgf_test_tuned_exploration_replay":
+            if provenance.get("paper_status") != "TEST_TUNED_EXPLORATION":
+                raise RuntimeError(f"exploration provenance guard failed: {path}")
+        else:
+            if (
+                provenance.get("status") != "QDIC_V11_MODEL_CODE_AND_WEIGHTS"
+                or provenance.get("paper_status") != "BASE_TRAIN"
+                or provenance.get("comparison_role") != "B0_OFFICIAL_V11_TEST_TUNED_COMPARATOR"
+            ):
+                raise RuntimeError(f"B0 comparator provenance guard failed: {path}")
         if reference is not None:
             if manifest.get("thresholds") != reference.get("thresholds"):
                 raise RuntimeError("exploration replay threshold mismatch across shards")
