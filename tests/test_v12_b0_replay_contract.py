@@ -7,7 +7,11 @@ from tools.v12_mgf_overlay_replay import (
     B0_COMPARISON_ARTIFACT,
     _read_provenance,
 )
-from tools.v12_post_mgf_exploration_replay import _validate_manifests
+from tools.v12_post_mgf_exploration_replay import (
+    _validate_existing_merge,
+    _validate_manifests,
+    sha256_file,
+)
 
 
 def _b0_model() -> SimpleNamespace:
@@ -113,3 +117,44 @@ def test_legacy_exploration_manifest_without_top_level_status_remains_accepted(t
     )
 
     assert len(_validate_manifests(tmp_path, 1)) == 1
+
+
+def test_existing_test_tuned_merge_is_reused_only_after_hash_validation(tmp_path):
+    full_cache = tmp_path / "full_cache"
+    full_cache.mkdir()
+    (full_cache / "manifest.json").write_text(
+        json.dumps({"status": "PASS", "frame_count": 3, "video_count": 1}),
+        encoding="utf-8",
+    )
+    merge = tmp_path / "merge"
+    merge.mkdir()
+    prediction = merge / "tao_track.json"
+    prediction.write_text("{}\n", encoding="utf-8")
+    (merge / "manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "PASS",
+                "artifact": "v12_qdic_mgf_test_tuned_exploration_replay_merged",
+                "paper_status": "TEST_TUNED_EXPLORATION",
+                "paper_valid": False,
+                "diagnostic_only": True,
+                "trial_id": "E05",
+                "full_cache": str(full_cache.resolve()),
+                "frames": 3,
+                "videos": 1,
+                "shard_count": 1,
+                "prediction": str(prediction.resolve()),
+                "prediction_sha256": sha256_file(prediction),
+                "detector_forward_calls": 0,
+                "gt_loaded_during_replay": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = _validate_existing_merge(merge, card_id="E05", full_cache=full_cache)
+    assert manifest["trial_id"] == "E05"
+
+    prediction.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="prediction hash"):
+        _validate_existing_merge(merge, card_id="E05", full_cache=full_cache)

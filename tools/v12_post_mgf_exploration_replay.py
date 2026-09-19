@@ -126,6 +126,62 @@ def _run(command: list[str], *, cwd: Path, environment: dict[str, str], log: Pat
         raise RuntimeError(f"command failed ({result.returncode}); see {log}")
 
 
+def _validate_existing_merge(
+    merge_root: Path,
+    *,
+    card_id: str,
+    full_cache: Path,
+) -> dict[str, Any]:
+    """Validate an already-created merge without ever overwriting it.
+
+    The controller historically merged a card before launching this
+    postprocessor.  Re-running the postprocessor must therefore treat a
+    complete merge as an immutable input, while still failing closed for a
+    partial or mismatched merge.
+    """
+    merge_manifest = merge_root / "manifest.json"
+    merged_prediction = merge_root / "tao_track.json"
+    if not merge_manifest.is_file() or not merged_prediction.is_file():
+        raise RuntimeError(f"existing merge root is incomplete: {merge_root}")
+    manifest = read_json(merge_manifest)
+    required = {
+        "status": "PASS",
+        "artifact": "v12_qdic_mgf_test_tuned_exploration_replay_merged",
+        "paper_status": "TEST_TUNED_EXPLORATION",
+        "paper_valid": False,
+        "diagnostic_only": True,
+        "trial_id": card_id,
+        "full_cache": str(full_cache.resolve()),
+        "detector_forward_calls": 0,
+        "gt_loaded_during_replay": False,
+    }
+    for key, expected in required.items():
+        if manifest.get(key) != expected:
+            raise RuntimeError(
+                f"existing merge contract mismatch for {key}: "
+                f"{manifest.get(key)!r} != {expected!r}: {merge_manifest}"
+            )
+    if int(manifest.get("shard_count", -1)) <= 0:
+        raise RuntimeError(f"existing merge has invalid shard_count: {merge_manifest}")
+    cache_manifest = full_cache / "manifest.json"
+    if not cache_manifest.is_file():
+        raise RuntimeError(f"full cache manifest missing while validating merge: {cache_manifest}")
+    cache = read_json(cache_manifest)
+    for key in ("frame_count", "video_count"):
+        if key in cache and manifest.get("frames" if key == "frame_count" else "videos") != cache[key]:
+            raise RuntimeError(
+                f"existing merge {key} mismatch: {manifest.get('frames' if key == 'frame_count' else 'videos')} "
+                f"!= {cache[key]}"
+            )
+    prediction_value = manifest.get("prediction")
+    if prediction_value and Path(str(prediction_value)).resolve() != merged_prediction.resolve():
+        raise RuntimeError(f"existing merge prediction path mismatch: {merge_manifest}")
+    expected_hash = manifest.get("prediction_sha256")
+    if expected_hash and sha256_file(merged_prediction) != expected_hash:
+        raise RuntimeError(f"existing merge prediction hash mismatch: {merged_prediction}")
+    return manifest
+
+
 def _load_annotation_protocol(annotation: Path) -> Any:
     from tools.v11_evaluate_b0_calibration import AnnotationCategoryProtocol
 
@@ -210,26 +266,35 @@ def main() -> int:
 
         manifests = _validate_manifests(replay_root, args.shard_count)
         merge_root = replay_root / "merged"
+        merge_reused = False
         if merge_root.exists() and any(merge_root.iterdir()):
-            raise RuntimeError(f"refusing to overwrite existing merge root: {merge_root}")
+            # The launcher may already have produced the merge before this
+            # postprocess was started.  Reuse it only after a complete,
+            # immutable contract and hash check; never overwrite it.
+            _validate_existing_merge(merge_root, card_id=args.card_id, full_cache=full_cache)
+            merge_reused = True
         environment = os.environ.copy()
         pythonpath = [str(repo)]
         if environment.get("PYTHONPATH"):
             pythonpath.append(environment["PYTHONPATH"])
         environment["PYTHONPATH"] = os.pathsep.join(pythonpath)
         merge_log = replay_root / "merge.log"
-        _run(
-            [
-                str(args.python.resolve()), str(repo / "tools" / "v12_merge_mgf_replay.py"),
-                "--shard-root", str(replay_root), "--full-cache", str(full_cache),
-                "--output-root", str(merge_root), "--shard-count", str(int(args.shard_count)),
-                "--trial-id", args.card_id,
-            ], cwd=repo, environment=environment, log=merge_log,
-        )
+        if not merge_reused:
+            _run(
+                [
+                    str(args.python.resolve()), str(repo / "tools" / "v12_merge_mgf_replay.py"),
+                    "--shard-root", str(replay_root), "--full-cache", str(full_cache),
+                    "--output-root", str(merge_root), "--shard-count", str(int(args.shard_count)),
+                    "--trial-id", args.card_id,
+                ], cwd=repo, environment=environment, log=merge_log,
+            )
         merge_manifest = merge_root / "manifest.json"
         merged_prediction = merge_root / "tao_track.json"
         if not merge_manifest.is_file() or not merged_prediction.is_file():
             raise RuntimeError("exploration merge did not produce a complete prediction")
+        merge_manifest_payload = _validate_existing_merge(
+            merge_root, card_id=args.card_id, full_cache=full_cache
+        )
 
         evaluation_root = merge_root / "evaluation"
         evaluation_name = f"{args.card_id}_TEST_TUNED"
@@ -258,6 +323,7 @@ def main() -> int:
             "test_used_for_selection": True,
             "selection_scope": "VAL_TEST_TUNED_EXPLORATION",
             "card_id": args.card_id,
+            "merge_reused": merge_reused,
             "prediction": str(merged_prediction.resolve()),
             "prediction_sha256": sha256_file(merged_prediction),
             "annotation": str(annotation),
@@ -278,6 +344,8 @@ def main() -> int:
                 "validated_shards": manifests,
                 "merge_manifest": str(merge_manifest.resolve()),
                 "merge_manifest_sha256": sha256_file(merge_manifest),
+                "merge_reused": merge_reused,
+                "merge_manifest_payload": merge_manifest_payload,
                 "merged_prediction": str(merged_prediction.resolve()),
                 "merged_prediction_sha256": sha256_file(merged_prediction),
                 "evaluation": str(evaluation_manifest.resolve()),
