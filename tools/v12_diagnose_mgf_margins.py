@@ -67,10 +67,13 @@ def diagnose(*, feature_root: Path, card_root: Path, b0_checkpoint: Path, cards:
     if features.ndim != 2 or features.shape[1] != 49:
         raise RuntimeError("margin diagnostic requires the audited 49-D Test exploration cache")
     scores: dict[str, tuple[np.ndarray, dict[str, Any]]] = {}
-    scores["B0"], b0_provenance = _score_b0(b0_checkpoint.resolve(), features, device)
+    b0_scores, b0_provenance = _score_b0(b0_checkpoint.resolve(), features, device)
+    scores["B0"] = (b0_scores, b0_provenance)
     provenance: dict[str, Any] = {"B0": b0_provenance}
     for card in cards:
-        scores[card], provenance[card] = _score_card(card_root.resolve(), card, features, device)
+        card_scores, card_provenance = _score_card(card_root.resolve(), card, features, device)
+        scores[card] = (card_scores, card_provenance)
+        provenance[card] = card_provenance
     result: dict[str, Any] = {
         "status": "PASS",
         "artifact": "qdic_v12_mgf_test_tuned_offline_margin_diagnostic",
