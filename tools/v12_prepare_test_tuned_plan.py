@@ -15,7 +15,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from tools.v12_make_mgf_exploration_configs import _write_b0_config, _write_config
+try:
+    from tools.v12_make_mgf_exploration_configs import _write_b0_config, _write_config
+except ModuleNotFoundError:  # direct ``python tools/...`` invocation
+    from v12_make_mgf_exploration_configs import _write_b0_config, _write_config
 
 
 def sha256_file(path: Path) -> str:
