@@ -58,3 +58,5 @@ def test_finalize_selects_mgf_and_b0_and_writes_first_line(tmp_path):
     assert result["final_label"] == "MGF_STRONG_TEST_TUNED"
     first_line = (tmp_path / "out" / "final_20h_test_tuned_report.md").read_text(encoding="utf-8").splitlines()[0]
     assert first_line.startswith("BEST MGF vs B0:")
+    for token in ("Test Overall AssocA", "Test Novel AssocA", "Test Base AssocA", "Test TETA", "best beta=", "best mode=", "adaptive won="):
+        assert token in first_line

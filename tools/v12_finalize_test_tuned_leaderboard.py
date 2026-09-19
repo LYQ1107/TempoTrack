@@ -331,10 +331,19 @@ def finalize(
     b0 = best_b0
     mgf = best_mgf
     lines = [
-        f"BEST MGF vs B0: Test Overall AssocA: B0 = {b0.get('test_assocA')}; MGF = {mgf.get('test_assocA')}; Delta = {deltas['overall_AssocA']}",
-        f"Test Novel AssocA: B0 = {b0.get('test_novel_assocA')}; MGF = {mgf.get('test_novel_assocA')}; Delta = {deltas['novel_AssocA']}",
-        f"Test Base AssocA: B0 = {b0.get('test_base_assocA')}; MGF = {mgf.get('test_base_assocA')}; Delta = {deltas['base_AssocA']}",
-        f"Test TETA: B0 = {b0.get('test_teta')}; MGF = {mgf.get('test_teta')}; Delta = {deltas['overall_TETA']}",
+        (
+            "BEST MGF vs B0: "
+            f"Test Overall AssocA [B0={b0.get('test_assocA')}, MGF={mgf.get('test_assocA')}, "
+            f"Delta={deltas['overall_AssocA']}]; "
+            f"Test Novel AssocA [B0={b0.get('test_novel_assocA')}, MGF={mgf.get('test_novel_assocA')}, "
+            f"Delta={deltas['novel_AssocA']}]; "
+            f"Test Base AssocA [B0={b0.get('test_base_assocA')}, MGF={mgf.get('test_base_assocA')}, "
+            f"Delta={deltas['base_AssocA']}]; "
+            f"Test TETA [B0={b0.get('test_teta')}, MGF={mgf.get('test_teta')}, "
+            f"Delta={deltas['overall_TETA']}]; "
+            f"best beta={result['best_beta']}; best mode={result['best_mode']}; "
+            f"adaptive won={'YES' if result['adaptive_won'] else 'NO'}; final label={label}"
+        ),
         "",
         "# 20-Hour Test-Tuned MGF Exploration",
         "",
