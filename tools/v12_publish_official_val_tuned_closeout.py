@@ -55,12 +55,39 @@ def _verify_val(plan_path: Path, runtime_path: Path, val_root: Path) -> dict[str
     _require_test_tuned(runtime, "Official-Val runtime")
     if plan.get("split") != "Official-Val" or plan.get("exact_split_name") != "validation_ours_v1":
         raise RuntimeError("Official-Val split provenance is invalid")
+    if runtime.get("split") != "Official-Val":
+        raise RuntimeError("Official-Val runtime split provenance is invalid")
     snapshot = Path(str(plan.get("source_test_final_json", ""))).resolve()
     if not snapshot.is_file() or plan.get("source_test_final_json_sha256") != sha256_file(snapshot):
         raise RuntimeError("Test selection snapshot is missing or hash-mismatched")
     candidates = plan.get("candidates")
     if not isinstance(candidates, list) or not candidates:
         raise RuntimeError("Official-Val plan has no candidates")
+    plan_candidate_ids = {str(item.get("candidate_id")) for item in candidates}
+    runtime_candidate_ids = {str(item) for item in runtime.get("candidate_ids", [])}
+    if runtime_candidate_ids != plan_candidate_ids:
+        raise RuntimeError("Official-Val runtime candidates do not match the plan")
+    cache = Path(str(runtime.get("full_cache", ""))).resolve()
+    cache_manifest = cache / "manifest.json"
+    if not cache_manifest.is_file():
+        raise RuntimeError(f"Official-Val cache manifest is missing: {cache_manifest}")
+    if runtime.get("full_cache_manifest_sha256") != sha256_file(cache_manifest):
+        raise RuntimeError("Official-Val cache manifest hash mismatch")
+    cache_receipt = read_json(cache_manifest)
+    provenance = cache_receipt.get("provenance", {})
+    required_cache_contract = {
+        "input_source": "COVTRACK_FRONTEND",
+        "supervision_source": "OFFICIAL_VAL_GT",
+        "oracle_features_used": False,
+        "gt_boxes_used_as_model_input": False,
+        "gt_tracks_used_as_memory": False,
+        "gt_used_only_for_supervision": True,
+        "source_role": "OFFICIAL_VAL",
+        "exact_split_name": "validation_ours_v1",
+    }
+    for key, expected in required_cache_contract.items():
+        if provenance.get(key) != expected:
+            raise RuntimeError(f"Official-Val cache contract failed for {key}: {provenance.get(key)!r}")
     verified: list[dict[str, Any]] = []
     for candidate in candidates:
         candidate_id = str(candidate.get("candidate_id"))
@@ -107,6 +134,9 @@ def _verify_val(plan_path: Path, runtime_path: Path, val_root: Path) -> dict[str
         "plan_sha256": sha256_file(plan_path),
         "runtime": str(runtime_path.resolve()),
         "runtime_sha256": sha256_file(runtime_path),
+        "cache_manifest": str(cache_manifest),
+        "cache_manifest_sha256": sha256_file(cache_manifest),
+        "cache_contract": required_cache_contract,
         "candidates": verified,
         "verified_at_unix": time.time(),
     }
