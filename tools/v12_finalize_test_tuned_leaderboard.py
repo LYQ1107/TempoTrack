@@ -125,6 +125,53 @@ def _flatten_teta(row: dict[str, Any], metrics: dict[str, Any]) -> None:
     row["test_clsA"] = row.get("test_overall_ClsA")
 
 
+def _flatten_val_teta(row: dict[str, Any], metrics: dict[str, Any] | None) -> None:
+    """Attach an independently produced Official-Val TETA receipt.
+
+    Val replay is intentionally optional at this aggregation boundary because
+    the Test-tuned controller can finish its Test exploration before the
+    separate, non-selection Val audit is available.  Missing Val metrics are
+    represented as nulls; they are never inferred from event-ranking values
+    or copied from Test.
+    """
+    for split in ("overall", "base", "novel"):
+        values = metrics.get(split, {}) if isinstance(metrics, dict) else {}
+        for field in TETA_FIELDS:
+            row[f"val_{split}_{field}"] = _number(values.get(field))
+    row["val_teta"] = row.get("val_overall_TETA")
+    row["val_assocA"] = row.get("val_overall_AssocA")
+    row["val_base_assocA"] = row.get("val_base_AssocA")
+    row["val_novel_assocA"] = row.get("val_novel_AssocA")
+
+
+def _load_val_metrics(val_metrics_root: Path | None, method: str, candidate_id: str | None) -> dict[str, Any] | None:
+    """Find a Val receipt without assuming a particular replay layout."""
+    if val_metrics_root is None:
+        return None
+    root = val_metrics_root.resolve()
+    candidates: list[Path] = []
+    if candidate_id:
+        candidates.extend(
+            [
+                root / candidate_id / "s00_m00" / "merged" / "val_metrics.json",
+                root / candidate_id / "val_metrics.json",
+            ]
+        )
+    candidates.extend(
+        [
+            root / method / "s00_m00" / "merged" / "val_metrics.json",
+            root / method / "val_metrics.json",
+        ]
+    )
+    for path in candidates:
+        if path.is_file():
+            value = read_json(path)
+            if not isinstance(value, dict) or not all(isinstance(value.get(key), dict) for key in ("overall", "base", "novel")):
+                raise RuntimeError(f"invalid Official-Val metrics receipt: {path}")
+            return value
+    return None
+
+
 def _selection_key(row: dict[str, Any]) -> tuple[float, float, float, float, str]:
     return (
         float(row.get("test_novel_assocA") if row.get("test_novel_assocA") is not None else float("-inf")),
@@ -141,7 +188,13 @@ def _delta(best: dict[str, Any], baseline: dict[str, Any], metric: str, split: s
     return None if left is None or right is None else left - right
 
 
-def finalize(*, ranking_path: Path, replay_root: Path, output_root: Path) -> dict[str, Any]:
+def finalize(
+    *,
+    ranking_path: Path,
+    replay_root: Path,
+    output_root: Path,
+    val_metrics_root: Path | None = None,
+) -> dict[str, Any]:
     ranking = read_json(ranking_path.resolve())
     if ranking.get("status") != "PASS" or ranking.get("paper_status") != "TEST_TUNED_EXPLORATION":
         raise RuntimeError("ranking receipt is not TEST_TUNED_EXPLORATION")
@@ -176,6 +229,7 @@ def finalize(*, ranking_path: Path, replay_root: Path, output_root: Path) -> dic
         }
         row.update(_ranking_row(ranking, method))
         _flatten_teta(row, metrics)
+        _flatten_val_teta(row, _load_val_metrics(val_metrics_root, method, candidate_id))
         rows.append(row)
 
     # Preserve all event-ranking methods in the final table, even when a
@@ -208,6 +262,7 @@ def finalize(*, ranking_path: Path, replay_root: Path, output_root: Path) -> dic
             for field in TETA_FIELDS:
                 row[f"test_{split}_{field}"] = None
         row.update({"test_teta": None, "test_assocA": None, "test_base_assocA": None, "test_novel_assocA": None, "test_locA": None, "test_clsA": None})
+        _flatten_val_teta(row, _load_val_metrics(val_metrics_root, method, None))
         rows.append(row)
 
     full_mgf = [row for row in rows if str(row["method"]).startswith("E") and row.get("test_teta") is not None]
@@ -251,6 +306,7 @@ def finalize(*, ranking_path: Path, replay_root: Path, output_root: Path) -> dic
         "ranking": str(ranking_path.resolve()),
         "ranking_sha256": sha256_file(ranking_path.resolve()),
         "replay_root": str(replay_root.resolve()),
+        "val_metrics_root": str(val_metrics_root.resolve()) if val_metrics_root is not None else None,
         "full_test_candidate_count": len(full_mgf) + len(full_b0),
         "best_mgf": best_mgf,
         "b0_reference": best_b0,
@@ -294,10 +350,13 @@ def finalize(*, ranking_path: Path, replay_root: Path, output_root: Path) -> dic
         "| Split | Metric | B0 | Best MGF | Delta |",
         "|---|---|---:|---:|---:|",
     ]
-    for split in ("overall", "base", "novel"):
-        for field in TETA_FIELDS:
-            delta = _delta(mgf, b0, field, split)
-            lines.append(f"| {split} | {field} | {b0.get(f'test_{split}_{field}')} | {mgf.get(f'test_{split}_{field}')} | {delta} |")
+    for metric_prefix, label_prefix in (("val", "Val"), ("test", "Test")):
+        for split in ("overall", "base", "novel"):
+            for field in TETA_FIELDS:
+                left = _number(mgf.get(f"{metric_prefix}_{split}_{field}"))
+                right = _number(b0.get(f"{metric_prefix}_{split}_{field}"))
+                delta = None if left is None or right is None else left - right
+                lines.append(f"| {label_prefix} {split} | {field} | {right} | {left} | {delta} |")
     lines.extend(["", "## Full-Test rows", "", "| Rank | Method | Candidate | beta | mode | Novel AssocA | Overall AssocA | TETA | Base AssocA | margin |", "|---:|---|---|---:|---|---:|---:|---:|---:|---:|"])
     for row in sorted((item for item in rows if item.get("test_teta") is not None), key=lambda item: (item.get("rank") is None, item.get("rank") or 10**9)):
         lines.append(f"| {row.get('rank') or '-'} | {row['method']} | {row.get('candidate_id') or '-'} | {row.get('beta') or '-'} | {row.get('mode') or '-'} | {row.get('test_novel_assocA')} | {row.get('test_assocA')} | {row.get('test_teta')} | {row.get('test_base_assocA')} | {row.get('margin_threshold')} |")
@@ -313,8 +372,14 @@ def main() -> int:
     parser.add_argument("--ranking-json", type=Path, required=True)
     parser.add_argument("--replay-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--val-metrics-root", type=Path)
     args = parser.parse_args()
-    finalize(ranking_path=args.ranking_json, replay_root=args.replay_root, output_root=args.output_root)
+    finalize(
+        ranking_path=args.ranking_json,
+        replay_root=args.replay_root,
+        output_root=args.output_root,
+        val_metrics_root=args.val_metrics_root,
+    )
     return 0
 
 
