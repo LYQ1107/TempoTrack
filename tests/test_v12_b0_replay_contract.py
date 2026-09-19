@@ -89,3 +89,27 @@ def test_b0_manifest_cannot_be_relabelled_as_paper_valid(tmp_path):
 
     with pytest.raises(RuntimeError, match="paper status"):
         _validate_manifests(tmp_path, 1)
+
+
+def test_legacy_exploration_manifest_without_top_level_status_remains_accepted(tmp_path):
+    shard = tmp_path / "shard_00"
+    shard.mkdir()
+    (shard / "manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "PASS",
+                "artifact": "v12_qdic_mgf_test_tuned_exploration_replay",
+                "thresholds": {"score_threshold": 0.0, "margin_threshold": 0.0},
+                "detector_forward_calls": 0,
+                "gt_loaded_during_replay": False,
+                "mgf_provenance": {
+                    "status": "QDIC_V12_MGF_EXPLORATION_MODEL_CODE_AND_WEIGHTS",
+                    "paper_status": "TEST_TUNED_EXPLORATION",
+                    "checkpoint_sha256": "mgf-checkpoint",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert len(_validate_manifests(tmp_path, 1)) == 1

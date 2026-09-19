@@ -105,9 +105,21 @@ def main() -> None:
             if reference and reference.get("artifact") == "v12_qdic_b0_test_tuned_comparison_replay"
             else "v12_qdic_mgf_causal_replay_merged"
         ),
-        "paper_status": reference.get("paper_status") if reference else None,
-        "paper_valid": reference.get("paper_valid") if reference else None,
-        "diagnostic_only": reference.get("diagnostic_only") if reference else None,
+        "paper_status": (
+            reference.get("paper_status", "TEST_TUNED_EXPLORATION")
+            if reference and reference.get("artifact") == "v12_qdic_mgf_test_tuned_exploration_replay"
+            else reference.get("paper_status") if reference else None
+        ),
+        "paper_valid": (
+            reference.get("paper_valid", False)
+            if reference and reference.get("artifact") == "v12_qdic_mgf_test_tuned_exploration_replay"
+            else reference.get("paper_valid") if reference else None
+        ),
+        "diagnostic_only": (
+            reference.get("diagnostic_only", True)
+            if reference and reference.get("artifact") == "v12_qdic_mgf_test_tuned_exploration_replay"
+            else reference.get("diagnostic_only") if reference else None
+        ),
         "comparison_role": reference.get("comparison_role") if reference else None,
         "trial_id": str(args.trial_id),
         "full_cache": str(args.full_cache.resolve()),

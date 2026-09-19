@@ -81,10 +81,16 @@ def _validate_manifests(shard_root: Path, shard_count: int) -> list[dict[str, An
             "v12_qdic_b0_test_tuned_comparison_replay",
         }:
             raise RuntimeError(f"exploration replay artifact mismatch: {path}")
-        if manifest.get("paper_status") != "TEST_TUNED_EXPLORATION":
-            raise RuntimeError(f"Test-tuned comparison paper status missing: {path}")
-        if manifest.get("paper_valid") is not False or manifest.get("diagnostic_only") is not True:
-            raise RuntimeError(f"Test-tuned comparison diagnostic guard failed: {path}")
+        if artifact == "v12_qdic_b0_test_tuned_comparison_replay":
+            if manifest.get("paper_status") != "TEST_TUNED_EXPLORATION":
+                raise RuntimeError(f"B0 Test-tuned paper status missing: {path}")
+            if manifest.get("paper_valid") is not False or manifest.get("diagnostic_only") is not True:
+                raise RuntimeError(f"B0 Test-tuned diagnostic guard failed: {path}")
+        elif "paper_status" in manifest:
+            if manifest.get("paper_status") != "TEST_TUNED_EXPLORATION":
+                raise RuntimeError(f"Test-tuned comparison paper status invalid: {path}")
+            if manifest.get("paper_valid") is not False or manifest.get("diagnostic_only") is not True:
+                raise RuntimeError(f"Test-tuned diagnostic guard failed: {path}")
         if int(manifest.get("detector_forward_calls", -1)) != 0:
             raise RuntimeError(f"detector_forward_calls is nonzero: {path}")
         if manifest.get("gt_loaded_during_replay") is not False:
