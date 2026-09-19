@@ -99,6 +99,11 @@ def main() -> None:
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--track-offset-scope", choices=("global", "cache-shards"), default="global")
     parser.add_argument("--limit-videos", type=int)
+    parser.add_argument(
+        "--progress-log",
+        type=Path,
+        help="optional JSONL progress receipt; intended for bounded throughput probes",
+    )
     parser.add_argument("--no-verify-cache", action="store_true")
     args = parser.parse_args()
 
@@ -143,28 +148,56 @@ def main() -> None:
     videos = list(reader.videos())
     if args.limit_videos is not None:
         videos = videos[: int(args.limit_videos)]
-    for video_id, video_path, _summary in videos:
-        scope_key = "global" if offset_scope == "global" else video_scopes.get(str(video_id))
-        if scope_key is None:
-            raise RuntimeError(f"cache-shards provenance lacks video: {video_id}")
-        track_offset = int(track_offsets_by_scope.get(scope_key, 0))
-        video_track_offsets[str(video_id)] = track_offset
-        video_rows, offset_delta, frame_count, match_count = _materialize_video(
-            reader=reader,
-            video_id=video_id,
-            video_path=video_path,
-            model=model,
-            cfg=cfg,
-            device=device,
-            category_ids=category_ids,
-            tempo_override=tempo,
-        )
-        for row in video_rows:
-            row["track_id"] = int(row["track_id"]) + track_offset
-        rows.extend(video_rows)
-        total_frames += frame_count
-        total_matches += match_count
-        track_offsets_by_scope[scope_key] = track_offset + offset_delta
+    progress_handle = None
+    if args.progress_log is not None:
+        progress_path = args.progress_log.resolve()
+        if progress_path.exists():
+            raise RuntimeError(f"refusing to overwrite progress log: {progress_path}")
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        progress_handle = progress_path.open("w", encoding="utf-8")
+    started_at = time.time()
+    try:
+        for video_index, (video_id, video_path, _summary) in enumerate(videos, start=1):
+            scope_key = "global" if offset_scope == "global" else video_scopes.get(str(video_id))
+            if scope_key is None:
+                raise RuntimeError(f"cache-shards provenance lacks video: {video_id}")
+            track_offset = int(track_offsets_by_scope.get(scope_key, 0))
+            video_track_offsets[str(video_id)] = track_offset
+            video_rows, offset_delta, frame_count, match_count = _materialize_video(
+                reader=reader,
+                video_id=video_id,
+                video_path=video_path,
+                model=model,
+                cfg=cfg,
+                device=device,
+                category_ids=category_ids,
+                tempo_override=tempo,
+            )
+            for row in video_rows:
+                row["track_id"] = int(row["track_id"]) + track_offset
+            rows.extend(video_rows)
+            total_frames += frame_count
+            total_matches += match_count
+            track_offsets_by_scope[scope_key] = track_offset + offset_delta
+            if progress_handle is not None:
+                progress_handle.write(
+                    json.dumps(
+                        {
+                            "completed_videos": video_index,
+                            "total_videos": len(videos),
+                            "video_id": int(video_id),
+                            "completed_frames": total_frames,
+                            "completed_match_frames": total_matches,
+                            "elapsed_seconds": time.time() - started_at,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+                progress_handle.flush()
+    finally:
+        if progress_handle is not None:
+            progress_handle.close()
     rows.sort(key=lambda row: _prediction_sort_key(row, image_order))
     prediction = output_root / "tao_track.json"
     prediction.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
