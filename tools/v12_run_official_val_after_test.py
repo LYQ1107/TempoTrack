@@ -134,19 +134,34 @@ def main() -> int:
         if previous.get("status") == "PASS":
             print(json.dumps(previous, ensure_ascii=False, indent=2))
             return 0
-        raise RuntimeError(f"refusing to restart existing after-Test supervisor: {args.runtime}")
-    runtime: dict[str, Any] = {
-        "status": "STARTING",
-        "artifact": "v12_mgf_test_tuned_official_val_after_test_supervisor",
-        "paper_status": "TEST_TUNED_EXPLORATION",
-        "paper_valid": False,
-        "diagnostic_only": True,
-        "test_used_for_selection": True,
-        "val_used_for_selection": False,
-        "repo": str(args.repo.resolve()),
-        "source_commit": subprocess.check_output(["git", "-C", str(args.repo.resolve()), "rev-parse", "HEAD"], text=True).strip(),
-        "started_at_unix": time.time(),
-    }
+        if previous.get("status") != "WAITING_FOR_TEST_CLOSEOUT":
+            raise RuntimeError(f"refusing to restart existing after-Test supervisor: {args.runtime}")
+        # A previous waiter may have been attached to an obsolete closeout PID.
+        # Preserve its evidence and safely reattach only from this explicit
+        # nonterminal waiting state; no replay is restarted here.
+        runtime = dict(previous)
+        runtime.update(
+            {
+                "attached_at_unix": time.time(),
+                "attached_closeout_pid": int(args.closeout_pid) if args.closeout_pid else None,
+                "attached_source_commit": subprocess.check_output(
+                    ["git", "-C", str(args.repo.resolve()), "rev-parse", "HEAD"], text=True
+                ).strip(),
+            }
+        )
+    else:
+        runtime = {
+            "status": "STARTING",
+            "artifact": "v12_mgf_test_tuned_official_val_after_test_supervisor",
+            "paper_status": "TEST_TUNED_EXPLORATION",
+            "paper_valid": False,
+            "diagnostic_only": True,
+            "test_used_for_selection": True,
+            "val_used_for_selection": False,
+            "repo": str(args.repo.resolve()),
+            "source_commit": subprocess.check_output(["git", "-C", str(args.repo.resolve()), "rev-parse", "HEAD"], text=True).strip(),
+            "started_at_unix": time.time(),
+        }
     write_json(args.runtime, runtime)
     try:
         final = _wait_for_test_closeout(args, runtime)
