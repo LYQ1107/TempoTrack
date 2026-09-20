@@ -169,6 +169,7 @@ def main() -> int:
             "recovery_metrics_sha256": sha256_file(metrics_path),
             "recovery_evaluation": str(evaluation_path),
             "recovery_evaluation_sha256": sha256_file(evaluation_path),
+            "recovery_receipt": str(receipt_path),
         }
     )
     write_json(runtime_path, corrected)
@@ -202,14 +203,6 @@ def main() -> int:
         "gt_loaded_during_replay": False,
         "created_at_unix": time.time(),
     }
-    write_json(receipt_path, receipt)
-    # Bind the corrected runtime to the receipt after the receipt exists.
-    corrected = read_json(runtime_path)
-    corrected["recovery_receipt"] = str(receipt_path)
-    corrected["recovery_receipt_sha256"] = sha256_file(receipt_path)
-    write_json(runtime_path, corrected)
-    receipt = read_json(receipt_path)
-    receipt["corrected_runtime"]["sha256"] = sha256_file(runtime_path)
     write_json(receipt_path, receipt)
     print(json.dumps({"status": "PASS", "runtime": str(runtime_path), "receipt": str(receipt_path), "source_commit": source_commit}, indent=2))
     return 0
