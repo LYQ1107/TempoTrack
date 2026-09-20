@@ -171,6 +171,9 @@ def _build_provenance(args: argparse.Namespace, controller: dict[str, Any], fina
     recovery = read_json(args.recovery_receipt.resolve())
     if recovery.get("status") != "PASS" or recovery.get("paper_status") != "TEST_TUNED_EXPLORATION":
         raise RuntimeError("FAIL_CLOSED_RECOVERY_RECEIPT")
+    b0_recovery = read_json(args.b0_recovery_receipt.resolve())
+    if b0_recovery.get("status") != "PASS" or b0_recovery.get("paper_status") != "TEST_TUNED_EXPLORATION":
+        raise RuntimeError("FAIL_CLOSED_B0_POSTPROCESS_RECOVERY_RECEIPT")
     source_commit = _git(args.repo.resolve(), "rev-parse", "HEAD")
     return {
         "status": "PASS",
@@ -193,6 +196,7 @@ def _build_provenance(args: argparse.Namespace, controller: dict[str, Any], fina
         "throughput_receipt": _file_receipt(args.throughput),
         "controller_runtime": _file_receipt(args.controller_runtime),
         "recovery_receipt": _file_receipt(args.recovery_receipt),
+        "b0_postprocess_recovery_receipt": _file_receipt(args.b0_recovery_receipt),
         "recovery_corrected_checkpoint_sha256": recovery.get("corrected_checkpoint_sha256"),
         "b0_runtime": _file_receipt(args.b0_runtime),
         "refinement_plan": _file_receipt(args.refinement_plan),
@@ -264,6 +268,7 @@ def main() -> int:
     parser.add_argument("--repo", type=Path, default=Path("/data1/LWR/vranlee/SERVER_ONLY/avis/masa_mgf"))
     parser.add_argument("--controller-runtime", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v12_mgf_explore/05_replay/controller_runtime.json"))
     parser.add_argument("--recovery-receipt", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v12_mgf_explore/05_replay/second_batch_retry_receipt.json"))
+    parser.add_argument("--b0-recovery-receipt", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v12_mgf_explore/05_replay/b0_postprocess_recovery_receipt.json"))
     parser.add_argument("--controller-pid", type=int, default=26725)
     parser.add_argument("--poll-seconds", type=float, default=60.0)
     parser.add_argument("--replay-root", type=Path, default=Path("/data2/usr_for_deadline/tempotrack_v12_mgf_explore/05_replay/full_test"))
@@ -365,6 +370,7 @@ def main() -> int:
         (args.throughput.resolve(), "throughput_probe_receipt.json"),
         (args.controller_runtime.resolve(), "controller_runtime.json"),
         (args.recovery_receipt.resolve(), "second_batch_retry_receipt.json"),
+        (args.b0_recovery_receipt.resolve(), "b0_postprocess_recovery_receipt.json"),
         (args.b0_plan.resolve(), "plans/b0_initial_plan.json"),
         (args.b0_runtime.resolve(), "b0_initial_runtime.json"),
         (args.diagnostic.resolve(), "plans/test_margin_diagnostic.json"),
