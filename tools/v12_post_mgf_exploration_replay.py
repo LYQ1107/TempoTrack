@@ -118,6 +118,37 @@ def _validate_manifests(shard_root: Path, shard_count: int) -> list[dict[str, An
     return manifests
 
 
+def _validate_existing_merge(merge_root: Path, shard_count: int) -> tuple[Path, dict[str, Any]]:
+    """Validate a merge already produced by the replay launcher.
+
+    The launcher performs the merge before it starts this postprocessor.  The
+    postprocessor is also callable on its own for recovery, so an existing
+    complete merge must be reused rather than treated as an overwrite.  An
+    incomplete or contract-incompatible directory remains fail-closed.
+    """
+    merge_manifest = merge_root / "manifest.json"
+    merged_prediction = merge_root / "tao_track.json"
+    if not merge_manifest.is_file() or not merged_prediction.is_file():
+        raise RuntimeError(
+            f"existing merge root is incomplete; refusing to overwrite: {merge_root}"
+        )
+    manifest = read_json(merge_manifest)
+    if manifest.get("status") != "PASS":
+        raise RuntimeError(f"existing merge manifest is not PASS: {merge_manifest}")
+    if int(manifest.get("shard_count", -1)) != int(shard_count):
+        raise RuntimeError(f"existing merge shard-count mismatch: {merge_manifest}")
+    if int(manifest.get("detector_forward_calls", -1)) != 0:
+        raise RuntimeError(f"existing merge detector contract failed: {merge_manifest}")
+    if manifest.get("gt_loaded_during_replay") is not False:
+        raise RuntimeError(f"existing merge GT contract failed: {merge_manifest}")
+    expected_hash = manifest.get("prediction_sha256")
+    if expected_hash and expected_hash != sha256_file(merged_prediction):
+        raise RuntimeError(f"existing merge prediction hash mismatch: {merged_prediction}")
+    if manifest.get("paper_status") != "TEST_TUNED_EXPLORATION":
+        raise RuntimeError(f"existing merge paper status invalid: {merge_manifest}")
+    return merged_prediction, manifest
+
+
 def _run(command: list[str], *, cwd: Path, environment: dict[str, str], log: Path) -> None:
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("w", encoding="utf-8") as handle:
@@ -225,26 +256,32 @@ def main() -> int:
 
         manifests = _validate_manifests(replay_root, args.shard_count)
         merge_root = replay_root / "merged"
-        if merge_root.exists() and any(merge_root.iterdir()):
-            raise RuntimeError(f"refusing to overwrite existing merge root: {merge_root}")
         environment = os.environ.copy()
         pythonpath = [str(repo)]
         if environment.get("PYTHONPATH"):
             pythonpath.append(environment["PYTHONPATH"])
         environment["PYTHONPATH"] = os.pathsep.join(pythonpath)
-        merge_log = replay_root / "merge.log"
-        _run(
-            [
-                str(args.python.resolve()), str(repo / "tools" / "v12_merge_mgf_replay.py"),
-                "--shard-root", str(replay_root), "--full-cache", str(full_cache),
-                "--output-root", str(merge_root), "--shard-count", str(int(args.shard_count)),
-                "--trial-id", args.card_id,
-            ], cwd=repo, environment=environment, log=merge_log,
-        )
-        merge_manifest = merge_root / "manifest.json"
-        merged_prediction = merge_root / "tao_track.json"
-        if not merge_manifest.is_file() or not merged_prediction.is_file():
-            raise RuntimeError("exploration merge did not produce a complete prediction")
+        if merge_root.exists():
+            merged_prediction, _merge_manifest = _validate_existing_merge(
+                merge_root, int(args.shard_count)
+            )
+            merge_manifest = merge_root / "manifest.json"
+            runtime["merge_reused"] = True
+            runtime["merge_manifest_sha256"] = sha256_file(merge_manifest)
+        else:
+            merge_log = replay_root / "merge.log"
+            _run(
+                [
+                    str(args.python.resolve()), str(repo / "tools" / "v12_merge_mgf_replay.py"),
+                    "--shard-root", str(replay_root), "--full-cache", str(full_cache),
+                    "--output-root", str(merge_root), "--shard-count", str(int(args.shard_count)),
+                    "--trial-id", args.card_id,
+                ], cwd=repo, environment=environment, log=merge_log,
+            )
+            merge_manifest = merge_root / "manifest.json"
+            merged_prediction = merge_root / "tao_track.json"
+            if not merge_manifest.is_file() or not merged_prediction.is_file():
+                raise RuntimeError("exploration merge did not produce a complete prediction")
 
         evaluation_root = merge_root / "evaluation"
         evaluation_dir = evaluation_root / evaluation_name

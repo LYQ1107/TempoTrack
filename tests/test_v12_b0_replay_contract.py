@@ -7,7 +7,11 @@ from tools.v12_mgf_overlay_replay import (
     B0_COMPARISON_ARTIFACT,
     _read_provenance,
 )
-from tools.v12_post_mgf_exploration_replay import _validate_manifests
+from tools.v12_post_mgf_exploration_replay import (
+    _validate_existing_merge,
+    _validate_manifests,
+    sha256_file,
+)
 
 
 def _b0_model() -> SimpleNamespace:
@@ -113,3 +117,37 @@ def test_legacy_exploration_manifest_without_top_level_status_remains_accepted(t
     )
 
     assert len(_validate_manifests(tmp_path, 1)) == 1
+
+
+def test_existing_complete_merge_is_reused_without_overwrite(tmp_path):
+    merge_root = tmp_path / "merged"
+    merge_root.mkdir()
+    prediction = merge_root / "tao_track.json"
+    prediction.write_text("[]\n", encoding="utf-8")
+    (merge_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "PASS",
+                "paper_status": "TEST_TUNED_EXPLORATION",
+                "shard_count": 1,
+                "detector_forward_calls": 0,
+                "gt_loaded_during_replay": False,
+                "prediction_sha256": sha256_file(prediction),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    reused_prediction, manifest = _validate_existing_merge(merge_root, 1)
+
+    assert reused_prediction == prediction
+    assert manifest["status"] == "PASS"
+
+
+def test_incomplete_existing_merge_fails_closed(tmp_path):
+    merge_root = tmp_path / "merged"
+    merge_root.mkdir()
+    (merge_root / "partial.tmp").write_text("partial\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="incomplete"):
+        _validate_existing_merge(merge_root, 1)
